@@ -1,0 +1,198 @@
+/**
+ * Poisson dagilimi ile futbol mac analizi.
+ * Girdi: iki takimin gol beklentisi (xG benzeri, ev/deplasman etkisi dahil).
+ */
+
+function factorial(n) {
+  return n <= 1 ? 1 : n * factorial(n - 1);
+}
+
+function poissonProbability(lambda, k) {
+  return (Math.pow(lambda, k) * Math.exp(-lambda)) / factorial(k);
+}
+
+/**
+ * Dixon-Coles duzeltme faktoru (tau).
+ * Bagimsiz Poisson varsayimi, ozellikle dusuk skorlu maclarda
+ * (0-0, 1-0, 0-1, 1-1) gercek verilerden hafifce sapar - bu skorlar
+ * gercekte modelin ongordugunden biraz daha sik/az cikar. Dixon & Coles
+ * (1997) makalesindeki duzeltme, sadece bu 4 dusuk skor icin carpan uygular.
+ * rho tipik olarak -0.05 ile -0.15 arasinda kucuk negatif bir degerdir;
+ * gercek deger lige gore backtesting ile kalibre edilebilir (bkz. sohbet).
+ */
+const DEFAULT_RHO = -0.13;
+
+function dixonColesTau(x, y, lambda, mu, rho) {
+  if (x === 0 && y === 0) return 1 - (lambda * mu * rho);
+  if (x === 0 && y === 1) return 1 + (lambda * rho);
+  if (x === 1 && y === 0) return 1 + (mu * rho);
+  if (x === 1 && y === 1) return 1 - rho;
+  return 1;
+}
+
+/**
+ * Dixon-Coles duzeltmesi uygulanmis, normalize edilmis skor matrisi.
+ * calculateMatchProbabilities ve calculateMarketProbabilities artik
+ * ham Poisson yerine bu matrisi kullaniyor.
+ */
+function buildScoreMatrix(homeLambda, awayLambda, maxGoals = 6, rho = DEFAULT_RHO) {
+  const matrix = [];
+  let total = 0;
+
+  for (let h = 0; h <= maxGoals; h++) {
+    const row = [];
+    for (let a = 0; a <= maxGoals; a++) {
+      let p = poissonProbability(homeLambda, h) * poissonProbability(awayLambda, a);
+      p *= dixonColesTau(h, a, homeLambda, awayLambda, rho);
+      p = Math.max(0, p); // guvenlik: tau cok dusuk lambda ile teorik olarak negatife kayabilir
+      row.push(p);
+      total += p;
+    }
+    matrix.push(row);
+  }
+
+  // Tau duzeltmesi toplam olasiligi hafifce 1'den kaydirir, yeniden normalize ediyoruz
+  if (total > 0) {
+    for (let h = 0; h <= maxGoals; h++) {
+      for (let a = 0; a <= maxGoals; a++) {
+        matrix[h][a] = matrix[h][a] / total;
+      }
+    }
+  }
+
+  return matrix;
+}
+
+/**
+ * Takim gucu (attack/defense rating) uzerinden beklenen gol (lambda) hesaplar.
+ * @param {number} teamAttack - takimin lig ortalamasina gore hucum gucu (orn. 1.3 = ortalamanin %30 ustu)
+ * @param {number} opponentDefense - rakibin savunma zayifligi (orn. 1.1 = ortalamadan %10 kotu savunma)
+ * @param {number} leagueAvgGoals - ligin mac basi ortalama gol sayisi (genelde ~1.4 ev, ~1.1 deplasman)
+ * @param {number} homeAdvantage - ev sahibi carpani (varsayilan 1.15)
+ */
+function calculateExpectedGoals(teamAttack, opponentDefense, leagueAvgGoals, homeAdvantage = 1) {
+  return +(teamAttack * opponentDefense * leagueAvgGoals * homeAdvantage).toFixed(2);
+}
+
+/**
+ * Iki takimin lambda (beklenen gol) degerlerinden tam skor matrisi ve
+ * mac sonucu olasiliklarini (1-X-2) hesaplar.
+ * @param {number} homeLambda
+ * @param {number} awayLambda
+ * @param {number} maxGoals - olasilik matrisinde kac gole kadar hesaplansin (varsayilan 6)
+ */
+function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 6) {
+  const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals);
+  let homeWin = 0, draw = 0, awayWin = 0;
+
+  for (let h = 0; h <= maxGoals; h++) {
+    for (let a = 0; a <= maxGoals; a++) {
+      const p = scoreMatrix[h][a];
+      if (h > a) homeWin += p;
+      else if (h === a) draw += p;
+      else awayWin += p;
+    }
+  }
+
+  return {
+    homeWinProbability: +(homeWin * 100).toFixed(1),
+    drawProbability: +(draw * 100).toFixed(1),
+    awayWinProbability: +(awayWin * 100).toFixed(1),
+    scoreMatrix: scoreMatrix.map(row => row.map(p => +p.toFixed(4))),
+  };
+}
+
+/** 2.5 ust/alt, KG var/yok gibi market bazli olasiliklar */
+function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 6) {
+  const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals);
+  let over25 = 0, btts = 0;
+
+  for (let h = 0; h <= maxGoals; h++) {
+    for (let a = 0; a <= maxGoals; a++) {
+      const p = scoreMatrix[h][a];
+      if (h + a > 2.5) over25 += p;
+      if (h > 0 && a > 0) btts += p;
+    }
+  }
+
+  return {
+    over25GoalsPercent: +(over25 * 100).toFixed(1),
+    bttsPercent: +(btts * 100).toFixed(1),
+  };
+}
+
+/** En guclu sinyali ve guven skorunu belirler (mockup'taki "En Guclu Sinyal" karti) */
+function findStrongestSignal(markets) {
+  // markets: [{ label: '2.5 Ust Gol', probability: 58.2 }, ...]
+  const sorted = [...markets].sort((a, b) => b.probability - a.probability);
+  const top = sorted[0];
+  const confidence = +(top.probability / 35).toFixed(2); // basit normalize edilmis guven skoru
+  return {
+    label: top.label,
+    probability: top.probability,
+    confidenceScore: confidence,
+    isStrong: top.probability >= 55,
+  };
+}
+
+/**
+ * Veri kalitesi skoru (mockup'taki "91/100").
+ * Kac kaynaktan basarili veri geldigi + verinin yasina gore hesaplanir.
+ * @param {number} successfulSources - basarili donen kaynak sayisi
+ * @param {number} totalSources - toplam denenen kaynak sayisi
+ * @param {number} dataAgeMinutes - en eski verinin kac dakika once cekildigi
+ */
+function calculateDataQualityScore(successfulSources, totalSources, dataAgeMinutes) {
+  const sourceScore = (successfulSources / totalSources) * 70; // kaynak basari orani agirlik: 70
+  const freshnessScore = Math.max(0, 30 - dataAgeMinutes); // her dakika bayatlama -1 puan, agirlik: 30
+  const total = Math.round(sourceScore + freshnessScore);
+  return Math.min(100, Math.max(0, total));
+}
+
+/**
+ * Beklenen korner tahmini.
+ * NOT: Gercek korner istatistigi (takimlarin gecmis mac korner ortalamasi)
+ * fixture basina ayri bir API cagrisi gerektiriyor - kota maliyeti yuksek.
+ * Bunun yerine zaten hesaplanmis beklenen gol (lambda) degerlerinden,
+ * mac temposunun korner sayisiyla genelde orantili oldugu varsayimiyla
+ * bir TAHMIN uretiyoruz. Bu gercek istatistik degil, turetilmis bir
+ * yaklasimdir - ileride gercek korner verisiyle kalibre edilebilir.
+ */
+function estimateCornerMetrics(homeLambda, awayLambda) {
+  const totalGoalExpectation = homeLambda + awayLambda;
+  const leagueAvgGoals = 2.5; // referans lig ortalamasi
+  const baseTotalCorners = 9.5; // ligler arasi tipik toplam korner ortalamasi
+
+  const intensityRatio = totalGoalExpectation / leagueAvgGoals;
+  const expectedTotal = +(baseTotalCorners * intensityRatio).toFixed(1);
+
+  // Muhafazakar alt sinir: beklenen degerin ~2.5 altini "guvenli minimum" sayiyoruz
+  const minExpected = Math.max(4, Math.round(expectedTotal - 2.5));
+
+  // 8.5 ustu olma olasiligi - ayni Poisson yaklasimini korner sayisina uyguluyoruz
+  let cumulative = 0;
+  for (let k = 0; k <= 8; k++) cumulative += poissonProbability(expectedTotal, k);
+  const over85Percent = +((1 - cumulative) * 100).toFixed(1);
+
+  const homeShare = totalGoalExpectation ? homeLambda / totalGoalExpectation : 0.5;
+
+  return {
+    expectedTotal,
+    minExpected,
+    over85Percent: Math.max(0, Math.min(100, over85Percent)),
+    homeShare: +(homeShare * 100).toFixed(1),
+    awayShare: +((1 - homeShare) * 100).toFixed(1),
+  };
+}
+
+module.exports = {
+  calculateExpectedGoals,
+  calculateMatchProbabilities,
+  calculateMarketProbabilities,
+  findStrongestSignal,
+  calculateDataQualityScore,
+  estimateCornerMetrics,
+  buildScoreMatrix,
+  dixonColesTau,
+  DEFAULT_RHO,
+};
