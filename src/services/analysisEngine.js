@@ -5,10 +5,16 @@ const oddsApi = require('./oddsApiService');
 const poisson = require('./poissonService');
 const stats = require('./statsService');
 const motivation = require('./motivationService');
+const tffScraper = require('./tffScraper');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
 const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
+
+// FotMob/free-api-live-football-data seमasinda Trendyol Süper Lig'in ID'si.
+// API-Football (footballApiService) askiya alindigi icin bu lig icin
+// form verisi TFF.org scraper'indan (tffScraper) cekiliyor.
+const SUPERLIG_LEAGUE_ID = '71';
 
 /**
  * Tam analiz hesaplama motoru. Hem /api/analysis route'u (anlik istekte)
@@ -27,6 +33,20 @@ const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
  * @param {string} [params.sportKey] - The Odds API sport key (varsayilan soccer_epl)
  */
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, season, sportKey }) {
+  const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
+
+  // Süper Lig'de form verisi TFF scraper'indan, isme gore cekiliyor
+  // (API-Football'in takim ID'leri bu ligde kullanilamiyor - kaynak
+  // suspended). Diger tum liglerde davranis degismedi.
+  const homeFormFetcher = isSuperLig
+    ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
+    : () => footballApi.getTeamForm(home, 15);
+  const awayFormFetcher = isSuperLig
+    ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
+    : () => footballApi.getTeamForm(away, 15);
+  const homeFormCacheKey = isSuperLig ? `tff-form:${homeTeamName}` : `form:${home}`;
+  const awayFormCacheKey = isSuperLig ? `tff-form:${awayTeamName}` : `form:${away}`;
+
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
       cache.getOrFetch(`h2h:${fixtureId}`, config.cache.ttlStatic, () =>
@@ -38,12 +58,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       cache.getOrFetch(`injuries:${fixtureId}`, config.cache.ttlStatic, () =>
         footballApi.getInjuries(fixtureId)
       ),
-      cache.getOrFetch(`form:${home}`, config.cache.ttlStatic, () =>
-        footballApi.getTeamForm(home, 15)
-      ),
-      cache.getOrFetch(`form:${away}`, config.cache.ttlStatic, () =>
-        footballApi.getTeamForm(away, 15)
-      ),
+      cache.getOrFetch(homeFormCacheKey, config.cache.ttlStatic, homeFormFetcher),
+      cache.getOrFetch(awayFormCacheKey, config.cache.ttlStatic, awayFormFetcher),
       league && season
         ? cache.getOrFetch(`standings:${league}:${season}`, config.cache.ttlStatic, () =>
             footballApi.getStandings(league, season)
@@ -52,6 +68,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ]);
 
   // --- Sakatlik/ceza ---
+  // Not: Süper Lig icin sakatlik verisi de API-Football'dan geliyor ve
+  // askida oldugu icin bos donuyor - injuryImpact notr (0 ceza) kalir.
   const injuriesRaw = injuriesResult.status === 'fulfilled' && injuriesResult.value.ok
     ? injuriesResult.value.data?.response || []
     : [];
@@ -143,6 +161,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, 0.5);
 
   // --- Ilk yari golune kim daha yakin ---
+  // Not: TFF verisinde halftime skoru yok (score.halftime her zaman
+  // null geliyor) - calculateFirstHalfTendency bu durumda otomatik
+  // olarak matchesConsidered:0, firstHalfScoringRate:null doner,
+  // ekstra bir kontrole gerek yok.
   const homeFirstHalf = stats.calculateFirstHalfTendency(homeFixtures, home);
   const awayFirstHalf = stats.calculateFirstHalfTendency(awayFixtures, away);
   const h2hFixturesRaw = h2hResult.status === 'fulfilled' && h2hResult.value.ok
@@ -191,6 +213,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     homeAdvantageMultiplier,
     h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
+    dataSource: isSuperLig ? 'tff' : 'api-football',
   };
 }
 
