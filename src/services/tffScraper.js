@@ -61,4 +61,5 @@ function parseStandings(html) {
         const rank = match ? parseInt(match[1], 10) : null;
         const name = match ? match[2].trim() : nameCell;
 
-        const link
+        const link = $(cells[0]).find('a').attr('href') || '';
+
