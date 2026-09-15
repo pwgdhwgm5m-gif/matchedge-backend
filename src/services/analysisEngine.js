@@ -74,8 +74,19 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const awayFixtures = awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.ok
     ? awayFixturesResult.value.data?.response || []
     : [];
-  const homeTeamFullSplit = stats.splitHomeAwayForm(homeFixtures, home, 5);
-  const awayTeamFullSplit = stats.splitHomeAwayForm(awayFixtures, away, 5);
+
+  // TFF kaynaginda gercek kulupID, disaridan gelen home/away
+  // parametresinden farkli bir ID semasina ait - form/streak/rest-day
+  // hesaplarinin dogru calismasi icin gercek TFF ID'sini kullaniyoruz.
+  const homeTeamIdForStats = isSuperLig && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
+    ? homeFixturesResult.value.teamId
+    : home;
+  const awayTeamIdForStats = isSuperLig && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
+    ? awayFixturesResult.value.teamId
+    : away;
+
+  const homeTeamFullSplit = stats.splitHomeAwayForm(homeFixtures, homeTeamIdForStats, 5);
+  const awayTeamFullSplit = stats.splitHomeAwayForm(awayFixtures, awayTeamIdForStats, 5);
   const homeAwaySplit = {
     home: homeTeamFullSplit.home,
     away: awayTeamFullSplit.away,
@@ -91,13 +102,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     motivationAway = motivation.calculateMotivationFromDescription(awayRow?.description);
   }
 
-  const homeRestDays = stats.calculateRestDays(homeFixtures, home);
-  const awayRestDays = stats.calculateRestDays(awayFixtures, away);
+  const homeRestDays = stats.calculateRestDays(homeFixtures, homeTeamIdForStats);
+  const awayRestDays = stats.calculateRestDays(awayFixtures, awayTeamIdForStats);
   const homeFatigue = stats.calculateFatigueMultiplier(homeRestDays);
   const awayFatigue = stats.calculateFatigueMultiplier(awayRestDays);
 
-  const homeStreak = stats.calculateStreak(homeFixtures, home);
-  const awayStreak = stats.calculateStreak(awayFixtures, away);
+  const homeStreak = stats.calculateStreak(homeFixtures, homeTeamIdForStats);
+  const awayStreak = stats.calculateStreak(awayFixtures, awayTeamIdForStats);
   const homeStreakMult = stats.streakMultiplier(homeStreak);
   const awayStreakMult = stats.streakMultiplier(awayStreak);
 
@@ -137,8 +148,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const marketImpliedProbabilities = oddsApi.normalizeImpliedProbabilities(matchOdds);
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, 0.5);
 
-  const homeFirstHalf = stats.calculateFirstHalfTendency(homeFixtures, home);
-  const awayFirstHalf = stats.calculateFirstHalfTendency(awayFixtures, away);
+  const homeFirstHalf = stats.calculateFirstHalfTendency(homeFixtures, homeTeamIdForStats);
+  const awayFirstHalf = stats.calculateFirstHalfTendency(awayFixtures, awayTeamIdForStats);
   const h2hFixturesRaw = h2hResult.status === 'fulfilled' && h2hResult.value.ok
     ? h2hResult.value.data?.response || []
     : [];
@@ -184,7 +195,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     },
     homeAdvantageMultiplier,
     h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
-    odds: oddsResult.status === 'ful
+    odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     dataSource: isSuperLig ? 'tff' : 'api-football',
   };
 }
