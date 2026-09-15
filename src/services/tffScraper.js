@@ -69,7 +69,7 @@ function parseStandings(html) {
         for (let i = 1; i < cells.length; i++) {
           nums.push($(cells[i]).text().trim());
         }
-        const [played, wins, draws, losses, goalsFor, goalsAgainst, goalDiff, points] = nums;
+        const partsArr = [played, wins, draws, losses, goalsFor, goalsAgainst, goalDiff, points] = nums;
 
         if (!name || played === undefined) return;
 
@@ -91,64 +91,3 @@ function parseStandings(html) {
 
   return standings;
 }
-
-const DATE_PATTERN = /(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/;
-
-function parseTurkishDate(text) {
-  const m = text.match(DATE_PATTERN);
-  if (!m) return null;
-  const [, day, month, year, hour, minute] = m;
-  const iso = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}T${hour ? String(hour).padStart(2, '0') : '00'}:${minute || '00'}:00`;
-  const d = new Date(iso);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function parseFixtures(html) {
-  const $ = cheerio.load(html);
-  const fixtures = [];
-
-  $('a[href*="macId="]').each((_, el) => {
-    const href = $(el).attr('href') || '';
-    const macIdMatch = href.match(/macId=(\d+)/i);
-    if (!macIdMatch) return;
-    const macId = macIdMatch[1];
-
-    const scoreText = $(el).text().trim();
-
-    const row = $(el).closest('tr');
-    if (!row.length) return;
-
-    const teamLinks = row.find('a[href*="kulupId="], a[href*="kulupID="]');
-    if (teamLinks.length < 2) return;
-
-    const homeName = $(teamLinks[0]).text().trim();
-    const awayName = $(teamLinks[1]).text().trim();
-    const homeHref = $(teamLinks[0]).attr('href') || '';
-    const awayHref = $(teamLinks[1]).attr('href') || '';
-    const homeId = (homeHref.match(/kulupI[dD]=(\d+)/i) || [])[1] || null;
-    const awayId = (awayHref.match(/kulupI[dD]=(\d+)/i) || [])[1] || null;
-
-    let homeScore = null;
-    let awayScore = null;
-    const scoreMatch = scoreText.match(/^(\d+)\s*-\s*(\d+)$/);
-    const finished = !!scoreMatch;
-    if (scoreMatch) {
-      homeScore = parseInt(scoreMatch[1], 10);
-      awayScore = parseInt(scoreMatch[2], 10);
-    }
-
-    let matchDate = parseTurkishDate(row.text());
-    if (!matchDate) {
-      const prevRow = row.prev('tr');
-      if (prevRow.length) matchDate = parseTurkishDate(prevRow.text());
-    }
-    if (!matchDate) {
-      const container = row.closest('table').prev();
-      if (container.length) matchDate = parseTurkishDate(container.text());
-    }
-
-    fixtures.push({
-      macId,
-      home: { id: homeId, name: hom
-
-
