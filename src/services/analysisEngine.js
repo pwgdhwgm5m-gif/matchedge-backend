@@ -175,5 +175,5 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   ]);
 
   return {
-    fixtureId,
-    hom
+        homeLambda,
+
