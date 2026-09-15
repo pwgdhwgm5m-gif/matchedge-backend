@@ -11,12 +11,16 @@ const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const API_KEY = process.env.SPORTSDB_API_KEY || '123';
 
 // free-api-live-football-data (FotMob) semasindaki leagueId -> TheSportsDB idLeague.
-// SADECE dogrulanmis eslesmeler burada. Bilinmeyen bir leagueId gelirse
-// fonksiyon bos/basarisiz doner, hataya dusmez.
+// Premier League ve Süper Lig (TFF uzerinden ayri islenir) haric digerleri
+// henuz gercek veriyle dogrulanmadi - test edildikce netlesecek.
 const LEAGUE_ID_MAP = {
-  '47': 4328, // Premier League
-  // TODO: diger ligler (La Liga, Bundesliga, Serie A, Ligue 1 vs.)
-  // dogrulandikca buraya eklenecek.
+  '47': 4328,   // Premier League
+  '87': 4335,   // La Liga
+  '55': 4332,   // Serie A
+  '54': 4331,   // Bundesliga
+  '53': 4334,   // Ligue 1
+  '57': 4337,   // Eredivisie
+  '135': 4336,  // Yunanistan Super League
 };
 
 async function fetchT(url, timeoutMs) {
