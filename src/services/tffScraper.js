@@ -69,7 +69,7 @@ function parseStandings(html) {
         for (let i = 1; i < cells.length; i++) {
           nums.push($(cells[i]).text().trim());
         }
-        const partsArr = [played, wins, draws, losses, goalsFor, goalsAgainst, goalDiff, points] = nums;
+        const = [played, wins, draws, losses, goalsFor, goalsAgainst, goalDiff, points] = nums;
 
         if (!name || played === undefined) return;
 
