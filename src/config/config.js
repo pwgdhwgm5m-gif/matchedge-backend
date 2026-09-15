@@ -49,6 +49,17 @@ module.exports = {
     ],
   },
 
+  // Gunun maclarini/sonuclarini cekmek icin kullanilan ikinci (yedek/ana)
+  // kaynak - "Free API Live Football Data" (RapidAPI). API-Football hesap
+  // sorunlari yasandiginda (askiya alinma, abonelik) devreye girer.
+  // Su an /api/results, /api/matches ve /api/live BU kaynagi kullaniyor -
+  // API-Football'dan daha guvenilir calisiyor.
+  freeFootballApi: {
+    key: process.env.FREE_FOOTBALL_API_KEY || '',
+    baseUrl: 'https://free-api-live-football-data.p.rapidapi.com',
+    host: 'free-api-live-football-data.p.rapidapi.com',
+  },
+
   oddsApi: {
     key: process.env.ODDS_API_KEY,
     baseUrl: 'https://api.the-odds-api.com/v4',
