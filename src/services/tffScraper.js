@@ -4,9 +4,10 @@
  */
 
 const cheerio = require('cheerio');
+
 // Turkce buyuk/kucuk harf donusumu JS'in varsayilan toLowerCase()'i ile
-// hatali calisiyor (Ozellikle "I" harfi). Karsilastirma icin ozel bir
-// normalize fonksiyonu kullaniyoruz.
+// hatali calisiyor (ozellikle "I" ve "İ" harfleri). Karsilastirma icin
+// ozel bir normalize fonksiyonu kullaniyoruz.
 function turkishNormalize(str) {
   return String(str)
     .replace(/İ/g, 'i')
@@ -27,11 +28,13 @@ function turkishNormalize(str) {
 
 const TFF_SUPERLIG_URL = 'https://www.tff.org/default.aspx?pageID=198';
 
-async function fetchT(url, options = {}, timeoutMs = 10000) {
+async function fetchT(url, options, timeoutMs) {
+  const opts = options || {};
+  const ms = timeoutMs || 10000;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(function () { controller.abort(); }, ms);
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(url, Object.assign({}, opts, { signal: controller.signal }));
     return res;
   } finally {
     clearTimeout(timer);
@@ -48,7 +51,7 @@ async function fetchTffHtml() {
   }, 10000);
 
   if (!res.ok) {
-    throw new Error(`TFF fetch failed: HTTP ${res.status}`);
+    throw new Error('TFF fetch failed: HTTP ' + res.status);
   }
 
   const buffer = await res.arrayBuffer();
@@ -61,18 +64,23 @@ async function fetchTffHtml() {
   return html;
 }
 
+function toInt(v) {
+  const n = parseInt(String(v).replace(/[^\-\d]/g, ''), 10);
+  return Number.isNaN(n) ? null : n;
+}
+
 function parseStandings(html) {
   const $ = cheerio.load(html);
   const standings = [];
 
-  $('table').each((_, table) => {
+  $('table').each(function (_, table) {
     const headerText = $(table).find('tr').first().text();
     if (!/AV/.test(headerText) || !/\bP\b/.test(headerText)) return;
 
     $(table)
       .find('tr')
       .slice(1)
-      .each((__, row) => {
+      .each(function (__, row) {
         const cells = $(row).find('td');
         if (cells.length < 8) return;
 
@@ -89,14 +97,15 @@ function parseStandings(html) {
         for (let i = 1; i < cells.length; i++) {
           nums.push($(cells[i]).text().trim());
         }
-        const [played, wins, draws, losses, goalsFor, goalsAgainst, goalDiff, points] = nums;
+        const played = nums[0], wins = nums[1], draws = nums[2], losses = nums[3];
+        const goalsFor = nums[4], goalsAgainst = nums[5], goalDiff = nums[6], points = nums[7];
 
         if (!name || played === undefined) return;
 
         standings.push({
-          rank,
-          kulupID,
-          name,
+          rank: rank,
+          kulupID: kulupID,
+          name: name,
           played: toInt(played),
           wins: toInt(wins),
           draws: toInt(draws),
@@ -111,6 +120,7 @@ function parseStandings(html) {
 
   return standings;
 }
+
 const DATE_PATTERN = /(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})(?:\s+(\d{1,2}):(\d{2}))?/;
 
 function parseTurkishDate(text) {
@@ -130,7 +140,7 @@ function parseFixtures(html) {
   const $ = cheerio.load(html);
   const fixtures = [];
 
-  $('a[href*="macId="]').each((_, el) => {
+  $('a[href*="macId="]').each(function (_, el) {
     const href = $(el).attr('href') || '';
     const macIdMatch = href.match(/macId=(\d+)/i);
     if (!macIdMatch) return;
@@ -148,8 +158,10 @@ function parseFixtures(html) {
     const awayName = $(teamLinks[1]).text().trim();
     const homeHref = $(teamLinks[0]).attr('href') || '';
     const awayHref = $(teamLinks[1]).attr('href') || '';
-    const homeId = (homeHref.match(/kulupI[dD]=(\d+)/i) || [])[1] || null;
-    const awayId = (awayHref.match(/kulupI[dD]=(\d+)/i) || [])[1] || null;
+    const homeIdArr = homeHref.match(/kulupI[dD]=(\d+)/i);
+    const awayIdArr = awayHref.match(/kulupI[dD]=(\d+)/i);
+    const homeId = homeIdArr ? homeIdArr[1] : null;
+    const awayId = awayIdArr ? awayIdArr[1] : null;
 
     let homeScore = null;
     let awayScore = null;
@@ -184,10 +196,6 @@ function parseFixtures(html) {
   return fixtures;
 }
 
-function toInt(v) {
-  const n = parseInt(String(v).replace(/[^\-\d]/g, ''), 10);
-  return Number.isNaN(n) ? null : n;
-}
 async function getStandings() {
   const html = await fetchTffHtml();
   return parseStandings(html);
@@ -205,7 +213,7 @@ async function getTeamForm(teamIdentifier, lastN) {
   function isMatch(team) {
     if (!team) return false;
     if (team.id && String(team.id) === String(teamIdentifier)) return true;
-    if (team.name && team.name.toLowerCase().indexOf(String(teamIdentifier).toLowerCase()) !== -1) return true;
+    if (team.name && turkishNormalize(team.name).indexOf(turkishNormalize(teamIdentifier)) !== -1) return true;
     return false;
   }
 
@@ -265,7 +273,8 @@ async function getTeamFixturesForAnalysis(teamName, count) {
     const fixtures = await getFixtures();
 
     function isMatch(team) {
-      return team && team.name && team.name.toLowerCase().indexOf(String(teamName).toLowerCase()) !== -1;
+      if (!team || !team.name) return false;
+      return turkishNormalize(team.name).indexOf(turkishNormalize(teamName)) !== -1;
     }
 
     const teamFixtures = fixtures.filter(function (f) {
