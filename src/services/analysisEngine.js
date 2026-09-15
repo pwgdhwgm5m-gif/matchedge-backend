@@ -6,32 +6,44 @@ const poisson = require('./poissonService');
 const stats = require('./statsService');
 const motivation = require('./motivationService');
 const tffScraper = require('./tffScraper');
-const leagueFormService = require('./leagueFormService');
+const sportsDb = require('./sportsDbService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
 const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
-// free-api-live-football-data (FotMob) semasinda Trendyol Süper Lig'in ID'si.
 const SUPERLIG_LEAGUE_ID = '71';
 
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, season, sportKey }) {
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
+  const isMappedLeague = leagueIdNum && !!sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)];
 
-  // API-Football (footballApiService) askida oldugu icin TUM liglerde
-  // form verisi artik kendi kaynaklarimizdan cekiliyor:
-  // - Süper Lig -> TFF.org scraper (gercek zamanli, resmi kaynak)
-  // - Diger ligler -> leagueFormService (backfill + gunluk cron ile
-  //   biriken kendi veritabanimiz, free-api-live-football-data kaynakli)
+  // API-Football (footballApiService) askida oldugu icin form verisi:
+  // - Süper Lig -> TFF.org scraper
+  // - Eslesmesi bilinen diger ligler -> TheSportsDB (Premium)
+  // - Eslesmesi olmayan ligler -> eskisi gibi API-Football denenir (suspended
+  //   oldugu icin muhtemelen bos doner, sistem yine de cokme, notr deger uretir)
   const homeFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
-    : () => leagueFormService.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15);
+    : isMappedLeague
+      ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15)
+      : () => footballApi.getTeamForm(home, 15);
   const awayFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
-    : () => leagueFormService.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15);
-  const homeFormCacheKey = isSuperLig ? `tff-form:${homeTeamName}` : `db-form:${leagueIdNum}:${homeTeamName}`;
-  const awayFormCacheKey = isSuperLig ? `tff-form:${awayTeamName}` : `db-form:${leagueIdNum}:${awayTeamName}`;
+    : isMappedLeague
+      ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15)
+      : () => footballApi.getTeamForm(away, 15);
+  const homeFormCacheKey = isSuperLig
+    ? `tff-form:${homeTeamName}`
+    : isMappedLeague
+      ? `tsdb-form:${leagueIdNum}:${homeTeamName}`
+      : `form:${home}`;
+  const awayFormCacheKey = isSuperLig
+    ? `tff-form:${awayTeamName}`
+    : isMappedLeague
+      ? `tsdb-form:${leagueIdNum}:${awayTeamName}`
+      : `form:${away}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
@@ -74,10 +86,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? awayFixturesResult.value.data?.response || []
     : [];
 
-  // Hem TFF hem de leagueFormService, disaridan gelen home/away parametresinden
-  // farkli bir kimlik semasi kullaniyor - form/streak/rest-day hesaplarinin
-  // dogru calismasi icin gercek teamId'yi kullaniyoruz.
-  const useOwnSource = isSuperLig || !!leagueIdNum;
+  const useOwnSource = isSuperLig || isMappedLeague;
   const homeTeamIdForStats = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
     ? homeFixturesResult.value.teamId
     : home;
@@ -175,7 +184,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   ]);
 
   return {
-    
+    fixtureId,
     homeLambda,
     awayLambda,
     matchProbabilities: blendedMatchProbabilities,
@@ -200,9 +209,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     homeAdvantageMultiplier,
     h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
-    dataSource: isSuperLig ? 'tff' : (leagueIdNum ? 'own-db' : 'api-football'),
+    dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'api-football'),
   };
 }
 
 module.exports = { computeFullAnalysis, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
-
