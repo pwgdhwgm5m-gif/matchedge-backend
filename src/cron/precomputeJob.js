@@ -3,77 +3,115 @@ const config = require('../config/config');
 const cache = require('../utils/cache');
 const footballApi = require('../services/footballApiService');
 const oddsApi = require('../services/oddsApiService');
+const sportsDb = require('../services/sportsDbService');
 const { computeFullAnalysis } = require('../services/analysisEngine');
 
+// TheSportsDB idLeague -> analysisEngine'in "league" parametresi olarak
+// bekledigi deger (Süper Lig icin '71' -> TFF dalina yonlendirir,
+// digerleri sportsDb.LEAGUE_ID_MAP uzerinden form cekimine yonlendirir).
+// SADECE burada listelenen ligler onden hesaplanir - kapsam bilincli
+// olarak dar tutuluyor, cunku bu liglerin disinda guvenilir form
+// kaynagimiz yok (API-Football askida).
+const PRECOMPUTE_TSDB_LEAGUES = {
+  '4339': '71',   // Türkiye Süper Lig (TFF scraper)
+  '4328': '47',   // Premier League
+  '4335': '87',   // La Liga
+  '4332': '55',   // Serie A
+  '4331': '54',   // Bundesliga
+  '4334': '53',   // Ligue 1
+  '4337': '57',   // Eredivisie
+  '4336': '135',  // Yunanistan Super League
+};
+
+const DAYS_AHEAD = 7;
+
+function formatDate(d) {
+  return d.toISOString().split('T')[0];
+}
+
 /**
- * Gunun fikstÃ¼rlerini tarar, her mac icin TAM analiz motorunu
- * (computeFullAnalysis - /api/analysis route'uyla AYNI fonksiyon)
- * onceden calistirip cache'e uzun TTL ile yazar. Kullanici sayfayi
- * actiginda canli hesaplama yapmaz, sadece hazir sonucu okur ->
- * sayfa acilisi hizli olur. Onceden bu fonksiyon basit sabit
- * degerler kullaniyordu - artik anlik istekle BIREBIR AYNI gelismis
- * modeli (motivasyon, yorgunluk, form, sakatlik, Dixon-Coles, piyasa
- * harmani) kullaniyor, boylece iki yol arasinda tutarsizlik kalmadi.
+ * Onumuzdeki DAYS_AHEAD gun icinde, PRECOMPUTE_TSDB_LEAGUES'de listelenen
+ * liglerdeki henuz oynanmamis (NS) maclari tarar, her biri icin TAM analiz
+ * motorunu (computeFullAnalysis - /api/analysis route'uyla AYNI fonksiyon)
+ * onceden calistirip cache'e uzun TTL ile yazar.
+ *
+ * NOT: Eskiden bu fonksiyon fiksturu API-Football'dan (footballApi.
+ * getFixturesByDate) cekiyordu - o kaynak askida oldugu icin (http_403)
+ * artik TheSportsDB (sportsDb.getMatchesByDate) kullaniliyor, ayni
+ * kaynagin /api/matches route'unda kullanildigi gibi.
  */
 async function precomputeTodaysMatches() {
-  const today = new Date().toISOString().split('T')[0];
-  console.log(`[precompute] ${today} fiksturleri taraniyor...`);
+  console.log(`[precompute] Onumuzdeki ${DAYS_AHEAD} gun taraniyor (TheSportsDB)...`);
 
-  const fixturesResult = await footballApi.getFixturesByDate(today);
-  if (!fixturesResult.ok) {
-    console.error('[precompute] Fikstur cekilemedi, bu tur atlaniyor.');
-    return;
+  const upcomingFixtures = [];
+
+  for (let i = 0; i < DAYS_AHEAD; i++) {
+    const date = new Date();
+    date.setDate(date.getDate() + i);
+    const dateStr = formatDate(date);
+
+    const result = await sportsDb.getMatchesByDate(dateStr);
+    if (!result.ok) {
+      console.error(`[precompute] ${dateStr}: fikstur cekilemedi, atlaniyor.`);
+      continue;
+    }
+
+    const events = (result.data && result.data.events) || [];
+    events.forEach(function (e) {
+      if (e.strStatus !== 'NS') return; // sadece henuz oynanmamis maclar
+      const fotmobLeague = PRECOMPUTE_TSDB_LEAGUES[String(e.idLeague)];
+      if (!fotmobLeague) return; // eslesmesi olmayan lig, atla
+
+      upcomingFixtures.push({
+        fixtureId: e.idEvent,
+        home: e.idHomeTeam,
+        away: e.idAwayTeam,
+        homeTeamName: e.strHomeTeam,
+        awayTeamName: e.strAwayTeam,
+        league: fotmobLeague,
+        season: new Date().getFullYear(),
+        kickoff: e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00')),
+      });
+    });
   }
 
-  const fixtures = fixturesResult.data?.response || [];
-  console.log(`[precompute] ${fixtures.length} mac bulundu.`);
+  console.log(`[precompute] ${upcomingFixtures.length} uygun mac bulundu (${Object.keys(PRECOMPUTE_TSDB_LEAGUES).length} lig).`);
 
-  // GUVENLIK SINIRI: computeFullAnalysis artik mac basina 4-5 API-Football
-  // istegi yapiyor (h2h, sakatlik, ev formu, deplasman formu, +standings).
-  // Ucretsiz plan (~100 istek/gun) ile sinirsiz calistirmak kotayi tek
-  // turda bitirebilir. En yakin zamanli maclari onceliklendirip ilk
-  // MAX_FIXTURES_PER_RUN kadarini isliyoruz - geri kalani kullanici
-  // sayfayi actiginda /api/analysis'in "realtime" yoluyla hesaplanir
-  // (biraz daha yavas ama calisir, veri kaybi olmaz).
+  // GUVENLIK SINIRI: her mac icin birkac TheSportsDB istegi yapiliyor
+  // (home form + away form). Kota korumasi icin en yakin tarihli
+  // maclari onceliklendirip ilk MAX_FIXTURES_PER_RUN kadarini isliyoruz.
   const MAX_FIXTURES_PER_RUN = config.maxPrecomputeFixturesPerRun;
-  const prioritized = [...fixtures]
-    .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date))
+  const prioritized = upcomingFixtures
+    .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff))
     .slice(0, MAX_FIXTURES_PER_RUN);
 
-  if (fixtures.length > MAX_FIXTURES_PER_RUN) {
-    console.log(`[precompute] Kota korumasi: ${fixtures.length} mactan ilk ${MAX_FIXTURES_PER_RUN} tanesi onden hesaplanacak.`);
+  if (upcomingFixtures.length > MAX_FIXTURES_PER_RUN) {
+    console.log(`[precompute] Kota korumasi: ${upcomingFixtures.length} mactan ilk ${MAX_FIXTURES_PER_RUN} tanesi onden hesaplanacak.`);
   }
 
   for (const fixture of prioritized) {
     try {
-      const fixtureId = fixture.fixture.id;
-
       const result = await computeFullAnalysis({
-        fixtureId,
-        home: fixture.teams.home.id,
-        away: fixture.teams.away.id,
-        homeTeamName: fixture.teams.home.name,
-        awayTeamName: fixture.teams.away.name,
-        league: fixture.league.id,
-        season: fixture.league.season,
-        // NOT: API-Football lig ID'si ile The Odds API'nin sport_key'i
-        // farkli sistemler - otomatik eslestirme yok. Belirtmezsek
-        // varsayilan soccer_epl denenir, takim adlari eslesmezse
-        // piyasa harmani sessizce atlanip sadece model kullanilir
-        // (hata vermez, sadece o mac icin blend olmaz).
+        fixtureId: fixture.fixtureId,
+        home: fixture.home,
+        away: fixture.away,
+        homeTeamName: fixture.homeTeamName,
+        awayTeamName: fixture.awayTeamName,
+        league: fixture.league,
+        season: fixture.season,
       });
 
       const precomputed = {
         ...result,
-        homeTeam: fixture.teams.home.name,
-        awayTeam: fixture.teams.away.name,
-        kickoff: fixture.fixture.date,
+        homeTeam: fixture.homeTeamName,
+        awayTeam: fixture.awayTeamName,
+        kickoff: fixture.kickoff,
         computedAt: new Date().toISOString(),
       };
 
-      cache.set(`precomputed:${fixtureId}`, precomputed, config.cache.ttlPrecomputed);
+      cache.set(`precomputed:${fixture.fixtureId}`, precomputed, config.cache.ttlPrecomputed);
     } catch (err) {
-      console.error(`[precompute] Mac ${fixture.fixture.id} icin hata:`, err.message);
+      console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
     }
   }
 
@@ -102,9 +140,7 @@ function startPrecomputeCron() {
 
 /**
  * Oran hareketi grafigi icin ayarlanan araliklarla (varsayilan 3 saat)
- * takip edilen liglerin anlik oranini kaydeder. Zamanla biriken bu
- * kayitlar grafik olusturur. Kac ligin takip edildigine gore kota
- * tuketimi degisir - config.js'deki yorumlara bak.
+ * takip edilen liglerin anlik oranini kaydeder.
  */
 function startOddsSnapshotCron() {
   cron.schedule(config.oddsSnapshotCron, async () => {
@@ -119,7 +155,6 @@ function startOddsSnapshotCron() {
   });
   console.log(`[odds-snapshot] Cron zamanlandi: "${config.oddsSnapshotCron}" - ${config.trackedLeagues.length} lig takip ediliyor`);
 
-  // Ilk kaydi hemen al, cron'un ilk calismasini beklemeden grafik veri toplamaya baslasin
   config.trackedLeagues.forEach(sportKey => oddsApi.recordOddsSnapshot(sportKey));
 }
 
