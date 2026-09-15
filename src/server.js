@@ -41,23 +41,6 @@ app.use('/api/live', liveRoute);
 app.use('/api/odds-history', oddsHistoryRoute);
 app.use('/api/results', resultsRoute);
 const tffScraper = require('./services/tffScraper');
-app.get('/test-tff-form', async (req, res) => {
-  try {
-    const data = await tffScraper.getTeamForm('GALATASARAY', 5);
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
-  }
-});
-
-app.get('/test-tff-standings', async (req, res) => {
-  try {
-    const data = await tffScraper.getStandings();
-    res.json(data);
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack });
-  }
-});
 
 app.use((err, req, res, next) => {
   console.error('[server] Beklenmeyen hata:', err);
