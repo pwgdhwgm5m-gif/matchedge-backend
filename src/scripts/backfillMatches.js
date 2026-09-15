@@ -1,24 +1,16 @@
 /**
  * backfillMatches.js
- * Tek seferlik calistirilir: son N gunun maclarini free-api-live-football-data
- * kaynagindan cekip veritabanina yazar. API-Football'in askida olmasi
- * nedeniyle diger liglerde form verisi olmadigi icin bu script gecmisi
- * doldurup analysisEngine'in dogru calismasini saglar.
- *
- * Calistirmak icin (Render Shell'de veya lokal):
- *   node src/scripts/backfillMatches.js
+ * Son N gunun maclarini free-api-live-football-data kaynagindan cekip
+ * veritabanina yazar. server.js icindeki /run-backfill route'u tarafindan
+ * cagrilir (Render free plan Shell/SSH desteklemedigi icin).
  */
 
-require('dotenv').config();
-const mongoose = require('mongoose');
-const config = require('../config/config');
-const { connectDB } = require('../db');
 const Match = require('../models/Match');
 const freeFootballApi = require('../services/freeFootballApiService');
 const { normalizeTeamName } = require('../utils/textNormalize');
 
 const DAYS_BACK = 45;
-const DELAY_MS = 1200; // her istek arasinda bekleme - rate limit'e takilmamak icin
+const DELAY_MS = 1200;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -28,12 +20,10 @@ function formatDate(d) {
   return d.toISOString().split('T')[0];
 }
 
-async function run() {
-  await connectDB();
+async function runBackfill() {
   console.log(`Backfill basliyor: son ${DAYS_BACK} gun`);
 
   let totalSaved = 0;
-  let totalSkipped = 0;
   let totalErrors = 0;
 
   for (let i = DAYS_BACK; i >= 0; i--) {
@@ -55,7 +45,7 @@ async function run() {
 
       for (const m of rawMatches) {
         const finished = !!m.status?.finished;
-        if (!finished) continue; // sadece bitmis maclari kaydet
+        if (!finished) continue;
 
         const homeTeam = m.home?.name || m.home?.longName || '';
         const awayTeam = m.away?.name || m.away?.longName || '';
@@ -82,7 +72,7 @@ async function run() {
           );
           savedThisDay++;
         } catch (err) {
-          // duplicate key gibi hatalar - atla
+          // duplicate - atla
         }
       }
 
@@ -97,11 +87,7 @@ async function run() {
   }
 
   console.log(`Backfill tamamlandi. Toplam kaydedilen: ${totalSaved}, hata: ${totalErrors}`);
-  await mongoose.connection.close();
-  process.exit(0);
+  return { totalSaved, totalErrors };
 }
 
-run().catch((err) => {
-  console.error('Backfill hatasi:', err);
-  process.exit(1);
-});
+module.exports = { runBackfill };
