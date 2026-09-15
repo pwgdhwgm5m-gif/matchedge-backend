@@ -44,7 +44,9 @@ const tffScraper = require('./services/tffScraper');
 
 app.get('/test-tff-analysis-fetch', async (req, res) => {
   try {
-    const data = await tffScraper.getTeamFixturesForAnalysis('Galatasaray', 15);
+      const teamName = req.query.team || 'Galatasaray';
+    const data = await tffScraper.getTeamFixturesForAnalysis(teamName, 15);
+
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
