@@ -40,6 +40,16 @@ app.use('/api/analysis', analysisRoute);
 app.use('/api/live', liveRoute);
 app.use('/api/odds-history', oddsHistoryRoute);
 app.use('/api/results', resultsRoute);
+app.get('/run-backfill', async (req, res) => {
+  res.json({ status: 'started', message: 'Backfill arka planda calisiyor, loglardan takip et' });
+  try {
+    const { runBackfill } = require('./scripts/backfillMatches');
+    await runBackfill();
+    console.log('[backfill] Tamamlandi');
+  } catch (err) {
+    console.error('[backfill] Hata:', err.message);
+  }
+});
 
 app.use((err, req, res, next) => {
   console.error('[server] Beklenmeyen hata:', err);
