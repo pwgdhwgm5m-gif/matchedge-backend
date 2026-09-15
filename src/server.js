@@ -42,9 +42,9 @@ app.use('/api/odds-history', oddsHistoryRoute);
 app.use('/api/results', resultsRoute);
 const tffScraper = require('./services/tffScraper');
 
-app.get('/test-tff-form', async (req, res) => {
+app.get('/test-tff-analysis-fetch', async (req, res) => {
   try {
-    const data = await tffScraper.getTeamForm('GALATASARAY', 5);
+    const data = await tffScraper.getTeamFixturesForAnalysis('Galatasaray', 15);
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message, stack: err.stack });
