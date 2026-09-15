@@ -4,6 +4,26 @@
  */
 
 const cheerio = require('cheerio');
+// Turkce buyuk/kucuk harf donusumu JS'in varsayilan toLowerCase()'i ile
+// hatali calisiyor (Ozellikle "I" harfi). Karsilastirma icin ozel bir
+// normalize fonksiyonu kullaniyoruz.
+function turkishNormalize(str) {
+  return String(str)
+    .replace(/İ/g, 'i')
+    .replace(/I/g, 'i')
+    .replace(/ı/g, 'i')
+    .replace(/Ş/g, 's')
+    .replace(/ş/g, 's')
+    .replace(/Ğ/g, 'g')
+    .replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'u')
+    .replace(/ü/g, 'u')
+    .replace(/Ö/g, 'o')
+    .replace(/ö/g, 'o')
+    .replace(/Ç/g, 'c')
+    .replace(/ç/g, 'c')
+    .toLowerCase();
+}
 
 const TFF_SUPERLIG_URL = 'https://www.tff.org/default.aspx?pageID=198';
 
