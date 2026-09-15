@@ -8,7 +8,8 @@
     "dev": "node --watch src/server.js"
   },
   "dependencies": {
-    "express": "^4.19.2","cheerio": "^1.0.0"
+    "express": "^4.19.2",
+    "cheerio": "^1.0.0",
 
     "axios": "^1.7.2",
     "node-cache": "^5.1.2",
