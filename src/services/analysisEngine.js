@@ -175,5 +175,34 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   ]);
 
   return {
-        homeLambda,
+    
+    homeLambda,
+    awayLambda,
+    matchProbabilities: blendedMatchProbabilities,
+    modelOnlyProbabilities: matchProbabilities,
+    marketImpliedProbabilities,
+    marketProbabilities,
+    cornerMetrics,
+    firstHalfProximity,
+    dataQualityScore,
+    strongestSignal,
+    injuries,
+    homeAwayForm: homeAwaySplit,
+    motivation: { home: motivationHome, away: motivationAway },
+    fatigue: {
+      home: { restDays: homeRestDays, multiplier: homeFatigue },
+      away: { restDays: awayRestDays, multiplier: awayFatigue },
+    },
+    streak: {
+      home: homeStreak,
+      away: awayStreak,
+    },
+    homeAdvantageMultiplier,
+    h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
+    odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
+    dataSource: isSuperLig ? 'tff' : (leagueIdNum ? 'own-db' : 'api-football'),
+  };
+}
+
+module.exports = { computeFullAnalysis, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
 
