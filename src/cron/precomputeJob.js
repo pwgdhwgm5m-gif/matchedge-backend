@@ -85,4 +85,59 @@ async function precomputeTodaysMatches() {
         home: fixture.home,
         away: fixture.away,
         homeTeamName: fixture.homeTeamName,
-        awayTeamName: fixture.
+        awayTeamName: fixture.awayTeamName,
+        league: fixture.league,
+        season: fixture.season,
+      });
+
+      const precomputed = {
+        ...result,
+        homeTeam: fixture.homeTeamName,
+        awayTeam: fixture.awayTeamName,
+        kickoff: fixture.kickoff,
+        computedAt: new Date().toISOString(),
+      };
+
+      cache.set(`precomputed:${fixture.fixtureId}`, precomputed, config.cache.ttlPrecomputed);
+    } catch (err) {
+      console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
+    }
+  }
+
+  console.log('[precompute] Tur tamamlandi.');
+}
+
+function startKeepAlive() {
+  console.warn(
+    '[keep-alive] DEVRE DISI: Render, servisin kendi kendine surekli ping ' +
+    'atmasini "anormal trafik" sayip hesabi askiya alma sebebi yapabiliyor. ' +
+    'Bunun yerine README\'deki "Uyumayan Sunucu" bolumunde anlatilan ' +
+    'HARICI bir uptime monitor (cron-job.org, UptimeRobot vb.) kullan - ' +
+    'bu servis DISINDAN geldigi icin ayni risk soz konusu degil.'
+  );
+}
+
+function startPrecomputeCron() {
+  cron.schedule('0 6,13 * * *', precomputeTodaysMatches);
+  console.log('[precompute] Cron zamanlandi: her gun 06:00 ve 13:00');
+
+  precomputeTodaysMatches();
+}
+
+function startOddsSnapshotCron() {
+  cron.schedule(config.oddsSnapshotCron, async () => {
+    for (const sportKey of config.trackedLeagues) {
+      try {
+        await oddsApi.recordOddsSnapshot(sportKey);
+        console.log(`[odds-snapshot] ${sportKey} kaydedildi`);
+      } catch (err) {
+        console.error(`[odds-snapshot] ${sportKey} icin hata:`, err.message);
+      }
+    }
+  });
+  console.log(`[odds-snapshot] Cron zamanlandi: "${config.oddsSnapshotCron}" - ${config.trackedLeagues.length} lig takip ediliyor`);
+
+  config.trackedLeagues.forEach(sportKey => oddsApi.recordOddsSnapshot(sportKey));
+}
+
+module.exports = { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron, precomputeTodaysMatches };
