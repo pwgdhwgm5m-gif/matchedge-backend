@@ -168,3 +168,114 @@ function toInt(v) {
   const n = parseInt(String(v).replace(/[^\-\d]/g, ''), 10);
   return Number.isNaN(n) ? null : n;
 }
+async function getStandings() {
+  const html = await fetchTffHtml();
+  return parseStandings(html);
+}
+
+async function getFixtures() {
+  const html = await fetchTffHtml();
+  return parseFixtures(html);
+}
+
+async function getTeamForm(teamIdentifier, lastN) {
+  const n = lastN || 5;
+  const fixtures = await getFixtures();
+
+  function isMatch(team) {
+    if (!team) return false;
+    if (team.id && String(team.id) === String(teamIdentifier)) return true;
+    if (team.name && team.name.toLowerCase().indexOf(String(teamIdentifier).toLowerCase()) !== -1) return true;
+    return false;
+  }
+
+  const teamMatches = fixtures.filter(function (f) {
+    return f.finished && (isMatch(f.home) || isMatch(f.away));
+  });
+
+  const hasDates = teamMatches.length > 0 && teamMatches.every(function (f) { return f.date; });
+  const sortedMatches = hasDates
+    ? teamMatches.slice().sort(function (a, b) { return new Date(a.date) - new Date(b.date); })
+    : teamMatches;
+
+  const lastMatches = sortedMatches.slice(-n);
+
+  const form = lastMatches.map(function (f) {
+    const isHome = isMatch(f.home);
+    const teamScore = isHome ? f.homeScore : f.awayScore;
+    const oppScore = isHome ? f.awayScore : f.homeScore;
+    if (teamScore > oppScore) return 'W';
+    if (teamScore < oppScore) return 'L';
+    return 'D';
+  });
+
+  return {
+    team: teamIdentifier,
+    lastN: n,
+    form: form.join(''),
+    matches: lastMatches,
+    datesAvailable: hasDates,
+  };
+}
+
+function adaptFixturesToApiFootballFormat(tffFixtures) {
+  return tffFixtures
+    .filter(function (f) { return f.finished; })
+    .map(function (f) {
+      return {
+        fixture: { id: f.macId, date: f.date },
+        teams: {
+          home: { id: f.home.id, name: f.home.name },
+          away: { id: f.away.id, name: f.away.name },
+        },
+        goals: { home: f.homeScore, away: f.awayScore },
+        score: { halftime: { home: null, away: null } },
+      };
+    });
+}
+
+async function getFixturesAsApiFootballFormat() {
+  const fixtures = await getFixtures();
+  return adaptFixturesToApiFootballFormat(fixtures);
+}
+
+async function getTeamFixturesForAnalysis(teamName, count) {
+  const n = count || 15;
+  try {
+    const fixtures = await getFixtures();
+
+    function isMatch(team) {
+      return team && team.name && team.name.toLowerCase().indexOf(String(teamName).toLowerCase()) !== -1;
+    }
+
+    const teamFixtures = fixtures.filter(function (f) {
+      return f.finished && (isMatch(f.home) || isMatch(f.away));
+    });
+
+    let resolvedTeamId = null;
+    for (let i = 0; i < teamFixtures.length; i++) {
+      const f = teamFixtures[i];
+      if (isMatch(f.home)) { resolvedTeamId = f.home.id; break; }
+      if (isMatch(f.away)) { resolvedTeamId = f.away.id; break; }
+    }
+
+    const lastFixtures = teamFixtures.slice(-n);
+    return {
+      ok: true,
+      data: { response: adaptFixturesToApiFootballFormat(lastFixtures) },
+      teamId: resolvedTeamId,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+module.exports = {
+  getStandings: getStandings,
+  getFixtures: getFixtures,
+  getTeamForm: getTeamForm,
+  getFixturesAsApiFootballFormat: getFixturesAsApiFootballFormat,
+  adaptFixturesToApiFootballFormat: adaptFixturesToApiFootballFormat,
+  getTeamFixturesForAnalysis: getTeamFixturesForAnalysis,
+  TFF_SUPERLIG_URL: TFF_SUPERLIG_URL,
+};
