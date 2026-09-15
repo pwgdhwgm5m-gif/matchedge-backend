@@ -145,16 +145,32 @@ function parseStandings(html) {
 function parseFixtures(html) {
   const $ = cheerio.load(html);
   const fixtures = [];
+  let currentWeek = null;
 
-  // Maç detay linklerini (macId= içeren href) temel alarak satırları eşleştir.
+  // Fikstür bölümündeki her satırı gez. TFF sayfası "N.Hafta" başlıkları
+  // ve altında ev sahibi / skor / deplasman satırları şeklinde yapılanmış.
+  $('body')
+    .find('*')
+    .each((_, el) => {
+      const text = $(el).text().trim();
+      const weekMatch = text.match(/^(\d+)\.Hafta$/);
+      if (weekMatch && $(el).children().length === 0) {
+        currentWeek = parseInt(weekMatch[1], 10);
+      }
+    });
+
+  // Daha güvenilir yöntem: maç detay linklerini (macId= içeren href)
+  // temel alarak satırları eşleştir.
   $('a[href*="macId="]').each((_, el) => {
     const href = $(el).attr('href') || '';
     const macIdMatch = href.match(/macId=(\d+)/i);
     if (!macIdMatch) return;
     const macId = macIdMatch[1];
 
+    // Skor linkinin metni "2 - 2" ya da "-" (oynanmamış) olabilir.
     const scoreText = $(el).text().trim();
 
+    // Aynı satırdaki (tr) takım linklerini bul.
     const row = $(el).closest('tr');
     if (!row.length) return;
 
@@ -195,16 +211,26 @@ function toInt(v) {
   return Number.isNaN(n) ? null : n;
 }
 
+/**
+ * Puan cetvelini getirir.
+ */
 async function getStandings() {
   const html = await fetchTffHtml();
   return parseStandings(html);
 }
 
+/**
+ * Tam fikstürü getirir (oynanmış + oynanmamış maçlar).
+ */
 async function getFixtures() {
   const html = await fetchTffHtml();
   return parseFixtures(html);
 }
 
+/**
+ * Bir takımın son N maçtaki formunu hesaplar (örn. "WWDLW").
+ * teamIdentifier: takım adı (case-insensitive, kısmi eşleşme) ya da kulupID.
+ */
 async function getTeamForm(teamIdentifier, lastN = 5) {
   const fixtures = await getFixtures();
 
@@ -221,6 +247,10 @@ async function getTeamForm(teamIdentifier, lastN = 5) {
     (f) => f.finished && (isMatch(f.home) || isMatch(f.away))
   );
 
+  // Not: TFF sayfası maçları hafta sırasına göre listeliyor ama kesin
+  // tarih/saat bilgisi bu fikstür bloğunda yok (o bilgi ayrı "Fikstür"
+  // panelinde). Hafta numarasına göre sıralama yeterli bir yaklaşım;
+  // daha kesin sonuç için maç tarihini de parse edip ekleyebilirsin.
   const lastMatches = teamMatches.slice(-lastN);
 
   const form = lastMatches.map((f) => {
