@@ -185,3 +185,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     homeAdvantageMultiplier,
     h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
     odds: oddsResult.status === 'ful
+    dataSource: isSuperLig ? 'tff' : 'api-football',
+  };
+}
+
+module.exports = { computeFullAnalysis, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
