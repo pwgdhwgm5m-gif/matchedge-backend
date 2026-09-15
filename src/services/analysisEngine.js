@@ -6,33 +6,32 @@ const poisson = require('./poissonService');
 const stats = require('./statsService');
 const motivation = require('./motivationService');
 const tffScraper = require('./tffScraper');
+const leagueFormService = require('./leagueFormService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
 const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
-// FotMob/free-api-live-football-data semasinda Trendyol Süper Lig'in ID'si.
-// API-Football (footballApiService) askiya alindigi icin bu lig icin
-// form verisi TFF.org scraper'indan (tffScraper) cekiliyor.
+// free-api-live-football-data (FotMob) semasinda Trendyol Süper Lig'in ID'si.
 const SUPERLIG_LEAGUE_ID = '71';
 
-/**
- * Tam analiz hesaplama motoru. Hem /api/analysis route'u (anlik istekte)
- * hem de precomputeJob.js (gunde 2 kez onden hesaplama) BU FONKSIYONU
- * cagirir - boylece iki yol da ayni gelismis modeli kullanir, biri
- * eski/basit bir hesapla kalmaz.
- */
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, season, sportKey }) {
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
+  const leagueIdNum = league ? parseInt(league, 10) : null;
 
+  // API-Football (footballApiService) askida oldugu icin TUM liglerde
+  // form verisi artik kendi kaynaklarimizdan cekiliyor:
+  // - Süper Lig -> TFF.org scraper (gercek zamanli, resmi kaynak)
+  // - Diger ligler -> leagueFormService (backfill + gunluk cron ile
+  //   biriken kendi veritabanimiz, free-api-live-football-data kaynakli)
   const homeFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
-    : () => footballApi.getTeamForm(home, 15);
+    : () => leagueFormService.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15);
   const awayFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
-    : () => footballApi.getTeamForm(away, 15);
-  const homeFormCacheKey = isSuperLig ? `tff-form:${homeTeamName}` : `form:${home}`;
-  const awayFormCacheKey = isSuperLig ? `tff-form:${awayTeamName}` : `form:${away}`;
+    : () => leagueFormService.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15);
+  const homeFormCacheKey = isSuperLig ? `tff-form:${homeTeamName}` : `db-form:${leagueIdNum}:${homeTeamName}`;
+  const awayFormCacheKey = isSuperLig ? `tff-form:${awayTeamName}` : `db-form:${leagueIdNum}:${awayTeamName}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
@@ -75,13 +74,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? awayFixturesResult.value.data?.response || []
     : [];
 
-  // TFF kaynaginda gercek kulupID, disaridan gelen home/away
-  // parametresinden farkli bir ID semasina ait - form/streak/rest-day
-  // hesaplarinin dogru calismasi icin gercek TFF ID'sini kullaniyoruz.
-  const homeTeamIdForStats = isSuperLig && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
+  // Hem TFF hem de leagueFormService, disaridan gelen home/away parametresinden
+  // farkli bir kimlik semasi kullaniyor - form/streak/rest-day hesaplarinin
+  // dogru calismasi icin gercek teamId'yi kullaniyoruz.
+  const useOwnSource = isSuperLig || !!leagueIdNum;
+  const homeTeamIdForStats = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
     ? homeFixturesResult.value.teamId
     : home;
-  const awayTeamIdForStats = isSuperLig && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
+  const awayTeamIdForStats = useOwnSource && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
     ? awayFixturesResult.value.teamId
     : away;
 
@@ -102,8 +102,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     motivationAway = motivation.calculateMotivationFromDescription(awayRow?.description);
   }
 
-  const homeRestDays = stats.calculateRestDays(homeFixtures, homeTeamIdForStats);
-  const awayRestDays = stats.calculateRestDays(awayFixtures, awayTeamIdForStats);
+  const homeRestDays = isSuperLig ? null : stats.calculateRestDays(homeFixtures, homeTeamIdForStats);
+  const awayRestDays = isSuperLig ? null : stats.calculateRestDays(awayFixtures, awayTeamIdForStats);
   const homeFatigue = stats.calculateFatigueMultiplier(homeRestDays);
   const awayFatigue = stats.calculateFatigueMultiplier(awayRestDays);
 
@@ -148,8 +148,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const marketImpliedProbabilities = oddsApi.normalizeImpliedProbabilities(matchOdds);
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, 0.5);
 
-  const homeFirstHalf = stats.calculateFirstHalfTendency(homeFixtures, homeTeamIdForStats);
-  const awayFirstHalf = stats.calculateFirstHalfTendency(awayFixtures, awayTeamIdForStats);
+  const homeFirstHalf = isSuperLig
+    ? { firstHalfScoringRate: null }
+    : stats.calculateFirstHalfTendency(homeFixtures, homeTeamIdForStats);
+  const awayFirstHalf = isSuperLig
+    ? { firstHalfScoringRate: null }
+    : stats.calculateFirstHalfTendency(awayFixtures, awayTeamIdForStats);
   const h2hFixturesRaw = h2hResult.status === 'fulfilled' && h2hResult.value.ok
     ? h2hResult.value.data?.response || []
     : [];
@@ -172,32 +176,4 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
 
   return {
     fixtureId,
-    homeLambda,
-    awayLambda,
-    matchProbabilities: blendedMatchProbabilities,
-    modelOnlyProbabilities: matchProbabilities,
-    marketImpliedProbabilities,
-    marketProbabilities,
-    cornerMetrics,
-    firstHalfProximity,
-    dataQualityScore,
-    strongestSignal,
-    injuries,
-    homeAwayForm: homeAwaySplit,
-    motivation: { home: motivationHome, away: motivationAway },
-    fatigue: {
-      home: { restDays: homeRestDays, multiplier: homeFatigue },
-      away: { restDays: awayRestDays, multiplier: awayFatigue },
-    },
-    streak: {
-      home: homeStreak,
-      away: awayStreak,
-    },
-    homeAdvantageMultiplier,
-    h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
-    odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
-    dataSource: isSuperLig ? 'tff' : 'api-football',
-  };
-}
-
-module.exports = { computeFullAnalysis, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
+    hom
