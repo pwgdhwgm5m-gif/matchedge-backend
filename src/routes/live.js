@@ -7,12 +7,28 @@ const sportsDb = require('../services/sportsDbService');
 /**
  * GET /api/live
  * Su an oynanan tum maclarin listesi.
- * NOT: Eskiden freeFootballApiService kullaniyordu - o kaynak aylik
- * kotasini doldurdugu icin artik sportsDbService (TheSportsDB) kullaniyor.
+ * ONCE TheSportsDB'nin GERCEK canli skor endpoint'i (V2 livescore) denenir -
+ * bu, gercek dakika (strProgress) ve gercek periyot (1H/HT/2H) verir.
+ * Eskiden burada eventsday.php (gunun tum fikstur listesi) filtrelenerek
+ * kullaniliyordu - o endpoint dakika bilgisi vermiyordu (hep null donuyordu)
+ * ve "canli mi" tespiti gevsekti (dun oynanmis bitmis bir mac bile yanlislikla
+ * canli gorunebiliyordu). V2 basarisiz olursa eski yontem yedek olarak devrede.
  */
 router.get('/', async (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const liveResult = await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () =>
+    sportsDb.getLiveScores()
+  );
 
+  if (liveResult.ok) {
+    const rawLive = liveResult.data?.livescore || [];
+    const simplified = rawLive
+      .filter(e => String(e.strSport || '').toLowerCase() === 'soccer')
+      .map(sportsDb.transformLiveEvent);
+    return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
+  }
+
+  // --- Fallback: eski yontem ---
+  const today = new Date().toISOString().split('T')[0];
   const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
     sportsDb.getMatchesByDate(today)
   );
@@ -24,40 +40,60 @@ router.get('/', async (req, res) => {
   const rawEvents = result.data?.events || [];
   const simplified = rawEvents.map(sportsDb.transformEvent).filter(m => m.isLive);
 
-  res.json({ matches: simplified, fromCache: result.fromCache });
+  res.json({ matches: simplified, fromCache: result.fromCache, source: 'eventsday-fallback' });
 });
 
 /**
  * GET /api/live/:fixtureId
- * Tek bir mac icin canli skor bilgisi. NOT: TheSportsDB sut/korner/topa
- * sahip olma gibi detayli istatistik vermiyor - o yuzden xG/momentum/
- * gole yakinlik su an icin varsayilan (0/50-50) donuyor. Skor, dakika
- * (statusShort'tan tahmini) ve takim isimleri gercek ve gunceldir.
+ * Tek bir mac icin canli skor bilgisi. Once V2 canli skor listesinde aranir
+ * (gercek dakika buradan gelir), bulunamazsa eski yontemle (eventsday.php)
+ * aranir. NOT: TheSportsDB sut/korner/topa sahip olma gibi detayli istatistik
+ * vermiyor - o yuzden xG/momentum/gole yakinlik su an icin varsayilan
+ * (0/50-50) donuyor. Skor, dakika ve takim isimleri gercek ve gunceldir.
  */
 router.get('/:fixtureId', async (req, res) => {
   const { fixtureId } = req.params;
-  const today = new Date().toISOString().split('T')[0];
 
-  const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
-    sportsDb.getMatchesByDate(today)
+  const liveResult = await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () =>
+    sportsDb.getLiveScores()
   );
 
-  if (!result.ok) {
-    return res.status(502).json({ error: 'Canli mac verisi alinamadi' });
+  let match = null;
+  let fromCacheFlag = false;
+
+  if (liveResult.ok) {
+    const rawLive = liveResult.data?.livescore || [];
+    const rawMatch = rawLive.find(e => String(e.idEvent) === String(fixtureId));
+    if (rawMatch) {
+      match = sportsDb.transformLiveEvent(rawMatch);
+      fromCacheFlag = liveResult.fromCache;
+    }
   }
 
-  const rawEvents = result.data?.events || [];
-  const raw = rawEvents.find(e => String(e.idEvent) === String(fixtureId));
+  if (!match) {
+    const today = new Date().toISOString().split('T')[0];
+    const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
+      sportsDb.getMatchesByDate(today)
+    );
 
-  if (!raw) {
+    if (result.ok) {
+      const rawEvents = result.data?.events || [];
+      const raw = rawEvents.find(e => String(e.idEvent) === String(fixtureId));
+      if (raw) {
+        match = sportsDb.transformEvent(raw);
+        fromCacheFlag = result.fromCache;
+      }
+    }
+  }
+
+  if (!match) {
     return res.status(404).json({ error: 'Mac bulunamadi' });
   }
-
-  const match = sportsDb.transformEvent(raw);
 
   res.json({
     fixtureId,
     minute: match.minute,
+    statusShort: match.statusShort,
     homeTeam: match.homeTeam,
     awayTeam: match.awayTeam,
     homeScore: match.homeScore,
@@ -76,7 +112,7 @@ router.get('/:fixtureId', async (req, res) => {
       dangerousAttacksAway: 0,
     },
     valueAlert: { triggered: false },
-    fromCache: { fixture: result.fromCache, stats: null },
+    fromCache: { fixture: fromCacheFlag, stats: null },
   });
 });
 
