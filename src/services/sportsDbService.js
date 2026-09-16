@@ -538,7 +538,8 @@ function transformScheduleEvent(e) {
   return {
     fixtureId: e.idEvent,
     date: e.dateEvent || (e.strTimestamp || '').slice(0, 10),
-    kickoff: e.strTimestamp || null,
+        kickoff: toUtcIso(e.strTimestamp),
+
     league: e.strLeague || '',
     round: e.intRound || null,
     homeTeam: e.strHomeTeam || '',
