@@ -11,8 +11,6 @@ const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const API_KEY = process.env.SPORTSDB_API_KEY || '123';
 
 // free-api-live-football-data (FotMob) semasindaki leagueId -> TheSportsDB idLeague.
-// Premier League ve Süper Lig (TFF uzerinden ayri islenir) haric digerleri
-// henuz gercek veriyle dogrulanmadi - test edildikce netlesecek.
 const LEAGUE_ID_MAP = {
   '47': 4328,   // Premier League
   '87': 4335,   // La Liga
@@ -21,6 +19,15 @@ const LEAGUE_ID_MAP = {
   '53': 4334,   // Ligue 1
   '57': 4337,   // Eredivisie
   '135': 4336,  // Yunanistan Super League
+  '59': 4358,   // Norvec Eliteserien
+  '67': 4347,   // Isvec Allsvenskan
+  '196': 4422,  // Polonya Ekstraklasa
+  '63': 4355,   // Rusya Premier Lig
+  '61': 4344,   // Portekiz Liga Portugal
+  '51': 4636,   // Finlandiya Veikkausliiga
+  '40': 4338,   // Belcika First Division A
+  '46': 4340,   // Danimarka Superligaen
+  '64': 4330,   // Iskocya Premiership
 };
 
 async function fetchT(url, timeoutMs) {
@@ -51,8 +58,8 @@ async function getMatchesByDate(dateStr) {
 }
 
 /**
- * TheSportsDB'nin ham event nesnesini, transformMatch'in (freeFootballApiService)
- * urettigi ile ayni sekle cevirir - route/frontend hicbir sey degistirmeden calisir.
+ * TheSportsDB'nin ham event nesnesini, eski freeFootballApiService ile
+ * ayni sekle cevirir - route/frontend hicbir sey degistirmeden calisir.
  */
 function transformEvent(e) {
   const finished = e.strStatus === 'FT' || e.strStatus === 'Match Finished';
@@ -69,6 +76,8 @@ function transformEvent(e) {
     isLive: isLive,
     homeTeam: e.strHomeTeam || '',
     awayTeam: e.strAwayTeam || '',
+    homeBadge: e.strHomeTeamBadge || null,
+    awayBadge: e.strAwayTeamBadge || null,
     homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : 0,
     awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : 0,
     halftimeHome: null,
@@ -87,9 +96,9 @@ async function getLeaguePastEvents(tsdbLeagueId) {
 
 /**
  * analysisEngine.js'in beklendigi {ok, data:{response:[...]}, teamId} formatinda
- * bir takimin son N macini doner. leagueFormService.js ile ayni sozlesme.
+ * bir takimin son N macini doner.
  * @param {string} teamName
- * @param {number|string} fotmobLeagueId - analysisEngine'den gelen "league" parametresi
+ * @param {number|string} fotmobLeagueId
  */
 async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
   const n = count || 15;
@@ -146,10 +155,21 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
   };
 }
 
+// LEAGUE_ID_MAP'in tersi: TheSportsDB idLeague -> FotMob leagueId.
+// Frontend TheSportsDB ID'sini biliyor (matches/results verisinden), ama
+// analysisEngine FotMob ID'si bekliyor - bu fonksiyon ikisi arasinda koprudur.
+function getFotmobIdForTsdbLeague(tsdbLeagueId) {
+  for (const [fotmobId, tsdbId] of Object.entries(LEAGUE_ID_MAP)) {
+    if (String(tsdbId) === String(tsdbLeagueId)) return fotmobId;
+  }
+  return null;
+}
+
 module.exports = {
   getMatchesByDate,
   transformEvent,
   getTeamFixturesForAnalysis,
   getLeaguePastEvents,
+  getFotmobIdForTsdbLeague,
   LEAGUE_ID_MAP,
 };
