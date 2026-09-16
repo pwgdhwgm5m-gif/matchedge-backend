@@ -268,6 +268,8 @@ async function getEventXg(bsdEventId) {
     estimated = !!(homeEstimated || awayEstimated);
   }
 
+  console.log('[BSD] xG bulundu, event:', bsdEventId, 'home:', homeXg, 'away:', awayXg, 'estimated:', estimated, '(rootEstimated ham deger:', rootEstimated, ')');
+
   return {
     available: true,
     home: parseFloat(homeXg),
