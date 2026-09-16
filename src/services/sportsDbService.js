@@ -151,6 +151,36 @@ function toUtcIso(raw) {
   return /Z$/i.test(raw) ? raw : raw + 'Z';
 }
 
+/**
+ * TESPIT EDILEN HATA: TheSportsDB'nin canli skor beslemesi bazen bir maci
+ * "canli" durumda (orn. 2H, 65') DONDURUP birakiyor - mac gercekte cok daha
+ * once bitmis (hatta baska bir kaynaktan - BSD'den - dogrulandi: ayni mac
+ * gercekte 92. dakika 7-2 iken bizim tarafta hala 65. dakika 4-2 gorunuyordu)
+ * ama TheSportsDB hicbir zaman "FT"ye cevirmiyor, biz de kaynaga guvendigimiz
+ * icin sonsuza kadar "CANLI 65'" gostermeye devam ediyorduk.
+ *
+ * Cozum: kickoff saatinden bu yana GERCEKTEN gecen sureyi kontrol ediyoruz.
+ * Normal sureli (uzatmasiz) bir maç makul biçimde ~120 dakikada (90 dk +
+ * araya giren duraklamalar) biter; bu yuzden 1H/2H/HT durumundaki bir mac
+ * kickoff'tan 130 dakikadan fazla sure gecmisse artik "donmus" kabul edilip
+ * bitmis sayiliyor. Uzatma/penalti olasi cup maclari icin daha genis bir
+ * MUTLAK sinir (170 dakika) var - hangi periyot kodu olursa olsun bu sureyi
+ * gecen hicbir mac gercekci degildir.
+ */
+const LIVE_STALE_NORMAL_MS = 130 * 60 * 1000;
+const LIVE_STALE_ABSOLUTE_MS = 170 * 60 * 1000;
+const NORMAL_TIME_LIVE_STATUSES = new Set(['1H', '2H', 'HT']);
+
+function isStaleLiveStatus(kickoffIso, statusUpper) {
+  if (!kickoffIso) return false;
+  const kickoffMs = new Date(kickoffIso).getTime();
+  if (isNaN(kickoffMs)) return false;
+  const elapsedMs = Date.now() - kickoffMs;
+  if (elapsedMs > LIVE_STALE_ABSOLUTE_MS) return true;
+  if (elapsedMs > LIVE_STALE_NORMAL_MS && NORMAL_TIME_LIVE_STATUSES.has(statusUpper)) return true;
+  return false;
+}
+
 function transformEvent(e) {
   const status = String(e.strStatus || '').trim();
   const statusUpper = status.toUpperCase();
@@ -167,14 +197,18 @@ function transformEvent(e) {
   const hasScore = e.intHomeScore !== null && e.intHomeScore !== undefined &&
                     e.intAwayScore !== null && e.intAwayScore !== undefined;
 
-  const isLive = !isPastDate && LIVE_STATUSES.has(statusUpper);
-  const finished = !isLive && (FINISHED_STATUSES.has(status) || isPastDate || hasScore);
+  const kickoffIso = toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00')));
+  const liveByStatus = !isPastDate && LIVE_STATUSES.has(statusUpper);
+  // Kickoff'tan bu yana gercekci olmayan bir sure gecmisse (bkz. yukarida
+  // isStaleLiveStatus) donmus canli veriye guvenmek yerine bitmis sayiyoruz.
+  const isLive = liveByStatus && !isStaleLiveStatus(kickoffIso, statusUpper);
+  const finished = !isLive && (FINISHED_STATUSES.has(status) || isPastDate || hasScore || liveByStatus);
 
   return {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
-    kickoff: toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00'))),
+    kickoff: kickoffIso,
     statusShort: finished ? 'FT' : (status || 'NS'),
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
     isLive: isLive,
@@ -222,8 +256,13 @@ function applyLiveOverlay(matches, liveEvents) {
 
     const rawStatus = String(raw.strStatus || '').trim();
     const statusUpper = rawStatus.toUpperCase();
-    const isLiveNow = LIVE_STATUSES.has(statusUpper);
-    const isFinishedNow = FINISHED_STATUSES.has(rawStatus);
+    const liveByStatus = LIVE_STATUSES.has(statusUpper);
+    // Ayni "donmus canli veri" korumasi burada da gerekli - livescore
+    // kaynagi bazen bir maci gercekte bittikten sonra da uzun sure "2H"
+    // gibi bir durumda birakabiliyor (bkz. isStaleLiveStatus yorumu).
+    const stale = liveByStatus && isStaleLiveStatus(m.kickoff, statusUpper);
+    const isLiveNow = liveByStatus && !stale;
+    const isFinishedNow = FINISHED_STATUSES.has(rawStatus) || stale;
 
     return Object.assign({}, m, {
       homeScore: raw.intHomeScore !== null && raw.intHomeScore !== undefined ? parseInt(raw.intHomeScore, 10) : m.homeScore,
@@ -273,14 +312,16 @@ async function getLiveScores() {
 /** V2 canli skor event'ini frontend'in bekledigi sekle cevirir */
 function transformLiveEvent(e) {
   const status = String(e.strStatus || '').trim().toUpperCase();
+  const kickoffIso = e.dateEvent && e.strEventTime ? toUtcIso(e.dateEvent + 'T' + e.strEventTime) : null;
+  const stale = isStaleLiveStatus(kickoffIso, status);
   return {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
-    kickoff: e.dateEvent && e.strEventTime ? toUtcIso(e.dateEvent + 'T' + e.strEventTime) : null,
-    statusShort: status || 'LIVE',
+    kickoff: kickoffIso,
+    statusShort: stale ? 'FT' : (status || 'LIVE'),
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
-    isLive: true,
+    isLive: !stale,
     homeTeam: e.strHomeTeam || '',
     awayTeam: e.strAwayTeam || '',
     homeBadge: e.strHomeTeamBadge || null,
