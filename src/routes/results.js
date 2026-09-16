@@ -16,20 +16,35 @@ const sportsDb = require('../services/sportsDbService');
 router.get('/', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
 
-  const result = await cache.getOrFetch(
-    `results:${date}`,
-    config.cache.ttlLive,
-    () => sportsDb.getMatchesByDate(date)
-  );
+  // NOT: gunun fikstur listesi (eventsday.php) ile gercek zamanli livescore
+  // AYNI ANDA cekiliyor - liste eventsday.php'den geliyor ama canli maclarin
+  // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
+  // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
+  // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
+  const [result, liveResult] = await Promise.all([
+    cache.getOrFetch(
+      `results:${date}`,
+      config.cache.ttlLive,
+      () => sportsDb.getMatchesByDate(date)
+    ),
+    cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
+  ]);
 
   if (!result.ok) {
     return res.status(502).json({ error: 'Sonuc verisi alinamadi' });
   }
 
   const rawEvents = result.data?.events || [];
-  const simplified = rawEvents
+  let simplified = rawEvents
     .map(sportsDb.transformEvent)
     .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
+
+  if (liveResult.ok) {
+    const rawLive = (liveResult.data?.livescore || []).filter(
+      e => String(e.strSport || '').toLowerCase() === 'soccer'
+    );
+    simplified = sportsDb.applyLiveOverlay(simplified, rawLive);
+  }
 
   res.json({ date, matches: simplified, fromCache: result.fromCache });
 });
