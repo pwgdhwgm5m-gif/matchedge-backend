@@ -23,7 +23,8 @@ router.get('/', async (req, res) => {
     const rawLive = liveResult.data?.livescore || [];
     const simplified = rawLive
       .filter(e => String(e.strSport || '').toLowerCase() === 'soccer')
-      .map(sportsDb.transformLiveEvent);
+      .map(sportsDb.transformLiveEvent)
+      .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
     return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
   }
 
@@ -38,7 +39,9 @@ router.get('/', async (req, res) => {
   }
 
   const rawEvents = result.data?.events || [];
-  const simplified = rawEvents.map(sportsDb.transformEvent).filter(m => m.isLive);
+  const simplified = rawEvents
+    .map(sportsDb.transformEvent)
+    .filter(m => m.isLive && sportsDb.isWhitelistedLeague(m.leagueId));
 
   res.json({ matches: simplified, fromCache: result.fromCache, source: 'eventsday-fallback' });
 });
