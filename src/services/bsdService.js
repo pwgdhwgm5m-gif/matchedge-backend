@@ -140,20 +140,50 @@ function isNameMatch(bsdName, ourName) {
   return a === b || a.indexOf(b) !== -1 || b.indexOf(a) !== -1;
 }
 
+function isWithinKickoffTolerance(e, kickoffMs) {
+  if (!kickoffMs) return true;
+  const evKickoff = getKickoff(e);
+  if (!evKickoff) return true;
+  const diffMs = Math.abs(new Date(evKickoff).getTime() - kickoffMs);
+  return diffMs < 3 * 60 * 60 * 1000; // 3 saat tolerans - farkli gunlerdeki rovans maclarini karistirmamak icin
+}
+
+/**
+ * DUZELTME: Deplasman takiminin adi kaynaklar arasinda cok farkli olabiliyor
+ * (gercek ornek: TheSportsDB "Racing de Santander" derken BSD ayni kulubu
+ * "Real Racing Club" olarak adlandiriyor - ortak hicbir kelime yok, substring
+ * eslesmesi hicbir zaman tutmaz). Bu yuzden asama asama gevseyen bir arama
+ * yapiliyor: once iki takim adi da eslesirse (en guvenilir) onu kullan;
+ * tutmazsa SADECE ev sahibi adina ve kickoff yakinligina guven - ayni gun
+ * ayni ev sahibinin iki farkli resmi macinin olmasi son derece nadir. Birden
+ * fazla aday cikarsa deplasman adiyla daraltmaya calisilir, o da tutmazsa
+ * ilk aday (en yakin kickoff'lu olan zaten one gelir) kullanilir. En son
+ * çare olarak sadece deplasman adi eslesmesi de denenir (ev/deplasman
+ * kaynaklar arasinda yer degistirmis olabilir ihtimaline karsi).
+ */
 function findMatchingEvent(events, homeTeam, awayTeam, kickoffIso) {
   const kickoffMs = kickoffIso ? new Date(kickoffIso).getTime() : null;
 
-  return events.find(function (e) {
-    const namesMatch = isNameMatch(getHomeTeamName(e), homeTeam) && isNameMatch(getAwayTeamName(e), awayTeam);
-    if (!namesMatch) return false;
-    if (!kickoffMs) return true;
+  const bothMatch = events.filter(function (e) {
+    return isNameMatch(getHomeTeamName(e), homeTeam) && isNameMatch(getAwayTeamName(e), awayTeam) && isWithinKickoffTolerance(e, kickoffMs);
+  });
+  if (bothMatch.length) return bothMatch[0];
 
-    const evKickoff = getKickoff(e);
-    if (!evKickoff) return true;
+  const homeOnlyMatch = events.filter(function (e) {
+    return isNameMatch(getHomeTeamName(e), homeTeam) && isWithinKickoffTolerance(e, kickoffMs);
+  });
+  if (homeOnlyMatch.length === 1) return homeOnlyMatch[0];
+  if (homeOnlyMatch.length > 1) {
+    const narrowed = homeOnlyMatch.filter(function (e) { return isNameMatch(getAwayTeamName(e), awayTeam); });
+    return narrowed[0] || homeOnlyMatch[0];
+  }
 
-    const diffMs = Math.abs(new Date(evKickoff).getTime() - kickoffMs);
-    return diffMs < 3 * 60 * 60 * 1000; // 3 saat tolerans - farkli gunlerdeki rovans maclarini karistirmamak icin
-  }) || null;
+  const awayOnlyMatch = events.filter(function (e) {
+    return isNameMatch(getAwayTeamName(e), awayTeam) && isWithinKickoffTolerance(e, kickoffMs);
+  });
+  if (awayOnlyMatch.length === 1) return awayOnlyMatch[0];
+
+  return null;
 }
 
 /**
