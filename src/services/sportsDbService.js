@@ -194,6 +194,47 @@ function transformEvent(e) {
 }
 
 /**
+ * eventsday.php (gunun tum fikstur listesi - /api/matches ve /api/results
+ * BUNU kullanir) canli bir macin skorunu GUNCEL VERMIYOR - sadece periyodik
+ * yenilenen bir gunluk liste, dakika/skor degisikligini gec yansitiyor (bazen
+ * hic yansitmiyor). Gercek zamanli skor SADECE V2 livescore endpoint'inden
+ * geliyor (getLiveScores - /api/live rotasi zaten bunu kullaniyor).
+ *
+ * Bu yuzden: eventsday.php'den gelen mac listesi olusturulduktan sonra, ayni
+ * anda cekilen livescore listesiyle "bindirme" yapiliyor - fixtureId eslesen
+ * her mac icin skor/dakika/durum, canli kaynaktan gelen GUNCEL degerlerle
+ * degistiriliyor. Boylece ana sayfa ve sonuclar ekrani da, canli simulator
+ * ekraniyla AYNI kaynaktan (livescore) guncel skoru gosteriyor - once sadece
+ * mac detayina girince guncel skor gorunuyordu, listede eski skor kalıyordu.
+ *
+ * @param {Array} matches - transformEvent ciktisi mac listesi
+ * @param {Array} liveEvents - getLiveScores() ham "livescore" dizisi (soccer filtreli)
+ */
+function applyLiveOverlay(matches, liveEvents) {
+  if (!liveEvents || !liveEvents.length) return matches;
+  const liveMap = new Map();
+  liveEvents.forEach(function (e) { liveMap.set(String(e.idEvent), e); });
+
+  return matches.map(function (m) {
+    const raw = liveMap.get(String(m.fixtureId));
+    if (!raw) return m;
+
+    const rawStatus = String(raw.strStatus || '').trim();
+    const statusUpper = rawStatus.toUpperCase();
+    const isLiveNow = LIVE_STATUSES.has(statusUpper);
+    const isFinishedNow = FINISHED_STATUSES.has(rawStatus);
+
+    return Object.assign({}, m, {
+      homeScore: raw.intHomeScore !== null && raw.intHomeScore !== undefined ? parseInt(raw.intHomeScore, 10) : m.homeScore,
+      awayScore: raw.intAwayScore !== null && raw.intAwayScore !== undefined ? parseInt(raw.intAwayScore, 10) : m.awayScore,
+      minute: raw.strProgress ? parseInt(raw.strProgress, 10) : m.minute,
+      statusShort: isFinishedNow ? 'FT' : (statusUpper || m.statusShort),
+      isLive: isLiveNow,
+    });
+  });
+}
+
+/**
  * V2 API icin header-tabanli istek (X-API-KEY). V1'den farkli olarak key
  * URL'de degil header'da gonderiliyor.
  */
@@ -650,6 +691,7 @@ function getFotmobIdForTsdbLeague(tsdbLeagueId) {
 module.exports = {
   getMatchesByDate,
   transformEvent,
+  applyLiveOverlay,
   toUtcIso,
   getTeamFixturesForAnalysis,
   getLeaguePastEvents,
