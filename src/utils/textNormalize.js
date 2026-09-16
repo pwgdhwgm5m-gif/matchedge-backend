@@ -20,4 +20,11 @@ function normalizeTeamName(str) {
     .trim();
 }
 
-module.exports = { normalizeTeamName };
+/** Iki takim adinin normalize edilince ayni olup olmadigini kontrol eder */
+function teamNamesMatch(nameA, nameB) {
+  if (!nameA || !nameB) return false;
+  return normalizeTeamName(nameA) === normalizeTeamName(nameB);
+}
+
+module.exports = { normalizeTeamName, teamNamesMatch };
+
