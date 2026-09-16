@@ -41,7 +41,13 @@ app.use('/api/live', liveRoute);
 app.use('/api/odds-history', oddsHistoryRoute);
 app.use('/api/results', resultsRoute);
 app.get('/run-backfill', async (req, res) => {
+  const providedSecret = req.headers['x-backfill-secret'] || req.query.secret;
+  if (!config.backfillSecret || providedSecret !== config.backfillSecret) {
+    return res.status(401).json({ error: 'Yetkisiz - gecerli backfill secret gerekli.' });
+  }
+
   res.json({ status: 'started', message: 'Backfill arka planda calisiyor, loglardan takip et' });
+
   try {
     const { runBackfill } = require('./scripts/backfillMatches');
     await runBackfill();
