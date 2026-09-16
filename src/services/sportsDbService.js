@@ -574,6 +574,53 @@ async function getLeagueSeasonScheduleFormatted(tsdbLeagueId, season) {
   return { ok: true, available: raw.length > 0, events: raw.map(transformScheduleEvent) };
 }
 
+/** V1 lookuptable.php - lig puan durumu (siralama, aci farki, "description" alani dahil) */
+async function getLeagueStandings(tsdbLeagueId, season) {
+  const url = BASE_URL + '/' + API_KEY + '/lookuptable.php?l=' + tsdbLeagueId + '&s=' + encodeURIComponent(season);
+  return fetchT(url, 10000);
+}
+
+function transformStandingRow(row) {
+  return {
+    teamId: row.idTeam,
+    teamName: row.strTeam,
+    rank: row.intRank ? parseInt(row.intRank, 10) : null,
+    points: row.intPoints ? parseInt(row.intPoints, 10) : null,
+    played: row.intPlayed ? parseInt(row.intPlayed, 10) : null,
+    goalDiff: row.intGoalDifference ? parseInt(row.intGoalDifference, 10) : null,
+    // API-Football'un "description" alaninin (orn. "Promotion - Champions
+    // League") esdegeri - motivationService bunu ayni sekilde okuyor.
+    description: row.strDescription || null,
+  };
+}
+
+/**
+ * Bir ligin puan durumunu doner (motivasyon hesabi icin kullanilir).
+ * API-Football'un standings'i askida/kota dolu oldugu icin hep bos
+ * donuyordu - bu, isMappedLeague olan ligler icin onun yerini alir.
+ * @param {number} tsdbLeagueId
+ * @param {string} season - orn. '2026-2027'
+ */
+async function getLeagueStandingsFormatted(tsdbLeagueId, season) {
+  const result = await getLeagueStandings(tsdbLeagueId, season);
+  if (!result.ok) return { ok: true, available: false, table: [] };
+  const raw = (result.data && result.data.table) || [];
+  return { ok: true, available: raw.length > 0, table: raw.map(transformStandingRow) };
+}
+
+/**
+ * TheSportsDB sezon formatini ('2026-2027' gibi) bugunun tarihine gore
+ * hesaplar. Avrupa liglerinin cogu Temmuz-Agustos'ta basladigi icin
+ * Temmuz oncesi bir onceki sezon, Temmuz ve sonrasi mevcut sezon kabul
+ * edilir.
+ */
+function getCurrentSeasonString(referenceDate) {
+  const d = referenceDate || new Date();
+  const year = d.getUTCFullYear();
+  const month = d.getUTCMonth() + 1; // 1-12
+  return month >= 7 ? `${year}-${year + 1}` : `${year - 1}-${year}`;
+}
+
 // LEAGUE_ID_MAP'in tersi: TheSportsDB idLeague -> FotMob leagueId.
 // Frontend TheSportsDB ID'sini biliyor (matches/results verisinden), ama
 // analysisEngine FotMob ID'si bekliyor - bu fonksiyon ikisi arasinda koprudur.
@@ -600,6 +647,8 @@ module.exports = {
   getEventHighlightsFormatted,
   getTeamSeasonScheduleFormatted,
   getLeagueSeasonScheduleFormatted,
+  getLeagueStandingsFormatted,
+  getCurrentSeasonString,
   isWhitelistedLeague,
   WHITELISTED_LEAGUE_IDS,
   LEAGUE_ID_MAP,
