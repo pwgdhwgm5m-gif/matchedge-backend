@@ -19,7 +19,9 @@ router.get('/', async (req, res) => {
   }
 
   const rawEvents = result.data?.events || [];
-  const simplified = rawEvents.map(sportsDb.transformEvent);
+  const simplified = rawEvents
+    .map(sportsDb.transformEvent)
+    .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
 
   res.json({ date, matches: simplified, fromCache: result.fromCache });
 });
