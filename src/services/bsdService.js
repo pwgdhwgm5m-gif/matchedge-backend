@@ -86,12 +86,24 @@ function extractList(data) {
   return data.results || data.events || data.data || [];
 }
 
+// DUZELTME: BSD'nin gercek /events/live/ ve /events/ endpoint'lerinde "sport"
+// diye bir parametre yok (BSD zaten sadece futbol API'si - Render loglarindaki
+// 400 govdesi bunu dogruladi: accepted_parameters = league_id/limit/offset/
+// season_id/team_id (live) ve date_from/date_to/league_id/limit/offset/round/
+// season_id/stage/status/team_id/team_name (gunluk liste). Tarih filtresi
+// "date" degil "date_from"/"date_to" olarak isteniyor. "team_name" parametresi
+// sayesinde gunun tum listesini cekip elle filtrelemek yerine dogrudan takim
+// adina gore daraltilmis sonuc istenebiliyor - bu hem daha guvenilir (sayfalama
+// yuzunden macimizin listede kaybolmasi ihtimalini azaltiyor) hem daha az veri
+// cekiyor.
 async function getLiveFootballEvents() {
-  return fetchBsd('/events/live/?sport=football', 8000);
+  return fetchBsd('/events/live/', 8000);
 }
 
-async function getFootballEventsForDate(dateStr) {
-  return fetchBsd('/events/?sport=football&date=' + dateStr, 8000);
+async function getFootballEventsForDate(dateStr, teamName) {
+  let path = '/events/?date_from=' + dateStr + '&date_to=' + dateStr;
+  if (teamName) path += '&team_name=' + encodeURIComponent(teamName);
+  return fetchBsd(path, 8000);
 }
 
 // BSD'nin ham event nesnesinde takim adi/kickoff alani hangi isimle
@@ -173,7 +185,7 @@ async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
   }
 
   if (!eventId) {
-    const dayResult = await getFootballEventsForDate(dateKey);
+    const dayResult = await getFootballEventsForDate(dateKey, homeTeam);
     if (dayResult.ok) {
       const dayList = extractList(dayResult.data);
       console.log('[BSD] gunun listesi alindi, mac sayisi:', dayList.length, 'aranan:', homeTeam, 'vs', awayTeam);
