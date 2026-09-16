@@ -141,9 +141,12 @@ module.exports = {
   // --- Kullanici hesabi / veritabani ---
   mongoUri: process.env.MONGODB_URI || '',
   jwtSecret: process.env.JWT_SECRET || '',
-  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
+
+  backfillSecret: process.env.BACKFILL_SECRET || '',
 
   // --- E-posta (dogrulama + sifre sifirlama) ---
+
   resendApiKey: process.env.RESEND_API_KEY || '',
   emailFrom: process.env.EMAIL_FROM || 'MatchEdge <onboarding@resend.dev>',
   // Dogrulama/sifirlama e-postalarindaki baglantilarin isaret edecegi
