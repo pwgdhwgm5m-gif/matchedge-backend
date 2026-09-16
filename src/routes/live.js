@@ -4,6 +4,7 @@ const cache = require('../utils/cache');
 const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
 const liveXg = require('../services/liveXgService');
+const bsdService = require('../services/bsdService');
 
 /**
  * GET /api/live
@@ -133,11 +134,28 @@ router.get('/:fixtureId', async (req, res) => {
     dangerousAttacks: 0,
   };
 
-  // TheSportsDB bazi (Pro/Premium) liglerde gercek xG sagliyor - varsa onu
-  // kullaniyoruz; saglamiyorsa sut/korner sayisindan kaba bir "canli xG"
-  // tahmini uretiyoruz (liveXgService.estimateLiveXg).
-  const homeLiveXg = (stats.xg && stats.xg.home != null) ? stats.xg.home : liveXg.estimateLiveXg(homeRawStats);
-  const awayLiveXg = (stats.xg && stats.xg.away != null) ? stats.xg.away : liveXg.estimateLiveXg(awayRawStats);
+  // Gercek xG oncelik sirasi: 1) TheSportsDB (Pro/Premium bazi buyuk
+  // liglerde saglıyor) 2) BSD - Bzzoiro Sports Data (farkli bir lig/mac
+  // kapsamı olabilir, kendi "estimated" bayragi false ise gercek sayilir)
+  // 3) hicbiri yoksa sut/korner sayisindan kaba bir "canli xG" tahmini
+  // (liveXgService.estimateLiveXg). BSD'ye sadece TheSportsDB'de gercek xG
+  // YOKSA basvuruluyor - gereksiz istek atilmiyor.
+  let homeLiveXg;
+  let awayLiveXg;
+
+  if (stats.xg && stats.xg.home != null && stats.xg.away != null) {
+    homeLiveXg = stats.xg.home;
+    awayLiveXg = stats.xg.away;
+  } else {
+    const bsdXg = await bsdService.getRealXgForMatch(match.homeTeam, match.awayTeam, match.kickoff, isFinished);
+    if (bsdXg.available && !bsdXg.estimated) {
+      homeLiveXg = bsdXg.home;
+      awayLiveXg = bsdXg.away;
+    } else {
+      homeLiveXg = liveXg.estimateLiveXg(homeRawStats);
+      awayLiveXg = liveXg.estimateLiveXg(awayRawStats);
+    }
+  }
 
   // Momentum: genel baski (isabetli sut + korner agirlikli).
   // Gol yakinligi: hangi takim gole daha yakin (isabetli sut + korner + canli xG,
