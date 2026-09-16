@@ -64,7 +64,9 @@ async function fetchBsd(path, timeoutMs) {
       headers: { 'Authorization': 'Token ' + API_KEY },
     });
     if (!res.ok) {
-      console.log('[BSD] http hata, path:', path, 'status:', res.status);
+      let bodyText = '';
+      try { bodyText = await res.text(); } catch (readErr) { bodyText = '(govde okunamadi: ' + readErr.message + ')'; }
+      console.log('[BSD] http hata, path:', path, 'status:', res.status, 'govde:', bodyText.slice(0, 500));
       return { ok: false, error: 'http_' + res.status };
     }
     const json = await res.json();
