@@ -61,6 +61,7 @@ async function precomputeTodaysMatches() {
         homeTeamName: e.strHomeTeam,
         awayTeamName: e.strAwayTeam,
         league: fotmobLeague,
+        leagueName: e.strLeague,
         season: new Date().getFullYear(),
         kickoff: e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00')),
       });
@@ -94,6 +95,7 @@ async function precomputeTodaysMatches() {
         ...result,
         homeTeam: fixture.homeTeamName,
         awayTeam: fixture.awayTeamName,
+        league: fixture.leagueName,
         kickoff: fixture.kickoff,
         computedAt: new Date().toISOString(),
       };
