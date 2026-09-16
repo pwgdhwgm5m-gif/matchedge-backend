@@ -172,11 +172,16 @@ function parseFixtures(html) {
       awayScore = parseInt(scoreMatch[2], 10);
     }
 
-    let matchDate = parseTurkishDate(row.text());
+        let matchDate = parseTurkishDate(row.text());
     if (!matchDate) {
-      const prevRow = row.prev('tr');
-      if (prevRow.length) matchDate = parseTurkishDate(prevRow.text());
+      let sibling = row.prev('tr');
+      while (sibling && sibling.length) {
+        matchDate = parseTurkishDate(sibling.text());
+        if (matchDate) break;
+        sibling = sibling.prev('tr');
+      }
     }
+
     if (!matchDate) {
       const container = row.closest('table').prev();
       if (container.length) matchDate = parseTurkishDate(container.text());
