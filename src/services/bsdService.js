@@ -251,7 +251,12 @@ async function getEventXg(bsdEventId) {
 
   const homeXg = pickField(statsResult.data, ['stats.home.xg.actual']);
   const awayXg = pickField(statsResult.data, ['stats.away.xg.actual']);
-  if (homeXg === null || awayXg === null) return { available: false };
+  if (homeXg === null || awayXg === null) {
+    // GECICI TESHIS: beklenen stats.home/away.xg.actual bulunamadi - gercek
+    // yaniti gorup alan adini duzeltebilmek icin tam govdeyi logluyoruz.
+    console.log('[BSD] xG alani bulunamadi, event:', bsdEventId, 'yanit:', JSON.stringify(statsResult.data).slice(0, 1500));
+    return { available: false };
+  }
 
   const rootEstimated = pickField(statsResult.data, ['xg_estimated']);
   let estimated;
