@@ -7,6 +7,7 @@
 
 const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
+const config = require('../config/config');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const V2_BASE_URL = 'https://www.thesportsdb.com/api/v2/json';
@@ -492,6 +493,76 @@ async function getEventTimelineFormatted(eventId) {
   return { ok: true, available: events.length > 0, events: events };
 }
 
+// Ilk yari skoru icin eventsday.php/eventspastleague.php HICBIR ZAMAN veri
+// vermiyor (yukarida transformEvent'te aciklandigi gibi) - tek kaynak, mac
+// zaman cizelgesindeki (event_timeline) gollerin dakikasi. Bu yuzden:
+// dakikasi 45'i gecmeyen gollari "ilk yari" sayip topluyoruz. Zaman
+// cizelgesi kucuk liglerde cogu zaman BOS/eksik geliyor - bu durumda ilk
+// yariyi tahmin etmek yerine null donduruyoruz (yanlis "0-0" gostermek,
+// hic gostermemekten daha kotu). Ayrica guvenlik icin: zaman cizelgesinden
+// sayilan TOPLAM gol sayisi, mac sonu skoruyla tutmuyorsa (cizelge eksikse
+// bu olur) yine null donuyoruz.
+const HALFTIME_CACHE_TTL = config.cache.ttlPrecomputed; // 6 saat - bitmis bir macin ilk yarisi degismez, sadece kota korumak icin makul bir sure
+const HALFTIME_UNAVAILABLE_TTL = 60 * 60; // 1 saat - veri o an yoksa da her istekte tekrar denemesin, ama kalici da kilitlenmesin
+
+async function computeHalftimeScore(eventId, finalHome, finalAway) {
+  const cacheKey = `halftime:${eventId}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const timeline = await getEventTimelineFormatted(eventId);
+  let result = { home: null, away: null };
+
+  if (timeline.available) {
+    const goals = timeline.events.filter(function (ev) { return ev.type === 'goal'; });
+    let totalHome = 0, totalAway = 0, htHome = 0, htAway = 0;
+    goals.forEach(function (g) {
+      if (g.isHome) totalHome++; else totalAway++;
+      if (g.minute !== null && g.minute <= 45) {
+        if (g.isHome) htHome++; else htAway++;
+      }
+    });
+
+    const scoreMatches = finalHome == null || finalAway == null ||
+      (totalHome === finalHome && totalAway === finalAway);
+
+    if (scoreMatches) {
+      result = { home: htHome, away: htAway };
+    }
+  }
+
+  cache.set(cacheKey, result, result.home !== null ? HALFTIME_CACHE_TTL : HALFTIME_UNAVAILABLE_TTL);
+  return result;
+}
+
+/**
+ * Bir mac listesindeki (transformEvent/applyLiveOverlay ciktisi), ilk yari
+ * skoru henuz bilinmeyen ve suresi dolmus/en az ilk yariyi gecmis maclar
+ * icin ilk yari skorunu doldurur. Ayni anda cok fazla premium API istegi
+ * atmamak icin (kota: dakikada sinirli istek) kucuk gruplar halinde,
+ * sirayla isleniyor - cogu zaten cache'den donecegi icin bu yavaslik
+ * sadece ilk kez gorulen maclarda bir kereye mahsus yasaniyor.
+ * @param {Array} matches
+ */
+async function attachHalftimeScores(matches) {
+  const CONCURRENCY = 4;
+  const candidates = matches.filter(function (m) {
+    const pastHalftime = m.statusShort === 'FT' || (m.isLive && m.minute != null && m.minute > 45);
+    return pastHalftime && (m.halftimeHome === null || m.halftimeHome === undefined) && m.fixtureId;
+  });
+
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = candidates.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async function (m) {
+      const ht = await computeHalftimeScore(m.fixtureId, m.homeScore, m.awayScore);
+      m.halftimeHome = ht.home;
+      m.halftimeAway = ht.away;
+    }));
+  }
+
+  return matches;
+}
+
 // TheSportsDB'nin strStat metnini bizim sabit anahtarlarimiza esler.
 const STAT_LABEL_MAP = {
   'shots on goal': 'shotsOnTarget',
@@ -699,6 +770,7 @@ module.exports = {
   getLiveScores,
   transformLiveEvent,
   getEventTimelineFormatted,
+  attachHalftimeScores,
   getEventStatsFormatted,
   getEventLineupFormatted,
   getEventTVFormatted,
