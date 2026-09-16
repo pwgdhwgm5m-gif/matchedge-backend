@@ -294,6 +294,217 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
   };
 }
 
+// ============================================================================
+// PRO/PREMIUM V2 EK VERILER: mac zaman cizelgesi, istatistikler, kadrolar,
+// TV yayin bilgisi, one cikanlar (highlights), tam sezon fikstürleri.
+// Onemli: bu veriler TheSportsDB'nin API-Football ile eslestirdigi buyuk
+// liglerde mevcut - kucuk/az bilinen liglerdeki maclarda genelde BOS doner.
+// Bu bir hata degil, TheSportsDB'nin kendi veri kapsamiyla ilgili bir sinir -
+// asagidaki fonksiyonlarin hepsi bu durumda { available: false, ... } donup
+// hicbir seyi kirmadan sessizce devam eder.
+// ============================================================================
+
+async function getEventTimeline(eventId) {
+  return fetchV2('/lookup/event_timeline/' + eventId, 8000);
+}
+
+async function getEventStats(eventId) {
+  return fetchV2('/lookup/event_stats/' + eventId, 8000);
+}
+
+async function getEventLineup(eventId) {
+  return fetchV2('/lookup/event_lineup/' + eventId, 8000);
+}
+
+async function getEventTV(eventId) {
+  return fetchV2('/lookup/event_tv/' + eventId, 8000);
+}
+
+async function getEventHighlights(eventId) {
+  return fetchV2('/lookup/event_highlights/' + eventId, 8000);
+}
+
+async function getTeamSeasonSchedule(teamId) {
+  return fetchV2('/schedule/full/team/' + teamId, 10000);
+}
+
+async function getLeagueSeasonSchedule(tsdbLeagueId, season) {
+  return fetchV2('/schedule/league/' + tsdbLeagueId + '/' + encodeURIComponent(season), 10000);
+}
+
+/** strTimeline degerini (Goal/subst/Yellow Card/Red Card vb.) sabit bir tipe cevirir */
+function normalizeTimelineType(rawType) {
+  const raw = String(rawType || '').toLowerCase();
+  if (raw.indexOf('goal') !== -1) return 'goal';
+  if (raw.indexOf('subst') !== -1 || raw.indexOf('sub') !== -1) return 'substitution';
+  if (raw.indexOf('yellow') !== -1) return 'yellow_card';
+  if (raw.indexOf('red') !== -1) return 'red_card';
+  return 'other';
+}
+
+function transformTimelineItem(item) {
+  return {
+    minute: item.intTime !== null && item.intTime !== undefined ? parseInt(item.intTime, 10) : null,
+    type: normalizeTimelineType(item.strTimeline),
+    detail: item.strTimelineDetail || '',
+    isHome: item.strHome === 'Yes',
+    team: item.strTeam || '',
+    player: item.strPlayer || '',
+    assist: item.strAssist || null,
+  };
+}
+
+/**
+ * Bir macin gol/kart/oyuncu degisikligi zaman cizelgesini doner.
+ * @param {string|number} eventId
+ */
+async function getEventTimelineFormatted(eventId) {
+  const result = await getEventTimeline(eventId);
+  if (!result.ok) return { ok: true, available: false, events: [] };
+  const raw = (result.data && result.data.lookup) || [];
+  const events = raw.map(transformTimelineItem).sort(function (a, b) { return (a.minute || 0) - (b.minute || 0); });
+  return { ok: true, available: events.length > 0, events: events };
+}
+
+// TheSportsDB'nin strStat metnini bizim sabit anahtarlarimiza esler.
+const STAT_LABEL_MAP = {
+  'shots on goal': 'shotsOnTarget',
+  'total shots': 'totalShots',
+  'corner kicks': 'corners',
+  'ball possession': 'possession',
+  fouls: 'fouls',
+  offsides: 'offsides',
+  'yellow cards': 'yellowCards',
+  'red cards': 'redCards',
+  'goalkeeper saves': 'saves',
+  expected_goals: 'xg',
+};
+
+function transformStats(rawList) {
+  const out = {};
+  rawList.forEach(function (item) {
+    const label = String(item.strStat || '').trim().toLowerCase();
+    const key = STAT_LABEL_MAP[label];
+    if (!key) return;
+    const home = item.intHome !== null && item.intHome !== undefined ? parseFloat(item.intHome) : null;
+    const away = item.intAway !== null && item.intAway !== undefined ? parseFloat(item.intAway) : null;
+    out[key] = { home: home, away: away };
+  });
+  return out;
+}
+
+/**
+ * Bir macin gercek istatistiklerini doner (sut, korner, top hakimiyeti,
+ * faul, xG vb.) - onceden bunlar hep 0/50-50 sabitti, artik gercek.
+ */
+async function getEventStatsFormatted(eventId) {
+  const result = await getEventStats(eventId);
+  if (!result.ok) return { ok: true, available: false, stats: {} };
+  const raw = (result.data && result.data.lookup) || [];
+  if (!raw.length) return { ok: true, available: false, stats: {} };
+  return { ok: true, available: true, stats: transformStats(raw) };
+}
+
+function transformLineupItem(item) {
+  return {
+    player: item.strPlayer || '',
+    position: item.strPosition || '',
+    positionShort: item.strPositionShort || '',
+    squadNumber: item.intSquadNumber || null,
+    isHome: item.strHome === 'Yes',
+    isSubstitute: item.strSubstitute === 'Yes',
+    photo: item.strCutout || null,
+  };
+}
+
+/** Bir macin ilk 11 + yedek kadrolarini (ev/deplasman ayri) doner */
+async function getEventLineupFormatted(eventId) {
+  const result = await getEventLineup(eventId);
+  if (!result.ok) return { ok: true, available: false, home: [], away: [], homeSubs: [], awaySubs: [] };
+  const raw = (result.data && result.data.lookup) || [];
+  if (!raw.length) return { ok: true, available: false, home: [], away: [], homeSubs: [], awaySubs: [] };
+
+  const mapped = raw.map(transformLineupItem);
+  return {
+    ok: true,
+    available: true,
+    home: mapped.filter(function (p) { return p.isHome && !p.isSubstitute; }),
+    away: mapped.filter(function (p) { return !p.isHome && !p.isSubstitute; }),
+    homeSubs: mapped.filter(function (p) { return p.isHome && p.isSubstitute; }),
+    awaySubs: mapped.filter(function (p) { return !p.isHome && p.isSubstitute; }),
+  };
+}
+
+function transformTVItem(item) {
+  return {
+    channel: item.strChannel || '',
+    country: item.strCountry || '',
+    logo: item.strLogo || null,
+    time: item.strTime || null,
+    date: item.dateEvent || null,
+  };
+}
+
+/** Bir macin hangi TV kanallarinda yayinlandigini/yayinlanacagini doner */
+async function getEventTVFormatted(eventId) {
+  const result = await getEventTV(eventId);
+  if (!result.ok) return { ok: true, available: false, broadcasts: [] };
+  const raw = (result.data && result.data.lookup) || [];
+  return { ok: true, available: raw.length > 0, broadcasts: raw.map(transformTVItem) };
+}
+
+/** Bir macin YouTube one cikanlar (highlights) videosunu doner */
+async function getEventHighlightsFormatted(eventId) {
+  const result = await getEventHighlights(eventId);
+  if (!result.ok) return { ok: true, available: false, videoUrl: null };
+  const raw = (result.data && result.data.lookup) || [];
+  const first = raw[0];
+  const videoUrl = first && first.strVideo ? first.strVideo : null;
+  return { ok: true, available: !!videoUrl, videoUrl: videoUrl };
+}
+
+function transformScheduleEvent(e) {
+  const homeScore = e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : null;
+  const awayScore = e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : null;
+  return {
+    fixtureId: e.idEvent,
+    date: e.dateEvent || (e.strTimestamp || '').slice(0, 10),
+    kickoff: e.strTimestamp || null,
+    league: e.strLeague || '',
+    round: e.intRound || null,
+    homeTeam: e.strHomeTeam || '',
+    awayTeam: e.strAwayTeam || '',
+    homeScore: homeScore,
+    awayScore: awayScore,
+    finished: homeScore !== null && awayScore !== null,
+    video: e.strVideo || null,
+  };
+}
+
+/**
+ * Bir takimin TUM sezon fikstürünü doner (gecmis + gelecek maclar, max 250
+ * kayit). eventslast.php'nin aksine (sadece son 10 mac) form disi analizler
+ * icin (orn. gelecek fikstür yogunlugu, motivasyon) kullanislidir.
+ */
+async function getTeamSeasonScheduleFormatted(teamId) {
+  const result = await getTeamSeasonSchedule(teamId);
+  if (!result.ok) return { ok: true, available: false, events: [] };
+  const raw = Array.isArray(result.data) ? result.data : ((result.data && result.data.schedule) || []);
+  return { ok: true, available: raw.length > 0, events: raw.map(transformScheduleEvent) };
+}
+
+/**
+ * Bir ligin TUM sezon fikstürünü doner (max 3000 kayit).
+ * @param {number} tsdbLeagueId
+ * @param {string} season - orn. '2025-2026'
+ */
+async function getLeagueSeasonScheduleFormatted(tsdbLeagueId, season) {
+  const result = await getLeagueSeasonSchedule(tsdbLeagueId, season);
+  if (!result.ok) return { ok: true, available: false, events: [] };
+  const raw = Array.isArray(result.data) ? result.data : ((result.data && result.data.schedule) || []);
+  return { ok: true, available: raw.length > 0, events: raw.map(transformScheduleEvent) };
+}
+
 // LEAGUE_ID_MAP'in tersi: TheSportsDB idLeague -> FotMob leagueId.
 // Frontend TheSportsDB ID'sini biliyor (matches/results verisinden), ama
 // analysisEngine FotMob ID'si bekliyor - bu fonksiyon ikisi arasinda koprudur.
@@ -312,5 +523,12 @@ module.exports = {
   getFotmobIdForTsdbLeague,
   getLiveScores,
   transformLiveEvent,
+  getEventTimelineFormatted,
+  getEventStatsFormatted,
+  getEventLineupFormatted,
+  getEventTVFormatted,
+  getEventHighlightsFormatted,
+  getTeamSeasonScheduleFormatted,
+  getLeagueSeasonScheduleFormatted,
   LEAGUE_ID_MAP,
 };
