@@ -218,7 +218,8 @@ function transformLiveEvent(e) {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
-    kickoff: e.dateEvent && e.strEventTime ? e.dateEvent + 'T' + e.strEventTime : null,
+        kickoff: e.dateEvent && e.strEventTime ? toUtcIso(e.dateEvent + 'T' + e.strEventTime) : null,
+
     statusShort: status || 'LIVE',
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
     isLive: true,
