@@ -84,9 +84,12 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4484', // Fransa Coupe de France
   '4485', // Almanya DFB-Pokal
   '4506', // Italya Coppa Italia
-  '4501', // Copa Libertadores
+  '4501', //   '4501', // Copa Libertadores
   '4490', // UEFA Uluslar Ligi
+  '5071', // UEFA Konferans Ligi
+  '4503', // FIFA Kulupler Dunya Kupasi
 ]);
+
 
 function isWhitelistedLeague(leagueId) {
   return WHITELISTED_LEAGUE_IDS.has(String(leagueId));
