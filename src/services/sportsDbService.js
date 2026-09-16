@@ -581,8 +581,12 @@ module.exports = {
   getEventStatsFormatted,
   getEventLineupFormatted,
   getEventTVFormatted,
-  getEventHighlightsFormatted,
-  getTeamSeasonScheduleFormatted,
+  getEventHighlightsFormatted,  getTeamSeasonScheduleFormatted,
   getLeagueSeasonScheduleFormatted,
+  isWhitelistedLeague,
+  WHITELISTED_LEAGUE_IDS,
   LEAGUE_ID_MAP,
 };
+
+  
+  
