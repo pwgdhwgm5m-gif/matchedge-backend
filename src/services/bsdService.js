@@ -43,8 +43,17 @@ const cache = require('../utils/cache');
 const BASE_URL = 'https://sports.bzzoiro.com/api/v2';
 const API_KEY = process.env.BSD_API_KEY || '';
 
+// GECICI TESHIS LOGLARI: BSD entegrasyonu hicbir macta devreye girmiyordu
+// (hep "estimate"e dusuyordu) ama sessizce basarisiz oldugu icin sebebi
+// gorunmuyordu. Bu loglar Render'in log ekraninda "[BSD]" ile aranarak
+// bulunabilir - sorun cozulunce kaldirilacak.
+console.log('[BSD] servis yuklendi, API_KEY tanimli mi:', !!API_KEY, API_KEY ? `(uzunluk: ${API_KEY.length})` : '');
+
 async function fetchBsd(path, timeoutMs) {
-  if (!API_KEY) return { ok: false, error: 'no_api_key' };
+  if (!API_KEY) {
+    console.log('[BSD] fetchBsd cagrildi ama API_KEY yok, path:', path);
+    return { ok: false, error: 'no_api_key' };
+  }
 
   const ms = timeoutMs || 8000;
   const controller = new AbortController();
@@ -55,11 +64,14 @@ async function fetchBsd(path, timeoutMs) {
       headers: { 'Authorization': 'Token ' + API_KEY },
     });
     if (!res.ok) {
+      console.log('[BSD] http hata, path:', path, 'status:', res.status);
       return { ok: false, error: 'http_' + res.status };
     }
     const json = await res.json();
+    console.log('[BSD] basarili yanit, path:', path, 'anahtar sayisi:', Object.keys(json || {}).length);
     return { ok: true, data: json };
   } catch (err) {
+    console.log('[BSD] istek hatasi, path:', path, 'hata:', err.message);
     return { ok: false, error: err.message };
   } finally {
     clearTimeout(timer);
@@ -149,17 +161,29 @@ async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
 
   const liveResult = await getLiveFootballEvents();
   if (liveResult.ok) {
-    const match = findMatchingEvent(extractList(liveResult.data), homeTeam, awayTeam, kickoffIso);
+    const liveList = extractList(liveResult.data);
+    console.log('[BSD] canli liste alindi, mac sayisi:', liveList.length, 'aranan:', homeTeam, 'vs', awayTeam);
+    const match = findMatchingEvent(liveList, homeTeam, awayTeam, kickoffIso);
     if (match) eventId = getEventId(match);
+    else if (liveList.length) console.log('[BSD] canli listede ornek 1. eleman:', JSON.stringify(liveList[0]).slice(0, 300));
+  } else {
+    console.log('[BSD] canli liste cekilemedi:', liveResult.error);
   }
 
   if (!eventId) {
     const dayResult = await getFootballEventsForDate(dateKey);
     if (dayResult.ok) {
-      const match = findMatchingEvent(extractList(dayResult.data), homeTeam, awayTeam, kickoffIso);
+      const dayList = extractList(dayResult.data);
+      console.log('[BSD] gunun listesi alindi, mac sayisi:', dayList.length, 'aranan:', homeTeam, 'vs', awayTeam);
+      const match = findMatchingEvent(dayList, homeTeam, awayTeam, kickoffIso);
       if (match) eventId = getEventId(match);
+      else if (dayList.length) console.log('[BSD] gunun listesinde ornek 1. eleman:', JSON.stringify(dayList[0]).slice(0, 300));
+    } else {
+      console.log('[BSD] gunun listesi cekilemedi:', dayResult.error);
     }
   }
+
+  console.log('[BSD] resolve sonucu:', homeTeam, 'vs', awayTeam, '->', eventId);
 
   // Bulunduysa uzun sure (mac kimligi degismez), bulunamadiysa kisa sure
   // (BSD listesine birazdan dusebilir, tekrar denenebilsin) cache'leniyor.
