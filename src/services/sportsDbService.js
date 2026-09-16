@@ -588,6 +588,8 @@ function getFotmobIdForTsdbLeague(tsdbLeagueId) {
 module.exports = {
   getMatchesByDate,
   transformEvent,
+  toUtcIso,
+
   getTeamFixturesForAnalysis,
   getLeaguePastEvents,
   getFotmobIdForTsdbLeague,
