@@ -46,6 +46,12 @@ router.get('/', async (req, res) => {
     simplified = sportsDb.applyLiveOverlay(simplified, rawLive);
   }
 
+  // Sonuclar ekraninda "Ilk Yari - Mac Sonu" skorunu gosterebilmek icin,
+  // suresi dolmus (veya ilk yariyi gecmis canli) maclarin ilk yari skorunu
+  // mac zaman cizelgesinden hesaplayip dolduruyoruz (bkz. sportsDbService).
+  // Sonucu cache'lendigi icin bu sadece her mac icin ilk seferde maliyetli.
+  simplified = await sportsDb.attachHalftimeScores(simplified);
+
   res.json({ date, matches: simplified, fromCache: result.fromCache });
 });
 
