@@ -47,9 +47,11 @@ router.get('/', async (req, res) => {
  * GET /api/live/:fixtureId
  * Tek bir mac icin canli skor bilgisi. Once V2 canli skor listesinde aranir
  * (gercek dakika buradan gelir), bulunamazsa eski yontemle (eventsday.php)
- * aranir. NOT: TheSportsDB sut/korner/topa sahip olma gibi detayli istatistik
- * vermiyor - o yuzden xG/momentum/gole yakinlik su an icin varsayilan
- * (0/50-50) donuyor. Skor, dakika ve takim isimleri gercek ve gunceldir.
+ * aranir. Artik gercek istatistik (sut, korner, top hakimiyeti, xG), mac
+ * zaman cizelgesi (gol/kart/degisiklik), kadrolar, TV yayin bilgisi ve
+ * one cikanlar (highlights) da TheSportsDB Pro'dan cekiliyor - kucuk
+ * liglerde bu ek veriler bulunmayabilir, o durumda ilgili alanlar bos
+ * doner ama skor/dakika/takim bilgisi her zaman gercek ve gunceldir.
  */
 router.get('/:fixtureId', async (req, res) => {
   const { fixtureId } = req.params;
@@ -90,6 +92,24 @@ router.get('/:fixtureId', async (req, res) => {
     return res.status(404).json({ error: 'Mac bulunamadi' });
   }
 
+  // --- Pro/Premium V2 ek veriler: zaman cizelgesi, istatistik, kadro, TV, highlights ---
+  // Bitmis maclarda bu veri degismeyecegi icin uzun (6 saat) cache'leniyor;
+  // canli maclarda kotayi korumak icin orta sureli (60 sn) cache'leniyor.
+  // Kucuk liglerdeki maclarda bu veriler genelde bulunmuyor - o durumda
+  // asagidaki *Result.available alanlari false donuyor, hicbir sey kirilmiyor.
+  const isFinished = match.statusShort === 'FT';
+  const extrasTtl = isFinished ? 60 * 60 * 6 : 60;
+
+  const [timelineResult, statsResult, lineupResult, tvResult, highlightsResult] = await Promise.all([
+    cache.getOrFetch(`tsdb-timeline:${fixtureId}`, extrasTtl, () => sportsDb.getEventTimelineFormatted(fixtureId)),
+    cache.getOrFetch(`tsdb-stats:${fixtureId}`, extrasTtl, () => sportsDb.getEventStatsFormatted(fixtureId)),
+    cache.getOrFetch(`tsdb-lineup:${fixtureId}`, extrasTtl, () => sportsDb.getEventLineupFormatted(fixtureId)),
+    cache.getOrFetch(`tsdb-tv:${fixtureId}`, extrasTtl, () => sportsDb.getEventTVFormatted(fixtureId)),
+    cache.getOrFetch(`tsdb-highlights:${fixtureId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(fixtureId)),
+  ]);
+
+  const stats = statsResult.available ? statsResult.stats : {};
+
   res.json({
     fixtureId,
     minute: match.minute,
@@ -98,21 +118,40 @@ router.get('/:fixtureId', async (req, res) => {
     awayTeam: match.awayTeam,
     homeScore: match.homeScore,
     awayScore: match.awayScore,
-    homeLiveXg: 0,
-    awayLiveXg: 0,
+    homeLiveXg: stats.xg ? (stats.xg.home ?? 0) : 0,
+    awayLiveXg: stats.xg ? (stats.xg.away ?? 0) : 0,
+    // NOT: momentum/goalProximity icin TheSportsDB'de dogrudan bir karsilik yok,
+    // bu ikisi hala model tahmini (varsayilan 50-50) - gercek "baski" verisi
+    // TSDB'de bulunmuyor.
     momentum: { home: 50, away: 50 },
     goalProximity: { home: 0, away: 0 },
-    possession: { home: 50, away: 50 },
+    possession: stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 },
     stats: {
-      shotsOnTargetHome: 0,
-      shotsOnTargetAway: 0,
-      cornersHome: 0,
-      cornersAway: 0,
+      shotsOnTargetHome: stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0,
+      shotsOnTargetAway: stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0,
+      cornersHome: stats.corners ? (stats.corners.home ?? 0) : 0,
+      cornersAway: stats.corners ? (stats.corners.away ?? 0) : 0,
+      // TheSportsDB "tehlikeli atak" istatistigi vermiyor, gercek karsiligi yok.
       dangerousAttacksHome: 0,
       dangerousAttacksAway: 0,
+      foulsHome: stats.fouls ? stats.fouls.home : null,
+      foulsAway: stats.fouls ? stats.fouls.away : null,
+      offsidesHome: stats.offsides ? stats.offsides.home : null,
+      offsidesAway: stats.offsides ? stats.offsides.away : null,
+      yellowCardsHome: stats.yellowCards ? stats.yellowCards.home : null,
+      yellowCardsAway: stats.yellowCards ? stats.yellowCards.away : null,
+      redCardsHome: stats.redCards ? stats.redCards.home : null,
+      redCardsAway: stats.redCards ? stats.redCards.away : null,
     },
+    statsAvailable: statsResult.available,
+    timeline: timelineResult.available ? timelineResult.events : [],
+    lineup: lineupResult.available
+      ? { home: lineupResult.home, away: lineupResult.away, homeSubs: lineupResult.homeSubs, awaySubs: lineupResult.awaySubs }
+      : null,
+    tv: tvResult.available ? tvResult.broadcasts : [],
+    highlightVideo: highlightsResult.available ? highlightsResult.videoUrl : null,
     valueAlert: { triggered: false },
-    fromCache: { fixture: fromCacheFlag, stats: null },
+    fromCache: { fixture: fromCacheFlag, stats: statsResult.fromCache },
   });
 });
 
