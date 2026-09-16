@@ -2,58 +2,58 @@ const express = require('express');
 const router = express.Router();
 const cache = require('../utils/cache');
 const config = require('../config/config');
-const freeFootballApi = require('../services/freeFootballApiService');
+const sportsDb = require('../services/sportsDbService');
 
 /**
  * GET /api/live
- * Su an oynanan tum maclarin listesi. Bugunun tum maclarini cekip
- * sadece "isLive: true" olanlari filtreliyoruz (bu kaynakta ayri bir
- * "sadece canlilar" endpoint'i yok).
+ * Su an oynanan tum maclarin listesi.
+ * NOT: Eskiden freeFootballApiService kullaniyordu - o kaynak aylik
+ * kotasini doldurdugu icin artik sportsDbService (TheSportsDB) kullaniyor.
  */
 router.get('/', async (req, res) => {
   const today = new Date().toISOString().split('T')[0];
 
   const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
-    freeFootballApi.getMatchesByDate(today)
+    sportsDb.getMatchesByDate(today)
   );
 
   if (!result.ok) {
     return res.status(502).json({ error: 'Canli veri alinamadi' });
   }
 
-  const rawMatches = result.data?.response?.matches || [];
-  const simplified = rawMatches.map(freeFootballApi.transformMatch).filter(m => m.isLive);
+  const rawEvents = result.data?.events || [];
+  const simplified = rawEvents.map(sportsDb.transformEvent).filter(m => m.isLive);
 
   res.json({ matches: simplified, fromCache: result.fromCache });
 });
 
 /**
  * GET /api/live/:fixtureId
- * Tek bir mac icin canli skor bilgisi. NOT: bu kaynak sut/korner/topa
+ * Tek bir mac icin canli skor bilgisi. NOT: TheSportsDB sut/korner/topa
  * sahip olma gibi detayli istatistik vermiyor - o yuzden xG/momentum/
- * gole yakinlik su an icin varsayilan (0/50-50) donuyor. Skor ve takim
- * isimleri gercek ve gunceldir.
+ * gole yakinlik su an icin varsayilan (0/50-50) donuyor. Skor, dakika
+ * (statusShort'tan tahmini) ve takim isimleri gercek ve gunceldir.
  */
 router.get('/:fixtureId', async (req, res) => {
   const { fixtureId } = req.params;
   const today = new Date().toISOString().split('T')[0];
 
   const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
-    freeFootballApi.getMatchesByDate(today)
+    sportsDb.getMatchesByDate(today)
   );
 
   if (!result.ok) {
     return res.status(502).json({ error: 'Canli mac verisi alinamadi' });
   }
 
-  const rawMatches = result.data?.response?.matches || [];
-  const raw = rawMatches.find(m => String(m.id) === String(fixtureId));
+  const rawEvents = result.data?.events || [];
+  const raw = rawEvents.find(e => String(e.idEvent) === String(fixtureId));
 
   if (!raw) {
     return res.status(404).json({ error: 'Mac bulunamadi' });
   }
 
-  const match = freeFootballApi.transformMatch(raw);
+  const match = sportsDb.transformEvent(raw);
 
   res.json({
     fixtureId,
