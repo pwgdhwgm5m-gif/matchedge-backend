@@ -63,7 +63,8 @@ async function precomputeTodaysMatches() {
         league: fotmobLeague,
         leagueName: e.strLeague,
         season: new Date().getFullYear(),
-        kickoff: e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00')),
+        kickoff: sportsDb.toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00'))),
+
       });
     });
   }
