@@ -3,6 +3,7 @@ const router = express.Router();
 const cache = require('../utils/cache');
 const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
+const liveXg = require('../services/liveXgService');
 
 /**
  * GET /api/live
@@ -113,6 +114,37 @@ router.get('/:fixtureId', async (req, res) => {
 
   const stats = statsResult.available ? statsResult.stats : {};
 
+  // Canli xG/momentum/gol yakinligi hesabi icin iki takimin ham istatistiklerini
+  // ortak sekle getiriyoruz. TheSportsDB "tehlikeli atak" ve "isabetsiz sut"
+  // vermiyor, bu yuzden bu iki alan hep 0 - hesaplamalar geri kalan gercek
+  // verilerle (isabetli sut, korner, varsa gercek xG) yapiliyor. Istatistik
+  // henuz yoksa (mac yeni basladiysa) tum degerler 0 olur ve asagidaki
+  // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
+  const homeRawStats = {
+    shotsOnTarget: stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0,
+    shotsOffTarget: 0,
+    corners: stats.corners ? (stats.corners.home ?? 0) : 0,
+    dangerousAttacks: 0,
+  };
+  const awayRawStats = {
+    shotsOnTarget: stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0,
+    shotsOffTarget: 0,
+    corners: stats.corners ? (stats.corners.away ?? 0) : 0,
+    dangerousAttacks: 0,
+  };
+
+  // TheSportsDB bazi (Pro/Premium) liglerde gercek xG sagliyor - varsa onu
+  // kullaniyoruz; saglamiyorsa sut/korner sayisindan kaba bir "canli xG"
+  // tahmini uretiyoruz (liveXgService.estimateLiveXg).
+  const homeLiveXg = (stats.xg && stats.xg.home != null) ? stats.xg.home : liveXg.estimateLiveXg(homeRawStats);
+  const awayLiveXg = (stats.xg && stats.xg.away != null) ? stats.xg.away : liveXg.estimateLiveXg(awayRawStats);
+
+  // Momentum: genel baski (isabetli sut + korner agirlikli).
+  // Gol yakinligi: hangi takim gole daha yakin (isabetli sut + korner + canli xG,
+  // xG en agirlikli faktor) - kullanicinin canli ekranda gordugu "kim daha yakin" barı.
+  const momentum = liveXg.calculateMomentum(homeRawStats, awayRawStats);
+  const goalProximity = liveXg.calculateGoalProximity(homeRawStats, awayRawStats, homeLiveXg, awayLiveXg);
+
   res.json({
     fixtureId,
     minute: match.minute,
@@ -121,19 +153,16 @@ router.get('/:fixtureId', async (req, res) => {
     awayTeam: match.awayTeam,
     homeScore: match.homeScore,
     awayScore: match.awayScore,
-    homeLiveXg: stats.xg ? (stats.xg.home ?? 0) : 0,
-    awayLiveXg: stats.xg ? (stats.xg.away ?? 0) : 0,
-    // NOT: momentum/goalProximity icin TheSportsDB'de dogrudan bir karsilik yok,
-    // bu ikisi hala model tahmini (varsayilan 50-50) - gercek "baski" verisi
-    // TSDB'de bulunmuyor.
-    momentum: { home: 50, away: 50 },
-    goalProximity: { home: 0, away: 0 },
+    homeLiveXg,
+    awayLiveXg,
+    momentum,
+    goalProximity,
     possession: stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 },
     stats: {
-      shotsOnTargetHome: stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0,
-      shotsOnTargetAway: stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0,
-      cornersHome: stats.corners ? (stats.corners.home ?? 0) : 0,
-      cornersAway: stats.corners ? (stats.corners.away ?? 0) : 0,
+      shotsOnTargetHome: homeRawStats.shotsOnTarget,
+      shotsOnTargetAway: awayRawStats.shotsOnTarget,
+      cornersHome: homeRawStats.corners,
+      cornersAway: awayRawStats.corners,
       // TheSportsDB "tehlikeli atak" istatistigi vermiyor, gercek karsiligi yok.
       dangerousAttacksHome: 0,
       dangerousAttacksAway: 0,
