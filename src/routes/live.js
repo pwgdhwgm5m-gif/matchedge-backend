@@ -142,18 +142,25 @@ router.get('/:fixtureId', async (req, res) => {
   // YOKSA basvuruluyor - gereksiz istek atilmiyor.
   let homeLiveXg;
   let awayLiveXg;
+  // xgSource: hangi kaynaktan geldigini disaridan (yanit uzerinden) dogrulayabilmek
+  // icin eklendi - BSD entegrasyonunun gercekten devreye girip girmedigini
+  // TheSportsDB'nin kendi gercek xG'sinden ayirt etmenin baska yolu yoktu.
+  let xgSource;
 
   if (stats.xg && stats.xg.home != null && stats.xg.away != null) {
     homeLiveXg = stats.xg.home;
     awayLiveXg = stats.xg.away;
+    xgSource = 'thesportsdb';
   } else {
     const bsdXg = await bsdService.getRealXgForMatch(match.homeTeam, match.awayTeam, match.kickoff, isFinished);
     if (bsdXg.available && !bsdXg.estimated) {
       homeLiveXg = bsdXg.home;
       awayLiveXg = bsdXg.away;
+      xgSource = 'bsd';
     } else {
       homeLiveXg = liveXg.estimateLiveXg(homeRawStats);
       awayLiveXg = liveXg.estimateLiveXg(awayRawStats);
+      xgSource = 'estimate';
     }
   }
 
@@ -173,6 +180,7 @@ router.get('/:fixtureId', async (req, res) => {
     awayScore: match.awayScore,
     homeLiveXg,
     awayLiveXg,
+    xgSource,
     momentum,
     goalProximity,
     possession: stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 },
