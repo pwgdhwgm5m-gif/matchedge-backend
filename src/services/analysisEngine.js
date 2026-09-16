@@ -126,10 +126,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
 
   let motivationHome = { label: 'Orta Sıra - Nötr', multiplier: 1.0 };
   let motivationAway = { label: 'Orta Sıra - Nötr', multiplier: 1.0 };
+  // Ekranda gosterilecek ham puan durumu tablosu - sadece kendi kaynagimizdan
+  // (TFF/TheSportsDB) gelen normallestirilmis tablo icin dolduruluyor; eski
+  // API-Football yolu (askida) icin bos birakiliyor.
+  let standingsTable = [];
   if (standingsResult.status === 'fulfilled' && standingsResult.value.ok) {
     const sv = standingsResult.value;
     if (isSuperLig || isMappedLeague) {
       const table = sv.table || [];
+      standingsTable = table;
       const homeRow = motivation.findTeamStanding(table, homeTeamIdForStats);
       const awayRow = motivation.findTeamStanding(table, awayTeamIdForStats);
       if (homeRow) {
@@ -252,6 +257,11 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       away: awayStreak,
     },
     homeAdvantageMultiplier,
+    standings: {
+      table: standingsTable,
+      homeTeamId: homeTeamIdForStats,
+      awayTeamId: awayTeamIdForStats,
+    },
     h2h: useDerivedH2H
       ? { ok: true, derived: true, data: { response: derivedH2HFixtures } }
       : (h2hResult.status === 'fulfilled' ? h2hResult.value : null),
