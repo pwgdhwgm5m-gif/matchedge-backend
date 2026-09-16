@@ -9,7 +9,15 @@ const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
+const V2_BASE_URL = 'https://www.thesportsdb.com/api/v2/json';
 const API_KEY = process.env.SPORTSDB_API_KEY || '123';
+
+// TheSportsDB'nin gercekten kullandigi durum kodlari (V2 canli skor ornek
+// verisinden dogrulandi). "Match Finished" gibi baska API'lerden (orn.
+// API-Football) kalma, TheSportsDB'de hic gorunmeyen degerler de guvenlik
+// icin listede tutuluyor.
+const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'FT_PEN', 'Match Finished', 'AWARDED', 'WO', 'ABD', 'CANC', 'POSTP']);
+const LIVE_STATUSES = new Set(['1H', '2H', 'HT', 'ET', 'BT', 'P', 'LIVE']);
 
 // free-api-live-football-data (FotMob) semasindaki leagueId -> TheSportsDB idLeague.
 const LEAGUE_ID_MAP = {
@@ -61,20 +69,91 @@ async function getMatchesByDate(dateStr) {
 /**
  * TheSportsDB'nin ham event nesnesini, eski freeFootballApiService ile
  * ayni sekle cevirir - route/frontend hicbir sey degistirmeden calisir.
+ *
+ * ONEMLI DUZELTME: Eskiden "bitti mi" kontrolu sadece strStatus alanina
+ * bakiyordu (== 'FT'). eventsday.php gecmis tarihli maclarda bu alani
+ * her zaman guvenilir doldurmuyor (bos/farkli deger donebiliyor) - bu
+ * yuzden dun oynanmis, sonuclanmis bir mac hala "CANLI" gorunebiliyordu.
+ * Simdi tarih de kontrol ediliyor: mac tarihi bugunden onceyse, statusShort
+ * ne olursa olsun kesin olarak "bitti" kabul ediliyor. "Canli" ise artik
+ * SADECE gercekten bilinen canli periyot kodlarindan biriyse (1H/HT/2H/ET
+ * vb.) true donuyor - eskiden "NS degilse ve skor varsa canli say" gibi
+ * cok gevsek bir kural vardi, bu yanlis pozitiflere yol aciyordu.
  */
 function transformEvent(e) {
-  const finished = e.strStatus === 'FT' || e.strStatus === 'Match Finished';
-  const started = !!e.intHomeScore || !!e.intAwayScore || finished;
-  const isLive = started && !finished && e.strStatus !== 'NS';
+  const status = String(e.strStatus || '').trim();
+  const eventDateStr = String(e.dateEvent || (e.strTimestamp || '').slice(0, 10) || '');
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isPastDate = eventDateStr && eventDateStr < todayStr;
+
+  const finished = FINISHED_STATUSES.has(status) || isPastDate;
+  const isLive = !finished && LIVE_STATUSES.has(status.toUpperCase());
 
   return {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
     kickoff: e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00')),
-    statusShort: e.strStatus || 'NS',
-    minute: null,
+    statusShort: finished ? 'FT' : (status || 'NS'),
+    minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
     isLive: isLive,
+    homeTeam: e.strHomeTeam || '',
+    awayTeam: e.strAwayTeam || '',
+    homeBadge: e.strHomeTeamBadge || null,
+    awayBadge: e.strAwayTeamBadge || null,
+    homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : 0,
+    awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : 0,
+    halftimeHome: null,
+    halftimeAway: null,
+  };
+}
+
+/**
+ * V2 API icin header-tabanli istek (X-API-KEY). V1'den farkli olarak key
+ * URL'de degil header'da gonderiliyor.
+ */
+async function fetchV2(path, timeoutMs) {
+  const ms = timeoutMs || 8000;
+  const controller = new AbortController();
+  const timer = setTimeout(function () { controller.abort(); }, ms);
+  try {
+    const res = await fetch(V2_BASE_URL + path, {
+      signal: controller.signal,
+      headers: { 'X-API-KEY': API_KEY },
+    });
+    if (!res.ok) {
+      return { ok: false, error: 'http_' + res.status };
+    }
+    const json = await res.json();
+    return { ok: true, data: json };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * TheSportsDB'nin GERCEK canli skor endpoint'i (V2, sadece premium).
+ * eventsday.php'nin aksine gercek dakika (strProgress) ve gercek periyot
+ * kodu (1H/HT/2H) doner - bu yuzden "kacinci dakikada" bilgisi ancak
+ * buradan gelebiliyor.
+ */
+async function getLiveScores() {
+  return fetchV2('/livescore/soccer', 8000);
+}
+
+/** V2 canli skor event'ini frontend'in bekledigi sekle cevirir */
+function transformLiveEvent(e) {
+  const status = String(e.strStatus || '').trim().toUpperCase();
+  return {
+    fixtureId: e.idEvent,
+    league: e.strLeague || '',
+    leagueId: e.idLeague,
+    kickoff: e.dateEvent && e.strEventTime ? e.dateEvent + 'T' + e.strEventTime : null,
+    statusShort: status || 'LIVE',
+    minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
+    isLive: true,
     homeTeam: e.strHomeTeam || '',
     awayTeam: e.strAwayTeam || '',
     homeBadge: e.strHomeTeamBadge || null,
@@ -231,5 +310,7 @@ module.exports = {
   getTeamFixturesForAnalysis,
   getLeaguePastEvents,
   getFotmobIdForTsdbLeague,
+  getLiveScores,
+  transformLiveEvent,
   LEAGUE_ID_MAP,
 };
