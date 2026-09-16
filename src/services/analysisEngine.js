@@ -45,11 +45,38 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       ? `tsdb-form:${leagueIdNum}:${awayTeamName}`
       : `form:${away}`;
 
+  // H2H artik ayri bir API cagrisi degil - Süper Lig/eslesen liglerde zaten
+  // cekilen "son N mac" form verisinden turetiliyor (asagida, fixture'lar
+  // cozuldukten sonra). API-Football'un h2h endpoint'i askida/kota dolu
+  // oldugu icin sadece eslesmeyen ligler icin fallback olarak kaliyor.
+  const useDerivedH2H = isSuperLig || isMappedLeague;
+
+  // Puan durumu (motivasyon icin): Süper Lig -> TFF scraper, eslesen
+  // ligler -> TheSportsDB lookuptable.php, digerleri -> eski API-Football
+  // yolu (kota dolu oldugu icin muhtemelen bos doner, notr deger uretir).
+  const currentSeason = sportsDb.getCurrentSeasonString();
+  const standingsFetcher = isSuperLig
+    ? () => tffScraper.getStandings().then(table => ({
+        ok: true,
+        available: table.length > 0,
+        table: table.map(r => ({ teamId: r.kulupID, teamName: r.name, rank: r.rank, points: r.points, description: null })),
+      }))
+    : isMappedLeague
+      ? () => sportsDb.getLeagueStandingsFormatted(sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)], currentSeason)
+      : () => (league && season ? footballApi.getStandings(league, season) : Promise.resolve({ ok: false }));
+  const standingsCacheKey = isSuperLig
+    ? 'tff-standings'
+    : isMappedLeague
+      ? `tsdb-standings:${leagueIdNum}:${currentSeason}`
+      : `standings:${league}:${season}`;
+
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
-      cache.getOrFetch(`h2h:${fixtureId}`, config.cache.ttlStatic, () =>
-        footballApi.getH2H(home, away)
-      ),
+      useDerivedH2H
+        ? Promise.resolve({ ok: true, skipped: true })
+        : cache.getOrFetch(`h2h:${fixtureId}`, config.cache.ttlStatic, () =>
+            footballApi.getH2H(home, away)
+          ),
       cache.getOrFetch(`odds:${sportKey || 'soccer_epl'}`, config.cache.ttlStatic, () =>
         oddsApi.getOddsForLeague(sportKey || 'soccer_epl')
       ),
@@ -58,11 +85,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       ),
       cache.getOrFetch(homeFormCacheKey, config.cache.ttlStatic, homeFormFetcher),
       cache.getOrFetch(awayFormCacheKey, config.cache.ttlStatic, awayFormFetcher),
-      league && season
-        ? cache.getOrFetch(`standings:${league}:${season}`, config.cache.ttlStatic, () =>
-            footballApi.getStandings(league, season)
-          )
-        : Promise.resolve({ ok: false }),
+      cache.getOrFetch(standingsCacheKey, config.cache.ttlStatic, standingsFetcher),
     ]);
 
   const injuriesRaw = injuriesResult.status === 'fulfilled' && injuriesResult.value.ok
@@ -101,14 +124,30 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     away: awayTeamFullSplit.away,
   };
 
-  let motivationHome = { label: 'Bilinmiyor', multiplier: 1.0 };
-  let motivationAway = { label: 'Bilinmiyor', multiplier: 1.0 };
+  let motivationHome = { label: 'Orta Sıra - Nötr', multiplier: 1.0 };
+  let motivationAway = { label: 'Orta Sıra - Nötr', multiplier: 1.0 };
   if (standingsResult.status === 'fulfilled' && standingsResult.value.ok) {
-    const standingsData = standingsResult.value.data;
-    const homeRow = motivation.findTeamStanding(standingsData, home);
-    const awayRow = motivation.findTeamStanding(standingsData, away);
-    motivationHome = motivation.calculateMotivationFromDescription(homeRow?.description);
-    motivationAway = motivation.calculateMotivationFromDescription(awayRow?.description);
+    const sv = standingsResult.value;
+    if (isSuperLig || isMappedLeague) {
+      const table = sv.table || [];
+      const homeRow = motivation.findTeamStanding(table, homeTeamIdForStats);
+      const awayRow = motivation.findTeamStanding(table, awayTeamIdForStats);
+      if (homeRow) {
+        motivationHome = homeRow.description
+          ? motivation.calculateMotivationFromDescription(homeRow.description)
+          : motivation.calculateMotivationFromRank(homeRow.rank, table.length);
+      }
+      if (awayRow) {
+        motivationAway = awayRow.description
+          ? motivation.calculateMotivationFromDescription(awayRow.description)
+          : motivation.calculateMotivationFromRank(awayRow.rank, table.length);
+      }
+    } else if (sv.data) {
+      const homeRow = motivation.findTeamStandingLegacy(sv.data, home);
+      const awayRow = motivation.findTeamStandingLegacy(sv.data, away);
+      motivationHome = motivation.calculateMotivationFromDescription(homeRow?.description);
+      motivationAway = motivation.calculateMotivationFromDescription(awayRow?.description);
+    }
   }
 
   const homeRestDays = isSuperLig ? null : stats.calculateRestDays(homeFixtures, homeTeamIdForStats);
@@ -163,19 +202,25 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const awayFirstHalf = isSuperLig
     ? { firstHalfScoringRate: null }
     : stats.calculateFirstHalfTendency(awayFixtures, awayTeamIdForStats);
-  const h2hFixturesRaw = h2hResult.status === 'fulfilled' && h2hResult.value.ok
-    ? h2hResult.value.data?.response || []
+  const derivedH2HFixtures = useDerivedH2H
+    ? stats.deriveH2HFromFixtures(homeFixtures, awayFixtures, homeTeamIdForStats, awayTeamIdForStats)
     : [];
-  const h2hFirstHalf = stats.calculateH2HFirstHalfTendency(h2hFixturesRaw, home, away);
+  const h2hFixturesRaw = useDerivedH2H
+    ? derivedH2HFixtures
+    : (h2hResult.status === 'fulfilled' && h2hResult.value.ok ? h2hResult.value.data?.response || [] : []);
+  const h2hFirstHalf = stats.calculateH2HFirstHalfTendency(h2hFixturesRaw, homeTeamIdForStats, awayTeamIdForStats);
   const firstHalfProximity = stats.combineFirstHalfProximity(
     homeFirstHalf.firstHalfScoringRate,
     awayFirstHalf.firstHalfScoringRate,
     h2hFirstHalf
   );
 
-  const successCount = [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult].filter(
+  const h2hSucceeded = useDerivedH2H
+    ? h2hFixturesRaw.length > 0
+    : (h2hResult.status === 'fulfilled' && h2hResult.value.ok);
+  const successCount = [oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult].filter(
     r => r.status === 'fulfilled' && r.value.ok !== false
-  ).length;
+  ).length + (h2hSucceeded ? 1 : 0);
   const dataQualityScore = poisson.calculateDataQualityScore(successCount, 5, 0);
 
   const strongestSignal = poisson.findStrongestSignal([
@@ -207,7 +252,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       away: awayStreak,
     },
     homeAdvantageMultiplier,
-    h2h: h2hResult.status === 'fulfilled' ? h2hResult.value : null,
+    h2h: useDerivedH2H
+      ? { ok: true, derived: true, data: { response: derivedH2HFixtures } }
+      : (h2hResult.status === 'fulfilled' ? h2hResult.value : null),
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'api-football'),
   };
