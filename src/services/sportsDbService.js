@@ -88,6 +88,7 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4490', // UEFA Uluslar Ligi
   '5071', // UEFA Konferans Ligi
   '4503', // FIFA Kulupler Dunya Kupasi
+  '4570', // Ingiltere Ligi Kupasi (Carabao Cup / EFL Cup)
 ]);
 
 function isWhitelistedLeague(leagueId) {
