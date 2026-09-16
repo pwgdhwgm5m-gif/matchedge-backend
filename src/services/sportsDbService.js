@@ -35,7 +35,7 @@ const LEAGUE_ID_MAP = {
   '61': 4344,   // Portekiz Liga Portugal
   '51': 4636,   // Finlandiya Veikkausliiga
   '40': 4338,   // Belcika First Division A
-   '46': 4340,   // Danimarka Superligaen
+  '46': 4340,   // Danimarka Superligaen
   '64': 4330,   // Iskocya Premiership
 };
 
@@ -84,19 +84,17 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4484', // Fransa Coupe de France
   '4485', // Almanya DFB-Pokal
   '4506', // Italya Coppa Italia
-  '4501', //   '4501', // Copa Libertadores
+  '4501', // Copa Libertadores
   '4490', // UEFA Uluslar Ligi
   '5071', // UEFA Konferans Ligi
   '4503', // FIFA Kulupler Dunya Kupasi
 ]);
-
 
 function isWhitelistedLeague(leagueId) {
   return WHITELISTED_LEAGUE_IDS.has(String(leagueId));
 }
 
 async function fetchT(url, timeoutMs) {
-
   const ms = timeoutMs || 10000;
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, ms);
@@ -138,10 +136,13 @@ async function getMatchesByDate(dateStr) {
  * cok gevsek bir kural vardi, bu yanlis pozitiflere yol aciyordu.
  */
 /**
- * TheSportsDB zaman damgalari UTC ama sonunda 'Z' yok. Bu haliyle
- * tarayici bunu yerel saat saniyor ve hicbir donusum yapmadan
- * gosteriyor - Turkiye (UTC+3) icin gercek saatten 3 saat erken
- * gorunmesine yol aciyordu. 'Z' eklenince dogru donusuyor.
+ * TheSportsDB zaman damgalari ("strTimestamp", dateEvent+strTime) UTC
+ * olarak geliyor ama sonunda 'Z' YOK. Bu haliyle frontend'e gonderilince
+ * tarayici bunu YEREL saat saniyor (JS spesifikasyonu geregi 'Z'siz
+ * tarih-saat string'leri local olarak parse edilir) ve hicbir donusum
+ * yapmadan oldugu gibi gosteriyor - Turkiye (UTC+3) icin gercek saatten
+ * 3 saat erken gorunmesine yol aciyordu (orn. gercek 22:30 yerine 19:30).
+ * 'Z' eklenince tarayici doğru sekilde UTC'den yerel saate ceviriyor.
  */
 function toUtcIso(raw) {
   if (!raw) return null;
@@ -162,7 +163,7 @@ function transformEvent(e) {
     league: e.strLeague || '',
     leagueId: e.idLeague,
     kickoff: toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00'))),
-
+    statusShort: finished ? 'FT' : (status || 'NS'),
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
     isLive: isLive,
     homeTeam: e.strHomeTeam || '',
@@ -218,8 +219,7 @@ function transformLiveEvent(e) {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
-        kickoff: e.dateEvent && e.strEventTime ? toUtcIso(e.dateEvent + 'T' + e.strEventTime) : null,
-
+    kickoff: e.dateEvent && e.strEventTime ? toUtcIso(e.dateEvent + 'T' + e.strEventTime) : null,
     statusShort: status || 'LIVE',
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
     isLive: true,
@@ -538,8 +538,7 @@ function transformScheduleEvent(e) {
   return {
     fixtureId: e.idEvent,
     date: e.dateEvent || (e.strTimestamp || '').slice(0, 10),
-        kickoff: toUtcIso(e.strTimestamp),
-
+    kickoff: toUtcIso(e.strTimestamp),
     league: e.strLeague || '',
     round: e.intRound || null,
     homeTeam: e.strHomeTeam || '',
@@ -589,7 +588,6 @@ module.exports = {
   getMatchesByDate,
   transformEvent,
   toUtcIso,
-
   getTeamFixturesForAnalysis,
   getLeaguePastEvents,
   getFotmobIdForTsdbLeague,
@@ -599,12 +597,10 @@ module.exports = {
   getEventStatsFormatted,
   getEventLineupFormatted,
   getEventTVFormatted,
-  getEventHighlightsFormatted,  getTeamSeasonScheduleFormatted,
+  getEventHighlightsFormatted,
+  getTeamSeasonScheduleFormatted,
   getLeagueSeasonScheduleFormatted,
   isWhitelistedLeague,
   WHITELISTED_LEAGUE_IDS,
   LEAGUE_ID_MAP,
 };
-
-  
-  
