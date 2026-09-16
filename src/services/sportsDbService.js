@@ -6,6 +6,7 @@
  */
 
 const { normalizeTeamName } = require('../utils/textNormalize');
+const cache = require('../utils/cache');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const API_KEY = process.env.SPORTSDB_API_KEY || '123';
@@ -94,16 +95,88 @@ async function getLeaguePastEvents(tsdbLeagueId) {
   return fetchT(url, 10000);
 }
 
+/** Ham TheSportsDB event nesnesini analysisEngine'in bekledigi sekle cevirir */
+function toAnalysisFixture(e) {
+  return {
+    fixture: { id: e.idEvent, date: e.strTimestamp || e.dateEvent },
+    teams: {
+      home: { id: e.idHomeTeam, name: e.strHomeTeam },
+      away: { id: e.idAwayTeam, name: e.strAwayTeam },
+    },
+    goals: {
+      home: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : null,
+      away: e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : null,
+    },
+    score: { halftime: { home: null, away: null } },
+  };
+}
+
+/**
+ * Takim adindan TheSportsDB takim ID'sini bulur (searchteams.php).
+ * ID'ler degismedigi icin 30 gun cache'leniyor - premium kotasini
+ * (20 istek/dk) bosa harcamamak icin onemli.
+ */
+async function resolveTeamId(teamName) {
+  const cacheKey = `tsdb-teamid:${normalizeTeamName(teamName)}`;
+  const result = await cache.getOrFetch(cacheKey, 60 * 60 * 24 * 30, async () => {
+    const url = BASE_URL + '/' + API_KEY + '/searchteams.php?t=' + encodeURIComponent(teamName);
+    const res = await fetchT(url, 8000);
+    if (!res.ok) return { ok: false };
+    const teams = (res.data && res.data.teams) || [];
+    if (!teams.length) return { ok: false };
+    const normalized = normalizeTeamName(teamName);
+    const exact = teams.find(function (t) { return normalizeTeamName(t.strTeam) === normalized; });
+    return { ok: true, idTeam: (exact || teams[0]).idTeam };
+  });
+  return result.ok ? result.idTeam : null;
+}
+
+/**
+ * Bir takimin son maclarini TAKIMA OZEL endpoint'ten ceker (premium: son
+ * 10 mac, hem ev hem deplasman dahil). eventspastleague.php'nin aksine
+ * (asagida, fallback olarak kalan eski yontem) bu, ligin dar bir "son
+ * birkac mac" penceresine sikismiyor - o pencerede o takimin maci
+ * olmasa bile (orn. lig lideri Barcelona gibi, arada UEFA/kupa maclari
+ * araya girince ligdeki son maci pencerenin disinda kalabiliyordu)
+ * dogru sonuc doner.
+ */
+async function getTeamLastEvents(teamId) {
+  const url = BASE_URL + '/' + API_KEY + '/eventslast.php?id=' + teamId;
+  return fetchT(url, 8000);
+}
+
 /**
  * analysisEngine.js'in beklendigi {ok, data:{response:[...]}, teamId} formatinda
- * bir takimin son N macini doner.
+ * bir takimin son N macini doner. Once takima ozel eventslast.php denenir
+ * (daha guvenilir); o basarisiz/bos donerse eski yontem (ligin son
+ * olaylarindan isimle filtreleme) fallback olarak calisir.
  * @param {string} teamName
  * @param {number|string} fotmobLeagueId
  */
 async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
   const n = count || 15;
-  const tsdbLeagueId = LEAGUE_ID_MAP[String(fotmobLeagueId)];
 
+  const teamId = await resolveTeamId(teamName);
+  if (teamId) {
+    const lastResult = await getTeamLastEvents(teamId);
+    if (lastResult.ok) {
+      const rawEvents = (lastResult.data && (lastResult.data.results || lastResult.data.events)) || [];
+      const finishedEvents = rawEvents.filter(function (e) {
+        return e.strStatus === 'FT' || e.intHomeScore !== null && e.intHomeScore !== undefined;
+      });
+      if (finishedEvents.length > 0) {
+        const lastEvents = finishedEvents.slice(-n);
+        return {
+          ok: true,
+          data: { response: lastEvents.map(toAnalysisFixture) },
+          teamId: teamId,
+        };
+      }
+    }
+  }
+
+  // --- Fallback: eski yontem (ligin son olaylari icinden isimle filtrele) ---
+  const tsdbLeagueId = LEAGUE_ID_MAP[String(fotmobLeagueId)];
   if (!tsdbLeagueId) {
     return { ok: false, error: 'league_not_mapped' };
   }
@@ -124,33 +197,20 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
     return e.strStatus === 'FT' && (isMatch(e.strHomeTeam) || isMatch(e.strAwayTeam));
   });
 
-  let resolvedTeamId = null;
-  for (let i = 0; i < teamEvents.length; i++) {
-    const e = teamEvents[i];
-    if (isMatch(e.strHomeTeam)) { resolvedTeamId = e.idHomeTeam; break; }
-    if (isMatch(e.strAwayTeam)) { resolvedTeamId = e.idAwayTeam; break; }
+  let resolvedTeamId = teamId || null;
+  if (!resolvedTeamId) {
+    for (let i = 0; i < teamEvents.length; i++) {
+      const e = teamEvents[i];
+      if (isMatch(e.strHomeTeam)) { resolvedTeamId = e.idHomeTeam; break; }
+      if (isMatch(e.strAwayTeam)) { resolvedTeamId = e.idAwayTeam; break; }
+    }
   }
 
   const lastEvents = teamEvents.slice(-n);
 
-  const response = lastEvents.map(function (e) {
-    return {
-      fixture: { id: e.idEvent, date: e.strTimestamp || e.dateEvent },
-      teams: {
-        home: { id: e.idHomeTeam, name: e.strHomeTeam },
-        away: { id: e.idAwayTeam, name: e.strAwayTeam },
-      },
-      goals: {
-        home: e.intHomeScore !== null ? parseInt(e.intHomeScore, 10) : null,
-        away: e.intAwayScore !== null ? parseInt(e.intAwayScore, 10) : null,
-      },
-      score: { halftime: { home: null, away: null } },
-    };
-  });
-
   return {
     ok: true,
-    data: { response: response },
+    data: { response: lastEvents.map(toAnalysisFixture) },
     teamId: resolvedTeamId,
   };
 }
