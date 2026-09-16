@@ -35,11 +35,65 @@ const LEAGUE_ID_MAP = {
   '61': 4344,   // Portekiz Liga Portugal
   '51': 4636,   // Finlandiya Veikkausliiga
   '40': 4338,   // Belcika First Division A
-  '46': 4340,   // Danimarka Superligaen
+   '46': 4340,   // Danimarka Superligaen
   '64': 4330,   // Iskocya Premiership
 };
 
+/**
+ * Sadece buyuk liglerin/kupalarin gosterilmesi icin TheSportsDB idLeague
+ * beyaz listesi. Eskiden /api/matches, /api/results, /api/live gunun TUM
+ * maclarini (kucuk alt ligler, amator kupa turlari, bilinmeyen bolgesel
+ * ligler dahil - bazi gunler 90+ mac) donduruyordu, bu da uygulamayi
+ * kullanilamaz derecede karisik hale getiriyordu. Artik bu liste disinda
+ * kalan hicbir mac API yanitlarinda gorunmuyor.
+ */
+const WHITELISTED_LEAGUE_IDS = new Set([
+  // --- Avrupa 1. Ligleri ---
+  '4328', // Ingiltere Premier League
+  '4335', // Ispanya La Liga
+  '4332', // Italya Serie A
+  '4331', // Almanya Bundesliga
+  '4334', // Fransa Ligue 1
+  '4337', // Hollanda Eredivisie
+  '4344', // Portekiz Primeira Liga
+  '4330', // Iskocya Premiership
+  '4336', // Yunanistan Super League
+  '4355', // Rusya Premier League
+  '4422', // Polonya Ekstraklasa
+  '4338', // Belcika First Division A
+  '4340', // Danimarka Superligaen
+  '4358', // Norvec Eliteserien
+  '4347', // Isvec Allsvenskan
+  '4636', // Finlandiya Veikkausliiga
+  '4339', // Turkiye Super Lig
+  '4621', // Avusturya Bundesliga
+  '4675', // Isvicre Super League
+  // --- Amerika 1. Ligleri ---
+  '4346', // ABD MLS
+  '4350', // Meksika Liga MX
+  '4351', // Brezilya Serie A
+  '4406', // Arjantin Primera Division
+  // --- Asya 1. Ligleri ---
+  '4633', // Japonya J1 League
+  '4689', // Guney Kore K League 1
+  // --- Buyuk Kupalar / Turnuvalar ---
+  '4480', // UEFA Sampiyonlar Ligi
+  '4481', // UEFA Avrupa Ligi
+  '4482', // Ingiltere FA Cup
+  '4483', // Ispanya Copa del Rey
+  '4484', // Fransa Coupe de France
+  '4485', // Almanya DFB-Pokal
+  '4506', // Italya Coppa Italia
+  '4501', // Copa Libertadores
+  '4490', // UEFA Uluslar Ligi
+]);
+
+function isWhitelistedLeague(leagueId) {
+  return WHITELISTED_LEAGUE_IDS.has(String(leagueId));
+}
+
 async function fetchT(url, timeoutMs) {
+
   const ms = timeoutMs || 10000;
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, ms);
