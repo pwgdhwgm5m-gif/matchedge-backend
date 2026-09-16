@@ -21,14 +21,20 @@
  * BSD'nin API dokumantasyonu tarayicida JS ile render edildigi icin bu
  * sandbox'tan otomatik okunamadi - endpoint yollari ve alan adlari,
  * kullanicinin docs sayfasindan elle paylastigi ekran goruntuleri/ornek
- * JSON'lara dayaniyor (odds endpoint'i icin dogrulanmis ornek: GET
- * /api/v2/events/{id}/odds/, Authorization: Token <key>). Shotmap/stats
- * endpoint'lerinin TAM yolu bu sekilde dogrulanamadi, REST kalibina
- * (/events/{id}/<alt-kaynak>/) gore var sayildi. Bu yuzden her adim
- * savunmaci yazildi: beklenen alan/endpoint bulunamazsa sessizce
- * { available: false } doner, hicbir sey kirilmaz - sadece o mac icin
- * "gercek BSD xG'si" gorunmez, mevcut tahmini xG'ye (liveXgService)
- * dusulur.
+ * JSON'lara dayaniyor. GET /api/v2/events/{id}/stats/ icin alinan gercek
+ * bir ornek yanitla (event_id, kok seviye xg_estimated, stats.home/away.xg
+ * .actual/.estimated, shotmap, momentum, average_positions, xg_per_minute
+ * alanlarinin hepsi TEK yanitta) asagidaki stats.home.xg.actual /
+ * stats.home.xg.estimated yolu DOGRULANDI - bu yuzden eskiden yedek olarak
+ * denenen, dogrulanamamis "kok seviyede home_xg_live/away_xg_live" cagrisi
+ * kaldirildi (gercek ornekte boyle alanlar yoktu, hem gereksiz bir istek
+ * daha atiliyordu). "Estimated mi" karari icin once kok seviye
+ * xg_estimated'a bakiliyor (docs: "the one field to read"), o yoksa
+ * stats.home/away.xg.estimated'a dusuluyor. Yine de beklenmedik bir sekilde
+ * karsilasilirsa (BSD tarafinda API degisirse) her adim savunmaci: alan
+ * bulunamazsa sessizce { available: false } doner, hicbir sey kirilmaz -
+ * sadece o mac icin "gercek BSD xG'si" gorunmez, mevcut tahmini xG'ye
+ * (liveXgService) dusulur.
  */
 
 const { normalizeTeamName } = require('../utils/textNormalize');
@@ -163,44 +169,38 @@ async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
 
 /**
  * Bir BSD event'inin takim bazli gercek/tahmini xG'sini doner.
- * Beklenen sekil (docs ekran goruntulerinden): stats.home.xg.actual,
- * stats.home.xg.estimated (ve away esdegeri). Bu sekil tutmazsa event
- * kokundeki home_xg_live/away_xg_live + xg_estimated alanlarina, o da
- * yoksa { available: false }'a dusuluyor.
+ * Dogrulanmis sekil (GET /events/{id}/stats/ - gercek ornek yanitla
+ * teyit edildi): stats.home.xg.actual, stats.away.xg.actual. "Estimated"
+ * karari icin once yanitin kok seviyesindeki xg_estimated'a bakiliyor
+ * (docs: bu, verinin BSD'nin kendi tahmini mi yoksa gercek olcum mu
+ * oldugunu gosteren asil alan), o alan yoksa stats.home/away.xg.estimated
+ * degerlerinin herhangi biri true ise tahmini sayiliyor. Beklenen xG
+ * alanlari bulunamazsa { available: false } donuyor.
  */
 async function getEventXg(bsdEventId) {
   const statsResult = await fetchBsd('/events/' + bsdEventId + '/stats/', 8000);
-  if (statsResult.ok) {
-    const homeXg = pickField(statsResult.data, ['stats.home.xg.actual']);
-    const awayXg = pickField(statsResult.data, ['stats.away.xg.actual']);
-    if (homeXg !== null && awayXg !== null) {
-      const homeEstimated = pickField(statsResult.data, ['stats.home.xg.estimated']);
-      const awayEstimated = pickField(statsResult.data, ['stats.away.xg.estimated']);
-      return {
-        available: true,
-        home: parseFloat(homeXg),
-        away: parseFloat(awayXg),
-        estimated: !!(homeEstimated || awayEstimated),
-      };
-    }
+  if (!statsResult.ok) return { available: false };
+
+  const homeXg = pickField(statsResult.data, ['stats.home.xg.actual']);
+  const awayXg = pickField(statsResult.data, ['stats.away.xg.actual']);
+  if (homeXg === null || awayXg === null) return { available: false };
+
+  const rootEstimated = pickField(statsResult.data, ['xg_estimated']);
+  let estimated;
+  if (rootEstimated !== null) {
+    estimated = !!rootEstimated;
+  } else {
+    const homeEstimated = pickField(statsResult.data, ['stats.home.xg.estimated']);
+    const awayEstimated = pickField(statsResult.data, ['stats.away.xg.estimated']);
+    estimated = !!(homeEstimated || awayEstimated);
   }
 
-  const rootResult = await fetchBsd('/events/' + bsdEventId + '/', 8000);
-  if (rootResult.ok) {
-    const homeXg = pickField(rootResult.data, ['home_xg_live']);
-    const awayXg = pickField(rootResult.data, ['away_xg_live']);
-    if (homeXg !== null && awayXg !== null) {
-      const rootEstimated = pickField(rootResult.data, ['xg_estimated']);
-      return {
-        available: true,
-        home: parseFloat(homeXg),
-        away: parseFloat(awayXg),
-        estimated: !!rootEstimated,
-      };
-    }
-  }
-
-  return { available: false };
+  return {
+    available: true,
+    home: parseFloat(homeXg),
+    away: parseFloat(awayXg),
+    estimated,
+  };
 }
 
 /**
