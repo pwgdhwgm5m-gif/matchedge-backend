@@ -152,12 +152,22 @@ function toUtcIso(raw) {
 
 function transformEvent(e) {
   const status = String(e.strStatus || '').trim();
+  const statusUpper = status.toUpperCase();
   const eventDateStr = String(e.dateEvent || (e.strTimestamp || '').slice(0, 10) || '');
   const todayStr = new Date().toISOString().slice(0, 10);
   const isPastDate = eventDateStr && eventDateStr < todayStr;
 
-  const finished = FINISHED_STATUSES.has(status) || isPastDate;
-  const isLive = !finished && LIVE_STATUSES.has(status.toUpperCase());
+  // TheSportsDB'nin gunluk mac listesi (eventsday.php) bazi maclarda skoru
+  // doldurmasina ragmen strStatus alanini bos/eksik birakabiliyor (ozellikle
+  // gecmis tarihli, daha az takip edilen liglerde) - bu yuzden bitmis,
+  // skoru belli bir mac yanlislikla "Baslamadi" gorunebiliyordu. Artik: her
+  // iki takimin da skoru doluysa VE mac su an canli degilse, statusShort/
+  // tarih ne derse desin kesin olarak "bitti" sayiyoruz.
+  const hasScore = e.intHomeScore !== null && e.intHomeScore !== undefined &&
+                    e.intAwayScore !== null && e.intAwayScore !== undefined;
+
+  const isLive = !isPastDate && LIVE_STATUSES.has(statusUpper);
+  const finished = !isLive && (FINISHED_STATUSES.has(status) || isPastDate || hasScore);
 
   return {
     fixtureId: e.idEvent,
@@ -173,6 +183,11 @@ function transformEvent(e) {
     awayBadge: e.strAwayTeamBadge || null,
     homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : 0,
     awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : 0,
+    // NOT: TheSportsDB'nin gunluk/gecmis mac listesi endpoint'leri
+    // (eventsday.php, eventspastleague.php) ilk yari skorunu hic saglamiyor -
+    // sadece mac sonu skoru var. Bu alan bu yuzden hep null; frontend zaten
+    // sadece doluyken gosteriyor, dolayisiyla bir sey kirilmiyor, sadece
+    // ilk yari skoru bu ekranda hicbir zaman gorunmeyecek (veri kaynagi sinirlamasi).
     halftimeHome: null,
     halftimeAway: null,
   };
