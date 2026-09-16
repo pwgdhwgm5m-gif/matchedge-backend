@@ -137,6 +137,17 @@ async function getMatchesByDate(dateStr) {
  * vb.) true donuyor - eskiden "NS degilse ve skor varsa canli say" gibi
  * cok gevsek bir kural vardi, bu yanlis pozitiflere yol aciyordu.
  */
+/**
+ * TheSportsDB zaman damgalari UTC ama sonunda 'Z' yok. Bu haliyle
+ * tarayici bunu yerel saat saniyor ve hicbir donusum yapmadan
+ * gosteriyor - Turkiye (UTC+3) icin gercek saatten 3 saat erken
+ * gorunmesine yol aciyordu. 'Z' eklenince dogru donusuyor.
+ */
+function toUtcIso(raw) {
+  if (!raw) return null;
+  return /Z$/i.test(raw) ? raw : raw + 'Z';
+}
+
 function transformEvent(e) {
   const status = String(e.strStatus || '').trim();
   const eventDateStr = String(e.dateEvent || (e.strTimestamp || '').slice(0, 10) || '');
@@ -150,8 +161,8 @@ function transformEvent(e) {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
-    kickoff: e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00')),
-    statusShort: finished ? 'FT' : (status || 'NS'),
+    kickoff: toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00'))),
+
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
     isLive: isLive,
     homeTeam: e.strHomeTeam || '',
