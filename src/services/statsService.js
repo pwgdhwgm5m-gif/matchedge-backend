@@ -1,6 +1,6 @@
 /**
  * Genel form yerine "evindeyken nasil, deplasmandayken nasil"
- * ayrimini cikarir. Bir takim evinde Ã§ok iyi, deplasmanda kotu
+ * ayrimini cikarir. Bir takim evinde çok iyi, deplasmanda kotu
  * olabilir - genel form ortalamasi bunu gizler.
  */
 
@@ -226,7 +226,7 @@ function calculateFatigueMultiplier(restDays) {
 
 /**
  * Son maclardaki galibiyet/maglubiyet serisini bulur (genel form, ev/deplasman
- * ayrimi yapmadan - momentum kavramÄ± venue'dan bagimsizdir).
+ * ayrimi yapmadan - momentum kavrami venue'dan bagimsizdir).
  */
 function calculateStreak(fixtures, teamId) {
   const sorted = [...fixtures]
@@ -264,6 +264,38 @@ function streakMultiplier(streak) {
 }
 
 /**
+ * Iki takimin H2H (birbirlerine karsi) maclarini, HER IKI takimin de
+ * zaten cekilmis olan "son N mac" fikstür listesinden cikarir - ayri bir
+ * API cagrisi GEREKTIRMEZ. API-Football'un h2h endpoint'i kota/askida
+ * oldugu icin hep bos donuyordu; bu fonksiyon TheSportsDB/TFF'den zaten
+ * cekilen form verisini tarayip rakip takimin gectigi maclari (varsa)
+ * bulur. Iki takim ayni ligdeyse son N mac penceresi genelde en az bir
+ * H2H eslesmesi yakalar.
+ * @param {Array} homeFixtures - ev sahibi takimin son maclari (API-Football sekli)
+ * @param {Array} awayFixtures - deplasman takimin son maclari (API-Football sekli)
+ * @param {number|string} homeTeamId
+ * @param {number|string} awayTeamId
+ */
+function deriveH2HFromFixtures(homeFixtures, awayFixtures, homeTeamId, awayTeamId) {
+  const matchesById = new Map();
+
+  function collect(fixtures, opponentId) {
+    if (!opponentId) return;
+    fixtures.forEach(f => {
+      const isVsOpponent = String(f.teams.home.id) === String(opponentId) || String(f.teams.away.id) === String(opponentId);
+      if (isVsOpponent) {
+        matchesById.set(String(f.fixture.id), f);
+      }
+    });
+  }
+
+  collect(homeFixtures, awayTeamId);
+  collect(awayFixtures, homeTeamId);
+
+  return Array.from(matchesById.values()).sort((a, b) => new Date(b.fixture.date) - new Date(a.fixture.date));
+}
+
+/**
  * Bir takimin KENDI ev/deplasman performans farkindan, lig ortalamasi
  * ile harmanlanmis, takime ozel ev sahibi avantaji carpani uretir.
  * Kucuk orneklem riskine karsi %50 takim / %50 lig ortalamasi agirlikli.
@@ -289,6 +321,7 @@ module.exports = {
   splitHomeAwayForm,
   calculateFirstHalfTendency,
   calculateH2HFirstHalfTendency,
+  deriveH2HFromFixtures,
   combineFirstHalfProximity,
   calculateInjuryImpact,
   calculateRestDays,
