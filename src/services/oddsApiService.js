@@ -12,7 +12,7 @@ async function getOddsForLeague(sportKey = 'soccer_epl') {
       params: {
         apiKey: config.oddsApi.key,
         regions: 'eu',
-        markets: 'h2h,totals,btts',
+        markets: 'h2h,totals',
         oddsFormat: 'decimal',
       },
     },
