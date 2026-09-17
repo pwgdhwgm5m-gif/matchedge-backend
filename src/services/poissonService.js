@@ -121,6 +121,34 @@ function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 6) {
   };
 }
 
+function calculateHalfMarkets(homeLambda, awayLambda) {
+  const firstHalf = calculateMatchProbabilities(homeLambda * 0.45, awayLambda * 0.45, 5);
+  const secondHalf = calculateMatchProbabilities(homeLambda * 0.55, awayLambda * 0.55, 5);
+  const firstTotal = (homeLambda + awayLambda) * 0.45;
+  const secondTotal = (homeLambda + awayLambda) * 0.55;
+  let firstMore = 0, secondMore = 0, equal = 0;
+  for (let first = 0; first <= 6; first++) {
+    for (let second = 0; second <= 6; second++) {
+      const p = poissonProbability(firstTotal, first) * poissonProbability(secondTotal, second);
+      if (first > second) firstMore += p; else if (second > first) secondMore += p; else equal += p;
+    }
+  }
+  const total = firstMore + secondMore + equal || 1;
+  return {
+    firstHalf: {
+      home: firstHalf.homeWinProbability, draw: firstHalf.drawProbability, away: firstHalf.awayWinProbability,
+    },
+    secondHalf: {
+      home: secondHalf.homeWinProbability, draw: secondHalf.drawProbability, away: secondHalf.awayWinProbability,
+    },
+    mostGoalsHalf: {
+      first: +((firstMore / total) * 100).toFixed(1),
+      equal: +((equal / total) * 100).toFixed(1),
+      second: +((secondMore / total) * 100).toFixed(1),
+    },
+  };
+}
+
 /** En guclu sinyali ve guven skorunu belirler (mockup'taki "En Guclu Sinyal" karti) */
 function findStrongestSignal(markets) {
   // markets: [{ label: '2.5 Ust Gol', probability: 58.2 }, ...]
@@ -189,6 +217,7 @@ module.exports = {
   calculateExpectedGoals,
   calculateMatchProbabilities,
   calculateMarketProbabilities,
+  calculateHalfMarkets,
   findStrongestSignal,
   calculateDataQualityScore,
   estimateCornerMetrics,
