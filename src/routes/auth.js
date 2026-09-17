@@ -7,6 +7,8 @@ const {
 } = require('../services/authService');
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const { requireAuth } = require('../middleware/authMiddleware');
+const config = require('../config/config');
+const { recordLoginEvent } = require('../services/loginAuditService');
 
 const VERIFICATION_VALID_HOURS = 24;
 const RESET_VALID_MINUTES = 60;
@@ -29,6 +31,9 @@ router.post('/register', async (req, res) => {
   }
   if (!/^\S+@\S+\.\S+$/.test(email)) {
     return res.status(400).json({ error: 'Gecerli bir e-posta adresi gir.' });
+  }
+  if (username.toLowerCase() === config.adminUsername) {
+    return res.status(409).json({ error: 'Bu kullanici adi kullanilamiyor.' });
   }
 
   try {
@@ -66,7 +71,7 @@ router.post('/register', async (req, res) => {
  * body: { username, password }
  */
 router.post('/login', async (req, res) => {
-  const { username, password } = req.body;
+  const { username, password, timezone } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Kullanici adi ve sifre zorunlu.' });
@@ -83,8 +88,18 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Kullanici adi veya sifre hatali.' });
     }
 
+    const now = new Date();
+    if (user.username === config.adminUsername) user.role = 'admin';
+    user.lastLoginAt = now;
+    user.lastActiveAt = now;
+    user.loginCount = (user.loginCount || 0) + 1;
+    await user.save();
+
     const token = generateToken(user);
-    res.json({ token, username: user.username, emailVerified: user.emailVerified });
+    res.json({ token, username: user.username, emailVerified: user.emailVerified, isAdmin: user.role === 'admin' });
+    recordLoginEvent({ user, req, clientTimezone: timezone }).catch(error => {
+      console.error('[auth/login-audit] Hata:', error.message);
+    });
   } catch (err) {
     console.error('[auth/login] Hata:', err.message);
     res.status(500).json({ error: 'Giris yapilamadi. Veritabani baglantisini kontrol et.' });
@@ -97,7 +112,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.userId);
   if (!user) return res.status(404).json({ error: 'Kullanici bulunamadi.' });
-  res.json({ username: user.username, email: user.email, emailVerified: user.emailVerified });
+  res.json({ username: user.username, email: user.email, emailVerified: user.emailVerified, isAdmin: user.role === 'admin' });
 });
 
 /**

@@ -141,7 +141,8 @@ module.exports = {
   // --- Kullanici hesabi / veritabani ---
   mongoUri: process.env.MONGODB_URI || '',
   jwtSecret: process.env.JWT_SECRET || '',
-    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
+  jwtExpiresIn: process.env.JWT_EXPIRES_IN || '30d',
+  adminUsername: (process.env.ADMIN_USERNAME || 'eddas34').trim().toLowerCase(),
 
   backfillSecret: process.env.BACKFILL_SECRET || '',
 

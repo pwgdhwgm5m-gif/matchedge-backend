@@ -11,6 +11,7 @@ const resultsRoute = require('./routes/results');
 const authRoute = require('./routes/auth');
 const notesRoute = require('./routes/notes');
 const favoritesRoute = require('./routes/favorites');
+const adminRoute = require('./routes/admin');
 const { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron } = require('./cron/precomputeJob');
 
 const app = express();
@@ -35,6 +36,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRoute);
 app.use('/api/notes', notesRoute);
 app.use('/api/favorites', favoritesRoute);
+app.use('/api/admin', adminRoute);
 app.use('/api/matches', matchesRoute);
 app.use('/api/analysis', analysisRoute);
 app.use('/api/live', liveRoute);
