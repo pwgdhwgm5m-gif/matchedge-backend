@@ -16,7 +16,7 @@ const couponSchema = new mongoose.Schema({
   league: { type: String, default: '' },
   kickoff: { type: Date, default: null },
   matchDate: { type: String, default: null },
-  selections: { type: [selectionSchema], validate: value => value.length > 0 && value.length <= 9 },
+  selections: { type: [selectionSchema], validate: value => value.length > 0 && value.length <= 3 },
   status: { type: String, enum: ['pending', 'won', 'lost', 'void'], default: 'pending' },
   finalScore: { home: Number, away: Number },
   settledAt: { type: Date, default: null },
