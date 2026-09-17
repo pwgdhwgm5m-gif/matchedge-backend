@@ -50,7 +50,7 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const { fixtureId, homeTeam, awayTeam, league, kickoff, selections } = req.body;
-  const safeSelections = Array.isArray(selections)
+  let safeSelections = Array.isArray(selections)
     ? selections.filter(item => ALLOWED_KEYS.has(item.key)).slice(0, 9).map(item => ({
         key: item.key, market: String(item.market || '').slice(0, 30),
         label: String(item.label || '').slice(0, 50), probability: Number(item.probability) || null,
@@ -58,6 +58,9 @@ router.post('/', async (req, res) => {
     : [];
   if (!fixtureId || !homeTeam || !awayTeam || !safeSelections.length) return res.status(400).json({ error: 'Maç ve seçim gerekli.' });
   try {
+    const existingKeys = await CommunityPick.find({ userId: req.user.userId, fixtureId: String(fixtureId), key: { $in: safeSelections.map(s => s.key) } }).distinct('key');
+    safeSelections = safeSelections.filter(selection => !existingKeys.includes(selection.key));
+    if (!safeSelections.length) return res.status(409).json({ error: 'Bu seçimleri daha önce Tribün Analizi’ne ekledin.' });
     const date = kickoff ? new Date(kickoff) : null;
     const coupon = await Coupon.create({
       userId: req.user.userId, fixtureId, homeTeam, awayTeam, league, kickoff: date,
