@@ -120,10 +120,10 @@ router.post('/settle', async (req, res) => {
         coupon.xpAwarded = xp;
         coupon.coinsAwarded = coins;
       }
-      await CommunityPick.updateMany(
-        { userId: coupon.userId, fixtureId: coupon.fixtureId, key: { $in: coupon.selections.map(s => s.key) } },
-        [{ $set: { result: { $let: { vars: { found: { $arrayElemAt: [{ $filter: { input: coupon.selections.map(s => ({ key: s.key, result: s.result })), as: 's', cond: { $eq: ['$s.key', '$key'] } } }, 0] } }, in: '$found.result' } }, settledAt: new Date() } }]
-      ).catch(() => {});
+      await Promise.all(coupon.selections.map(selection => CommunityPick.updateOne(
+        { userId: coupon.userId, fixtureId: coupon.fixtureId, key: selection.key },
+        { result: selection.result, settledAt: new Date() }
+      ))).catch(() => {});
       await coupon.save();
     }
     res.json({ checked: coupons.length });
