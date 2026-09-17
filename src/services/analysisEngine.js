@@ -7,6 +7,7 @@ const stats = require('./statsService');
 const motivation = require('./motivationService');
 const tffScraper = require('./tffScraper');
 const sportsDb = require('./sportsDbService');
+const premiumIntelligence = require('./premiumIntelligenceService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -228,6 +229,21 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   ).length + (h2hSucceeded ? 1 : 0);
   const dataQualityScore = poisson.calculateDataQualityScore(successCount, 5, 0);
 
+  const premium = premiumIntelligence.buildPremiumIntelligence({
+    modelProbabilities: matchProbabilities,
+    marketProbabilities: marketImpliedProbabilities,
+    matchOdds,
+    homePlayed: homeForm.played,
+    awayPlayed: awayForm.played,
+    hasStandings: standingsTable.length > 0,
+    injuriesAvailable: injuriesResult.status === 'fulfilled' && injuriesResult.value.ok === true,
+    h2hCount: h2hFixturesRaw.length,
+    homeLambda,
+    awayLambda,
+    homeForm,
+    awayForm,
+  });
+
   const strongestSignal = poisson.findStrongestSignal([
     { label: '2.5 Ust Gol', probability: marketProbabilities.over25GoalsPercent },
     { label: 'KG Var', probability: marketProbabilities.bttsPercent },
@@ -245,6 +261,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     firstHalfProximity,
     dataQualityScore,
     strongestSignal,
+    premium,
     injuries,
     homeAwayForm: homeAwaySplit,
     motivation: { home: motivationHome, away: motivationAway },
