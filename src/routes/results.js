@@ -3,6 +3,7 @@ const router = express.Router();
 const cache = require('../utils/cache');
 const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
+const footballDataOrg = require('../services/footballDataOrgService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -21,13 +22,14 @@ router.get('/', async (req, res) => {
   // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
   // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
   // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
-  const [result, liveResult] = await Promise.all([
+  const [result, liveResult, verifiedResult] = await Promise.all([
     cache.getOrFetch(
       `results:${date}`,
       config.cache.ttlLive,
       () => sportsDb.getMatchesByDate(date)
     ),
     cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
+    cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
   ]);
 
   if (!result.ok) {
@@ -46,13 +48,25 @@ router.get('/', async (req, res) => {
     simplified = sportsDb.applyLiveOverlay(simplified, rawLive);
   }
 
+  // football-data.org is the primary score verifier for the competitions it
+  // covers. It supplies explicit full-time and half-time score objects.
+  // Unmatched leagues stay untouched and continue through TheSportsDB.
+  if (verifiedResult.ok) {
+    simplified = footballDataOrg.mergeVerifiedScores(simplified, verifiedResult.matches);
+  }
+
   // Sonuclar ekraninda "Ilk Yari - Mac Sonu" skorunu gosterebilmek icin,
   // suresi dolmus (veya ilk yariyi gecmis canli) maclarin ilk yari skorunu
   // mac zaman cizelgesinden hesaplayip dolduruyoruz (bkz. sportsDbService).
   // Sonucu cache'lendigi icin bu sadece her mac icin ilk seferde maliyetli.
   simplified = await sportsDb.attachHalftimeScores(simplified);
 
-  res.json({ date, matches: simplified, fromCache: result.fromCache });
+  res.json({
+    date,
+    matches: simplified,
+    fromCache: result.fromCache,
+    verificationSource: verifiedResult.ok ? 'football-data.org' : 'thesportsdb-fallback',
+  });
 });
 
 module.exports = router;

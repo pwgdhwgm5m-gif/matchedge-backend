@@ -70,6 +70,11 @@ module.exports = {
     baseUrl: 'https://www.thesportsdb.com/api/v1/json',
   },
 
+  footballDataOrg: {
+    token: process.env.FOOTBALL_DATA_TOKEN || '',
+    baseUrl: 'https://api.football-data.org/v4',
+  },
+
   cache: {
     ttlStatic: parseInt(process.env.CACHE_TTL_STATIC || '900', 10),      // 15 dk
     ttlLive: parseInt(process.env.CACHE_TTL_LIVE || '45', 10),           // 45 sn
