@@ -40,6 +40,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, data
     .sort((a, b) => b.score - a.score || b.probability - a.probability);
 
   return {
+    allMarkets: candidates,
     topPredictions: candidates.slice(0, 3),
     best: candidates[0] || null,
     valuePicks: candidates.filter(item => item.isValue),
