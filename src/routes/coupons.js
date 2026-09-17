@@ -1,5 +1,7 @@
 const express = require('express');
 const Coupon = require('../models/Coupon');
+const CommunityPick = require('../models/CommunityPick');
+const User = require('../models/User');
 const { requireAuth } = require('../middleware/authMiddleware');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
@@ -62,6 +64,11 @@ router.post('/', async (req, res) => {
       matchDate: date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : null,
       selections: safeSelections,
     });
+    await Promise.all(safeSelections.map(selection => CommunityPick.findOneAndUpdate(
+      { userId: req.user.userId, fixtureId: String(fixtureId), key: selection.key },
+      { userId: req.user.userId, fixtureId: String(fixtureId), homeTeam, awayTeam, league: league || '', kickoff: date, key: selection.key, market: selection.market, label: selection.label },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    )));
     res.status(201).json({ coupon });
   } catch (error) {
     res.status(500).json({ error: 'Kupon oluşturulamadı.' });
@@ -93,6 +100,30 @@ router.post('/settle', async (req, res) => {
       coupon.status = coupon.selections.some(s => s.result === 'lost') ? 'lost' : coupon.selections.every(s => s.result === 'won') ? 'won' : 'pending';
       coupon.settledAt = coupon.status === 'pending' ? null : new Date();
       coupon.markModified('selections');
+
+      if (coupon.status !== 'pending' && !coupon.rewardsProcessed) {
+        const won = coupon.selections.filter(s => s.result === 'won').length;
+        const lost = coupon.selections.filter(s => s.result === 'lost').length;
+        const xp = won * 10 + lost * 2;
+        const coins = won * 10 + (coupon.status === 'won' && coupon.selections.length > 1 ? 5 * coupon.selections.length : 0);
+        const user = await User.findById(coupon.userId);
+        if (user) {
+          user.xp = (user.xp || 0) + xp;
+          user.edgeCoins = (user.edgeCoins || 0) + coins;
+          user.correctPicks = (user.correctPicks || 0) + won;
+          user.wrongPicks = (user.wrongPicks || 0) + lost;
+          user.currentStreak = lost ? 0 : (user.currentStreak || 0) + won;
+          user.bestStreak = Math.max(user.bestStreak || 0, user.currentStreak || 0);
+          await user.save();
+        }
+        coupon.rewardsProcessed = true;
+        coupon.xpAwarded = xp;
+        coupon.coinsAwarded = coins;
+      }
+      await CommunityPick.updateMany(
+        { userId: coupon.userId, fixtureId: coupon.fixtureId, key: { $in: coupon.selections.map(s => s.key) } },
+        [{ $set: { result: { $let: { vars: { found: { $arrayElemAt: [{ $filter: { input: coupon.selections.map(s => ({ key: s.key, result: s.result })), as: 's', cond: { $eq: ['$s.key', '$key'] } } }, 0] } }, in: '$found.result' } }, settledAt: new Date() } }]
+      ).catch(() => {});
       await coupon.save();
     }
     res.json({ checked: coupons.length });
