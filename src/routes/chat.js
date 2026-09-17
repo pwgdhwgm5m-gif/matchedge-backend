@@ -5,6 +5,7 @@ const SupportTicket = require('../models/SupportTicket');
 const User = require('../models/User');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { moderateMessage } = require('../services/chatModerationService');
+const { rankForXp } = require('../services/gamificationService');
 
 const router = express.Router();
 const rateWindows = new Map();
@@ -85,15 +86,25 @@ router.get('/:fixtureId', async (req, res) => {
     author: { $nin: blocked },
   };
   const messages = await ChatMessage.find(query).sort({ createdAt: -1 }).limit(100).lean();
+  const authors = await User.find({ _id: { $in: messages.map(m => m.author) } }).select('xp edgeCoins correctPicks wrongPicks').lean();
+  const profiles = new Map(authors.map(a => [String(a._id), a]));
   res.json({
-    messages: messages.reverse().map(item => ({
+    messages: messages.reverse().map(item => {
+      const profile = profiles.get(String(item.author)) || {};
+      const rank = rankForXp(profile.xp || 0);
+      const total = (profile.correctPicks || 0) + (profile.wrongPicks || 0);
+      return {
       id: item._id,
       authorId: item.author,
       authorName: item.authorName,
       text: item.text,
       createdAt: item.createdAt,
       mine: String(item.author) === String(req.user.userId),
-    })),
+      rank,
+      xp: profile.xp || 0,
+      edgeCoins: profile.edgeCoins || 0,
+      accuracy: total ? Math.round((profile.correctPicks / total) * 100) : 0,
+    }}),
     rulesAccepted: Boolean(user.chatRulesAcceptedAt),
     suspendedUntil: user.chatSuspendedUntil || null,
   });
@@ -134,6 +145,9 @@ router.post('/:fixtureId', async (req, res) => {
       text: message.text,
       createdAt: message.createdAt,
       mine: true,
+      rank: rankForXp(user.xp || 0),
+      xp: user.xp || 0,
+      edgeCoins: user.edgeCoins || 0,
     },
   });
 });
