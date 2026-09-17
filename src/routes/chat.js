@@ -52,11 +52,19 @@ router.patch('/moderation/:messageId', requireAdmin, async (req, res) => {
   res.json({ message });
 });
 
+router.get('/moderation/tickets', requireAdmin, async (req, res) => {
+  const tickets = await SupportTicket.find({ status: 'open' }).sort({ createdAt: -1 }).limit(200).lean();
+  res.json({ tickets });
+});
+
+router.patch('/moderation/tickets/:ticketId', requireAdmin, async (req, res) => {
+  if (!validId(req.params.ticketId)) return res.status(400).json({ error: 'Geçersiz destek talebi.' });
+  const ticket = await SupportTicket.findByIdAndUpdate(req.params.ticketId, { status: 'resolved' }, { new: true });
+  if (!ticket) return res.status(404).json({ error: 'Destek talebi bulunamadı.' });
+  res.json({ ticket });
+});
+
 router.post('/support', async (req, res) => {
-  const moderation = moderateMessage(req.body.message);
-  if (!moderation.ok && moderation.code !== 'CONTACT') {
-    return res.status(400).json({ error: moderation.message });
-  }
   const message = String(req.body.message || '').trim();
   if (!message || message.length > 1000) return res.status(400).json({ error: 'Destek mesajı 1-1000 karakter olmalı.' });
   const ticket = await SupportTicket.create({
