@@ -16,7 +16,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, dataHealth, premium }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium }) {
   const health = Number(dataHealth?.score || 0);
   const candidates = [
     { key: 'home', market: '1X2', label: 'Ev Sahibi', probability: Number(modelProbabilities?.homeWinProbability || 0) },
@@ -28,6 +28,15 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, data
     { key: 'bttsNo', market: 'KG', label: 'KG Yok', probability: 100 - Number(goalMarkets?.bttsPercent || 0) },
     { key: 'cornersOver85', market: 'KORNER', label: '8.5 Üst Korner', probability: Number(cornerMetrics?.over85Percent || 0) },
     { key: 'cornersUnder85', market: 'KORNER', label: '8.5 Alt Korner', probability: 100 - Number(cornerMetrics?.over85Percent || 0) },
+    { key: 'fhHome', market: 'İLK YARI', label: 'Ev Sahibi', probability: Number(halfMarkets?.firstHalf?.home || 0) },
+    { key: 'fhDraw', market: 'İLK YARI', label: 'Beraberlik', probability: Number(halfMarkets?.firstHalf?.draw || 0) },
+    { key: 'fhAway', market: 'İLK YARI', label: 'Deplasman', probability: Number(halfMarkets?.firstHalf?.away || 0) },
+    { key: 'shHome', market: 'İKİNCİ YARI', label: 'Ev Sahibi', probability: Number(halfMarkets?.secondHalf?.home || 0) },
+    { key: 'shDraw', market: 'İKİNCİ YARI', label: 'Beraberlik', probability: Number(halfMarkets?.secondHalf?.draw || 0) },
+    { key: 'shAway', market: 'İKİNCİ YARI', label: 'Deplasman', probability: Number(halfMarkets?.secondHalf?.away || 0) },
+    { key: 'mostGoalsFirst', market: 'EN GOLLÜ YARI', label: 'İlk Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.first || 0) },
+    { key: 'mostGoalsEqual', market: 'EN GOLLÜ YARI', label: 'Eşit', probability: Number(halfMarkets?.mostGoalsHalf?.equal || 0) },
+    { key: 'mostGoalsSecond', market: 'EN GOLLÜ YARI', label: 'İkinci Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.second || 0) },
   ].filter(item => Number.isFinite(item.probability) && item.probability > 0 && item.probability < 100)
     .map(item => ({
       ...item,
