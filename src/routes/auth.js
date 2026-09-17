@@ -114,7 +114,7 @@ router.post('/login', async (req, res) => {
     await user.save();
 
     const token = generateToken(user);
-    res.json({ token, username: user.username, emailVerified: user.emailVerified, isAdmin: user.role === 'admin' });
+    res.json({ token, username: user.username, email: user.email, emailVerified: user.emailVerified, isAdmin: user.role === 'admin' });
     recordLoginEvent({ user, req, clientTimezone: timezone }).catch(error => {
       console.error('[auth/login-audit] Hata:', error.message);
     });
