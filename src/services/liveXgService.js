@@ -49,7 +49,7 @@ const GOAL_PROXIMITY_WEIGHTS = {
   shotsOnTarget: 3,
   dangerousAttacks: 0.4,
   corners: 0.8,
-  liveXg: 8,
+  liveXg: 12,
 };
 
 function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg) {
