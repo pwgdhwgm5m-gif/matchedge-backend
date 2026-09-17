@@ -7,9 +7,9 @@ const footballDataOrg = require('../services/footballDataOrgService');
 const router = express.Router();
 router.use(requireAuth);
 
-const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver85', 'cornersUnder85']);
+const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond']);
 
-function settleSelection(key, home, away, corners) {
+function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   const total = home + away;
   if (key === 'home') return home > away ? 'won' : 'lost';
   if (key === 'draw') return home === away ? 'won' : 'lost';
@@ -20,6 +20,20 @@ function settleSelection(key, home, away, corners) {
   if (key === 'bttsNo') return home === 0 || away === 0 ? 'won' : 'lost';
   if (key === 'cornersOver85' && corners != null) return corners > 8.5 ? 'won' : 'lost';
   if (key === 'cornersUnder85' && corners != null) return corners < 8.5 ? 'won' : 'lost';
+  if (halftimeHome == null || halftimeAway == null) return 'pending';
+  const secondHome = home - halftimeHome;
+  const secondAway = away - halftimeAway;
+  if (key === 'fhHome') return halftimeHome > halftimeAway ? 'won' : 'lost';
+  if (key === 'fhDraw') return halftimeHome === halftimeAway ? 'won' : 'lost';
+  if (key === 'fhAway') return halftimeAway > halftimeHome ? 'won' : 'lost';
+  if (key === 'shHome') return secondHome > secondAway ? 'won' : 'lost';
+  if (key === 'shDraw') return secondHome === secondAway ? 'won' : 'lost';
+  if (key === 'shAway') return secondAway > secondHome ? 'won' : 'lost';
+  const firstGoals = halftimeHome + halftimeAway;
+  const secondGoals = secondHome + secondAway;
+  if (key === 'mostGoalsFirst') return firstGoals > secondGoals ? 'won' : 'lost';
+  if (key === 'mostGoalsEqual') return firstGoals === secondGoals ? 'won' : 'lost';
+  if (key === 'mostGoalsSecond') return secondGoals > firstGoals ? 'won' : 'lost';
   return 'pending';
 }
 
@@ -63,6 +77,7 @@ router.post('/settle', async (req, res) => {
       const [raw, verified] = await Promise.all([sportsDb.getMatchesByDate(date), footballDataOrg.getMatchesByDate(date)]);
       let matches = raw.ok ? (raw.data?.events || []).map(sportsDb.transformEvent) : [];
       if (verified.ok) matches = footballDataOrg.mergeVerifiedScores(matches, verified.matches);
+      matches = await sportsDb.attachHalftimeScores(matches);
       matchesByDate.set(date, matches);
     }
     for (const coupon of coupons) {
@@ -73,7 +88,7 @@ router.post('/settle', async (req, res) => {
         const stats = await sportsDb.getEventStatsFormatted(coupon.fixtureId);
         if (stats.available && stats.stats?.corners) corners = Number(stats.stats.corners.home || 0) + Number(stats.stats.corners.away || 0);
       }
-      coupon.selections.forEach(selection => { selection.result = settleSelection(selection.key, match.homeScore, match.awayScore, corners); });
+      coupon.selections.forEach(selection => { selection.result = settleSelection(selection.key, match.homeScore, match.awayScore, corners, match.halftimeHome, match.halftimeAway); });
       coupon.finalScore = { home: match.homeScore, away: match.awayScore };
       coupon.status = coupon.selections.some(s => s.result === 'lost') ? 'lost' : coupon.selections.every(s => s.result === 'won') ? 'won' : 'pending';
       coupon.settledAt = coupon.status === 'pending' ? null : new Date();
