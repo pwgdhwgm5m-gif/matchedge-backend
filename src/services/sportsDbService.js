@@ -1,6 +1,6 @@
 /**
  * sportsDbService.js
- * MatchEdge — TheSportsDB (Premium) veri kaynağı.
+ * SoccerEdge Pro — TheSportsDB (Premium) veri kaynağı.
  * free-api-live-football-data aylık kotasını doldurdugu icin
  * /api/matches ve diger liglerin form verisi bu kaynaga tasindi.
  */

@@ -1,6 +1,6 @@
 /**
  * tffScraper.js
- * MatchEdge — Trendyol Süper Lig veri kaynağı (TFF.org scraping)
+ * SoccerEdge Pro — Trendyol Süper Lig veri kaynağı (TFF.org scraping)
  */
 
 const cheerio = require('cheerio');

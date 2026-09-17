@@ -1,6 +1,6 @@
 /**
  * bsdService.js
- * MatchEdge — Bzzoiro Sports Data (BSD, sports.bzzoiro.com) entegrasyonu.
+ * SoccerEdge Pro — Bzzoiro Sports Data (BSD, sports.bzzoiro.com) entegrasyonu.
  *
  * NEDEN: TheSportsDB gercek xG'yi SADECE kendi Pro/Premium eslestirmesinin
  * kapsadigi buyuk liglerde saglıyor (bkz. sportsDbService.js). BSD ikinci
