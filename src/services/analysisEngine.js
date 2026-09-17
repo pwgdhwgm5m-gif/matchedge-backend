@@ -248,6 +248,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     { label: '2.5 Ust Gol', probability: marketProbabilities.over25GoalsPercent },
     { label: 'KG Var', probability: marketProbabilities.bttsPercent },
   ]);
+  const marketBoard = premiumIntelligence.buildMarketBoard({
+    modelProbabilities: matchProbabilities,
+    goalMarkets: marketProbabilities,
+    cornerMetrics,
+    dataHealth: premium.dataHealth,
+    premium,
+  });
 
   return {
     fixtureId,
@@ -261,6 +268,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     firstHalfProximity,
     dataQualityScore,
     strongestSignal,
+    marketBoard,
     premium,
     injuries,
     homeAwayForm: homeAwaySplit,
