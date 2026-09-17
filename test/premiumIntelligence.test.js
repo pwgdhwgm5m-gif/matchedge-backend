@@ -32,7 +32,8 @@ const earlySeason = buildPremiumIntelligence({
   h2hCount: 0,
 });
 
-assert.equal(earlySeason.status, 'NO_BET');
+assert.equal(earlySeason.status, 'PICK');
+assert.equal(earlySeason.selection, 'home');
 assert.ok(earlySeason.blockers.includes('SMALL_SAMPLE'));
 
 const noOdds = buildPremiumIntelligence({
@@ -44,8 +45,10 @@ const noOdds = buildPremiumIntelligence({
   h2hCount: 1,
 });
 
-assert.equal(noOdds.status, 'WATCH');
-assert.equal(noOdds.bestEdge, null);
+assert.equal(noOdds.status, 'PICK');
+assert.equal(noOdds.selection, 'home');
+assert.equal(noOdds.bestEdge.modelProbability, 45);
+assert.equal(noOdds.bestEdge.edgePoints, null);
 assert.ok(noOdds.blockers.includes('NO_MARKET_ODDS'));
 
 console.log('premiumIntelligence tests passed');
