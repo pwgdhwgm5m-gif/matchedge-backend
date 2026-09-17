@@ -45,6 +45,9 @@ const userSchema = new mongoose.Schema({
   blockedChatUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   verificationTokenHash: { type: String, default: null },
   verificationExpires: { type: Date, default: null },
+  verificationCodeHash: { type: String, default: null },
+  verificationCodeAttempts: { type: Number, default: 0, min: 0 },
+  verificationLastSentAt: { type: Date, default: null },
   resetTokenHash: { type: String, default: null },
   resetExpires: { type: Date, default: null },
   createdAt: {
