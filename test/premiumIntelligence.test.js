@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { buildPremiumIntelligence } = require('../src/services/premiumIntelligenceService');
+const { buildPremiumIntelligence, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
 
 const strong = buildPremiumIntelligence({
   modelProbabilities: { homeWinProbability: 60, drawProbability: 23, awayWinProbability: 17 },
@@ -52,3 +52,14 @@ assert.equal(noOdds.bestEdge.edgePoints, null);
 assert.ok(noOdds.blockers.includes('NO_MARKET_ODDS'));
 
 console.log('premiumIntelligence tests passed');
+
+const board = buildMarketBoard({
+  modelProbabilities: { homeWinProbability: 44, drawProbability: 28, awayWinProbability: 28 },
+  goalMarkets: { over25GoalsPercent: 68, bttsPercent: 61 },
+  cornerMetrics: { over85Percent: 72 },
+  dataHealth: { score: 80 },
+  premium: { status: 'PICK', selection: 'home', bestEdge: null },
+});
+assert.equal(board.best.key, 'cornersOver85');
+assert.equal(board.topPredictions.length, 3);
+assert.ok(board.topPredictions.some(item => item.key === 'over25'));
