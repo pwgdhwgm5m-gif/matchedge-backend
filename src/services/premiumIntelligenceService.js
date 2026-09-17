@@ -65,6 +65,12 @@ function buildPremiumIntelligence({
     h2hCount,
   });
 
+  const modelChoices = OUTCOMES.map(outcome => ({
+    outcome: outcome.key,
+    modelProbability: Number(modelProbabilities?.[outcome.modelKey] || 0),
+  })).sort((a, b) => b.modelProbability - a.modelProbability);
+  const hasModel = modelChoices.some(choice => choice.modelProbability > 0);
+
   const edges = hasOdds
     ? OUTCOMES.map(outcome => {
         const model = Number(modelProbabilities?.[outcome.modelKey] || 0);
@@ -83,7 +89,14 @@ function buildPremiumIntelligence({
       }).sort((a, b) => b.edgePoints - a.edgePoints)
     : [];
 
-  const bestEdge = edges[0] || null;
+  const bestEdge = edges[0] || (hasModel ? {
+    ...modelChoices[0],
+    marketProbability: null,
+    edgePoints: null,
+    odds: null,
+    fairOdds: modelChoices[0].modelProbability > 0 ? +(100 / modelChoices[0].modelProbability).toFixed(2) : null,
+    positive: false,
+  } : null);
   const minSample = Math.min(homePlayed, awayPlayed);
   const blockers = [];
   if (homePlayed < 5 || awayPlayed < 5) blockers.push('SMALL_SAMPLE');
@@ -91,10 +104,12 @@ function buildPremiumIntelligence({
   if (!hasStandings) blockers.push('NO_STANDINGS');
   if (dataHealth.score < 55) blockers.push('LOW_DATA_HEALTH');
 
+  // Always surface the model's strongest actionable lean when a prediction is
+  // available. VALUE remains reserved for a price-backed edge; NO_BET is used
+  // only when the model itself cannot produce a valid selection.
   let status = 'NO_BET';
-  if (!hasOdds) status = 'WATCH';
-  else if (minSample >= 5 && dataHealth.score >= 70 && bestEdge?.edgePoints >= 5) status = 'VALUE';
-  else if (minSample >= 3 && dataHealth.score >= 55 && bestEdge?.edgePoints >= 3) status = 'WATCH';
+  if (hasModel) status = 'PICK';
+  if (hasOdds && minSample >= 3 && dataHealth.score >= 55 && bestEdge?.edgePoints >= 3) status = 'VALUE';
 
   const drivers = [];
   if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_XG_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
@@ -105,7 +120,7 @@ function buildPremiumIntelligence({
   if ((awayForm?.avgGoalsAgainst || 0) >= 1.5) drivers.push({ code: 'AWAY_DEFENCE_RISK', strength: awayForm.avgGoalsAgainst });
 
   return {
-    version: 'premium-v1',
+    version: 'premium-v2',
     status,
     selection: bestEdge?.outcome || null,
     bestEdge,
@@ -115,7 +130,7 @@ function buildPremiumIntelligence({
     drivers: drivers.slice(0, 4),
     methodology: {
       edgeUsesModelOnly: true,
-      minimumValueEdgePoints: 5,
+      minimumValueEdgePoints: 3,
       minimumFullSample: 5,
     },
   };
