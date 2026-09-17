@@ -20,6 +20,9 @@ const couponSchema = new mongoose.Schema({
   status: { type: String, enum: ['pending', 'won', 'lost', 'void'], default: 'pending' },
   finalScore: { home: Number, away: Number },
   settledAt: { type: Date, default: null },
+  rewardsProcessed: { type: Boolean, default: false, index: true },
+  xpAwarded: { type: Number, default: 0, min: 0 },
+  coinsAwarded: { type: Number, default: 0, min: 0 },
   createdAt: { type: Date, default: Date.now },
 });
 
