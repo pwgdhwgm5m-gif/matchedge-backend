@@ -1,0 +1,124 @@
+/**
+ * MatchEdge Premium Intelligence
+ *
+ * Produces a transparent decision layer above the raw probability model.
+ * It deliberately uses model-only probabilities for edge calculations; using
+ * the already market-blended probability would hide disagreement with price.
+ */
+
+const OUTCOMES = [
+  { key: 'home', modelKey: 'homeWinProbability', marketKey: 'home', oddsKey: 'home' },
+  { key: 'draw', modelKey: 'drawProbability', marketKey: 'draw', oddsKey: 'draw' },
+  { key: 'away', modelKey: 'awayWinProbability', marketKey: 'away', oddsKey: 'away' },
+];
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function buildDataHealth({ homePlayed, awayPlayed, hasOdds, hasStandings, injuriesAvailable, h2hCount }) {
+  const homeSample = clamp(homePlayed / 5, 0, 1);
+  const awaySample = clamp(awayPlayed / 5, 0, 1);
+  const score = Math.round(
+    homeSample * 25 +
+    awaySample * 25 +
+    (hasOdds ? 20 : 0) +
+    (hasStandings ? 10 : 0) +
+    (injuriesAvailable ? 10 : 0) +
+    (h2hCount > 0 ? 10 : 0)
+  );
+
+  return {
+    score,
+    level: score >= 80 ? 'high' : score >= 55 ? 'medium' : 'low',
+    sample: { home: homePlayed, away: awayPlayed, target: 5 },
+    checks: {
+      odds: hasOdds,
+      standings: hasStandings,
+      injuries: injuriesAvailable,
+      h2h: h2hCount > 0,
+    },
+  };
+}
+
+function buildPremiumIntelligence({
+  modelProbabilities,
+  marketProbabilities,
+  matchOdds,
+  homePlayed = 0,
+  awayPlayed = 0,
+  hasStandings = false,
+  injuriesAvailable = false,
+  h2hCount = 0,
+  homeLambda = 0,
+  awayLambda = 0,
+  homeForm,
+  awayForm,
+}) {
+  const hasOdds = !!(marketProbabilities && matchOdds);
+  const dataHealth = buildDataHealth({
+    homePlayed,
+    awayPlayed,
+    hasOdds,
+    hasStandings,
+    injuriesAvailable,
+    h2hCount,
+  });
+
+  const edges = hasOdds
+    ? OUTCOMES.map(outcome => {
+        const model = Number(modelProbabilities?.[outcome.modelKey] || 0);
+        const market = Number(marketProbabilities?.[outcome.marketKey] || 0);
+        const odds = Number(matchOdds?.[outcome.oddsKey] || 0);
+        const edgePoints = +(model - market).toFixed(1);
+        return {
+          outcome: outcome.key,
+          modelProbability: model,
+          marketProbability: market,
+          edgePoints,
+          odds,
+          fairOdds: model > 0 ? +(100 / model).toFixed(2) : null,
+          positive: edgePoints >= 3,
+        };
+      }).sort((a, b) => b.edgePoints - a.edgePoints)
+    : [];
+
+  const bestEdge = edges[0] || null;
+  const minSample = Math.min(homePlayed, awayPlayed);
+  const blockers = [];
+  if (homePlayed < 5 || awayPlayed < 5) blockers.push('SMALL_SAMPLE');
+  if (!hasOdds) blockers.push('NO_MARKET_ODDS');
+  if (!hasStandings) blockers.push('NO_STANDINGS');
+  if (dataHealth.score < 55) blockers.push('LOW_DATA_HEALTH');
+
+  let status = 'NO_BET';
+  if (!hasOdds) status = 'WATCH';
+  else if (minSample >= 5 && dataHealth.score >= 70 && bestEdge?.edgePoints >= 5) status = 'VALUE';
+  else if (minSample >= 3 && dataHealth.score >= 55 && bestEdge?.edgePoints >= 3) status = 'WATCH';
+
+  const drivers = [];
+  if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_XG_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
+  if (awayLambda > homeLambda + 0.35) drivers.push({ code: 'AWAY_XG_EDGE', strength: +(awayLambda - homeLambda).toFixed(2) });
+  if ((homeForm?.avgGoalsFor || 0) >= 1.5) drivers.push({ code: 'HOME_ATTACK_FORM', strength: homeForm.avgGoalsFor });
+  if ((awayForm?.avgGoalsFor || 0) >= 1.5) drivers.push({ code: 'AWAY_ATTACK_FORM', strength: awayForm.avgGoalsFor });
+  if ((homeForm?.avgGoalsAgainst || 0) >= 1.5) drivers.push({ code: 'HOME_DEFENCE_RISK', strength: homeForm.avgGoalsAgainst });
+  if ((awayForm?.avgGoalsAgainst || 0) >= 1.5) drivers.push({ code: 'AWAY_DEFENCE_RISK', strength: awayForm.avgGoalsAgainst });
+
+  return {
+    version: 'premium-v1',
+    status,
+    selection: bestEdge?.outcome || null,
+    bestEdge,
+    edges,
+    dataHealth,
+    blockers,
+    drivers: drivers.slice(0, 4),
+    methodology: {
+      edgeUsesModelOnly: true,
+      minimumValueEdgePoints: 5,
+      minimumFullSample: 5,
+    },
+  };
+}
+
+module.exports = { buildPremiumIntelligence, buildDataHealth };
