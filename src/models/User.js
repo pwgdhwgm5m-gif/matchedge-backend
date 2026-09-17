@@ -42,7 +42,7 @@ const userSchema = new mongoose.Schema({
   loginCount: { type: Number, default: 0, min: 0 },
   xp: { type: Number, default: 0, min: 0, index: true },
   edgeCoins: { type: Number, default: 100, min: 0 },
-  walletVersion: { type: Number, default: 1 },
+  walletVersion: { type: Number, default: 0 },
   dailyLoginStreak: { type: Number, default: 0, min: 0, max: 7 },
   lastDailyClaimAt: { type: Date, default: null },
   totalCoinsWon: { type: Number, default: 0, min: 0 },
