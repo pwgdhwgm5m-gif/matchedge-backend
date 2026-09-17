@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { buildPremiumIntelligence, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
+const { calculateHalfMarkets } = require('../src/services/poissonService');
 
 const strong = buildPremiumIntelligence({
   modelProbabilities: { homeWinProbability: 60, drawProbability: 23, awayWinProbability: 17 },
@@ -63,3 +64,8 @@ const board = buildMarketBoard({
 assert.equal(board.best.key, 'cornersOver85');
 assert.equal(board.topPredictions.length, 3);
 assert.ok(board.topPredictions.some(item => item.key === 'over25'));
+
+const halves = calculateHalfMarkets(1.8, 0.9);
+assert.ok(halves.firstHalf.home > halves.firstHalf.away);
+assert.ok(halves.secondHalf.home > halves.secondHalf.away);
+assert.ok(halves.mostGoalsHalf.second > halves.mostGoalsHalf.first);
