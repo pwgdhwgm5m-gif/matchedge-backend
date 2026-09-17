@@ -1,5 +1,5 @@
 /**
- * MatchEdge Premium Intelligence
+ * SoccerEdge Pro Premium Intelligence
  *
  * Produces a transparent decision layer above the raw probability model.
  * It deliberately uses model-only probabilities for edge calculations; using

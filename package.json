@@ -1,7 +1,7 @@
 {
   "name": "matchedge-backend",
   "version": "1.0.0",
-  "description": "MatchEdge - Futbol analiz ve canli mac takip backend'i",
+  "description": "SoccerEdge Pro - Futbol analiz ve canli mac takip backend'i",
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",

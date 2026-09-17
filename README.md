@@ -1,4 +1,4 @@
-# MatchEdge Backend
+# SoccerEdge Pro Backend
 
 Football match analysis + live tracking backend. Includes a Poisson model
 with Dixon-Coles correction, real team-based attack/defense ratings,
@@ -162,7 +162,7 @@ transactional email API with a generous free tier.
    testing - it works immediately with zero setup. Before a real
    launch, verify your own domain under **Domains** in Resend's
    dashboard, then change `EMAIL_FROM` to an address on it (e.g.
-   `MatchEdge <noreply@yourdomain.com>`) - this avoids emails landing
+   `SoccerEdge Pro <noreply@yourdomain.com>`) - this avoids emails landing
    in spam and looks more professional to users.
 5. Set `FRONTEND_URL` to wherever you end up hosting the frontend
    files (see the frontend README) - the verification and reset links
@@ -248,7 +248,7 @@ MONGODB_URI = your_mongodb_atlas_connection_string
 JWT_SECRET = your_generated_random_string
 JWT_EXPIRES_IN = 30d
 RESEND_API_KEY = your_resend_api_key
-EMAIL_FROM = MatchEdge <onboarding@resend.dev>
+EMAIL_FROM = SoccerEdge Pro <onboarding@resend.dev>
 FRONTEND_URL = https://wherever-you-host-the-frontend.com
 NODE_ENV = production
 ```
@@ -294,7 +294,7 @@ Here is exactly how to set one up, using either of two free services:
    for the confirmation link)
 3. Once logged in, click "Create cronjob"
 4. Fill in the form:
-   - **Title:** anything, e.g. "MatchEdge keep-alive"
+   - **Title:** anything, e.g. "SoccerEdge Pro keep-alive"
    - **URL:** `https://your-service-name.onrender.com/health`
    - **Execution schedule:** choose "Every X minutes" and set it to
      every 10-14 minutes (must be under 15 minutes)
@@ -306,7 +306,7 @@ Here is exactly how to set one up, using either of two free services:
 3. Once logged in, click "+ Add New Monitor"
 4. Fill in the form:
    - **Monitor Type:** HTTP(s)
-   - **Friendly Name:** anything, e.g. "MatchEdge"
+   - **Friendly Name:** anything, e.g. "SoccerEdge Pro"
    - **URL:** `https://your-service-name.onrender.com/health`
    - **Monitoring Interval:** 5 minutes (the free plan's minimum, well
      under Render's 15-minute sleep threshold)

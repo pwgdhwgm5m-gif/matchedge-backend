@@ -154,7 +154,7 @@ module.exports = {
   // --- E-posta (dogrulama + sifre sifirlama) ---
 
   resendApiKey: process.env.RESEND_API_KEY || '',
-  emailFrom: process.env.EMAIL_FROM || 'MatchEdge <onboarding@resend.dev>',
+  emailFrom: process.env.EMAIL_FROM || 'SoccerEdge Pro <onboarding@resend.dev>',
   // Dogrulama/sifirlama e-postalarindaki baglantilarin isaret edecegi
   // frontend adresi. Frontend'i nereye yuklediysen (Render Static Site,
   // Netlify vb.) o adresi buraya yaz - sonuna slash koyma.

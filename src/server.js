@@ -71,7 +71,7 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(config.port, async () => {
-  console.log(`MatchEdge backend ${config.port} portunda calisiyor (${config.nodeEnv})`);
+  console.log(`SoccerEdge Pro backend ${config.port} portunda calisiyor (${config.nodeEnv})`);
   await connectDB();
   startPrecomputeCron();
   startOddsSnapshotCron();
