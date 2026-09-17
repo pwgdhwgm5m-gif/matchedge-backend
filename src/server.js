@@ -14,6 +14,7 @@ const favoritesRoute = require('./routes/favorites');
 const adminRoute = require('./routes/admin');
 const couponsRoute = require('./routes/coupons');
 const chatRoute = require('./routes/chat');
+const communityRoute = require('./routes/community');
 const { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron } = require('./cron/precomputeJob');
 
 const app = express();
@@ -41,6 +42,7 @@ app.use('/api/favorites', favoritesRoute);
 app.use('/api/admin', adminRoute);
 app.use('/api/coupons', couponsRoute);
 app.use('/api/chat', chatRoute);
+app.use('/api/community', communityRoute);
 app.use('/api/matches', matchesRoute);
 app.use('/api/analysis', analysisRoute);
 app.use('/api/live', liveRoute);
