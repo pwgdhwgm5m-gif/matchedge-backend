@@ -16,6 +16,36 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, dataHealth, premium }) {
+  const health = Number(dataHealth?.score || 0);
+  const candidates = [
+    { key: 'home', market: '1X2', label: 'Ev Sahibi', probability: Number(modelProbabilities?.homeWinProbability || 0) },
+    { key: 'draw', market: '1X2', label: 'Beraberlik', probability: Number(modelProbabilities?.drawProbability || 0) },
+    { key: 'away', market: '1X2', label: 'Deplasman', probability: Number(modelProbabilities?.awayWinProbability || 0) },
+    { key: 'over25', market: 'GOL', label: '2.5 Üst', probability: Number(goalMarkets?.over25GoalsPercent || 0) },
+    { key: 'under25', market: 'GOL', label: '2.5 Alt', probability: 100 - Number(goalMarkets?.over25GoalsPercent || 0) },
+    { key: 'bttsYes', market: 'KG', label: 'KG Var', probability: Number(goalMarkets?.bttsPercent || 0) },
+    { key: 'bttsNo', market: 'KG', label: 'KG Yok', probability: 100 - Number(goalMarkets?.bttsPercent || 0) },
+    { key: 'cornersOver85', market: 'KORNER', label: '8.5 Üst Korner', probability: Number(cornerMetrics?.over85Percent || 0) },
+    { key: 'cornersUnder85', market: 'KORNER', label: '8.5 Alt Korner', probability: 100 - Number(cornerMetrics?.over85Percent || 0) },
+  ].filter(item => Number.isFinite(item.probability) && item.probability > 0 && item.probability < 100)
+    .map(item => ({
+      ...item,
+      probability: +item.probability.toFixed(1),
+      score: +((item.probability - 50) * 0.72 + health * 0.28).toFixed(1),
+      dataHealth: health,
+      isValue: premium?.status === 'VALUE' && premium?.selection === item.key,
+      edgePoints: premium?.selection === item.key ? premium?.bestEdge?.edgePoints ?? null : null,
+    }))
+    .sort((a, b) => b.score - a.score || b.probability - a.probability);
+
+  return {
+    topPredictions: candidates.slice(0, 3),
+    best: candidates[0] || null,
+    valuePicks: candidates.filter(item => item.isValue),
+  };
+}
+
 function buildDataHealth({ homePlayed, awayPlayed, hasOdds, hasStandings, injuriesAvailable, h2hCount }) {
   const homeSample = clamp(homePlayed / 5, 0, 1);
   const awaySample = clamp(awayPlayed / 5, 0, 1);
@@ -136,4 +166,4 @@ function buildPremiumIntelligence({
   };
 }
 
-module.exports = { buildPremiumIntelligence, buildDataHealth };
+module.exports = { buildPremiumIntelligence, buildDataHealth, buildMarketBoard };
