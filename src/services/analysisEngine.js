@@ -192,6 +192,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const matchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
   const marketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
   const cornerMetrics = poisson.estimateCornerMetrics(homeLambda, awayLambda);
+  const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda);
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
@@ -254,6 +255,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     cornerMetrics,
     dataHealth: premium.dataHealth,
     premium,
+    halfMarkets,
   });
 
   return {
@@ -265,6 +267,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketImpliedProbabilities,
     marketProbabilities,
     cornerMetrics,
+    halfMarkets,
     firstHalfProximity,
     dataQualityScore,
     strongestSignal,
