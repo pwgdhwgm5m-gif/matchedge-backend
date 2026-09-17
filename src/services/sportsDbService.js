@@ -223,9 +223,15 @@ function transformEvent(e) {
     // sadece mac sonu skoru var. Bu alan bu yuzden hep null; frontend zaten
     // sadece doluyken gosteriyor, dolayisiyla bir sey kirilmiyor, sadece
     // ilk yari skoru bu ekranda hicbir zaman gorunmeyecek (veri kaynagi sinirlamasi).
-    halftimeHome: null,
-    halftimeAway: null,
+    halftimeHome: parseOptionalScore(e.intHomeScoreHalfTime ?? e.intHomeScoreHT),
+    halftimeAway: parseOptionalScore(e.intAwayScoreHalfTime ?? e.intAwayScoreHT),
   };
+}
+
+function parseOptionalScore(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 /**
@@ -529,7 +535,10 @@ function transformTimelineItem(item) {
 async function getEventTimelineFormatted(eventId) {
   const result = await getEventTimeline(eventId);
   if (!result.ok) return { ok: true, available: false, events: [] };
-  const raw = (result.data && result.data.lookup) || [];
+  // V2 responses use `timeline`; older/alternate responses used `lookup`.
+  // Accept both so real goal events are not silently discarded.
+  const data = result.data || {};
+  const raw = data.timeline || data.lookup || data.events || [];
   const events = raw.map(transformTimelineItem).sort(function (a, b) { return (a.minute || 0) - (b.minute || 0); });
   return { ok: true, available: events.length > 0, events: events };
 }
