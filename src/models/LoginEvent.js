@@ -14,5 +14,4 @@ const loginEventSchema = new mongoose.Schema({
   userAgent: { type: String, default: '' },
 });
 
-loginEventSchema.index({loginAt:1}, {expireAfterSeconds:90*24*60*60});
 module.exports = mongoose.model('LoginEvent', loginEventSchema);
