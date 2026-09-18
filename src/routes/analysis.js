@@ -3,6 +3,7 @@ const router = express.Router();
 const cache = require('../utils/cache');
 const { computeFullAnalysis } = require('../services/analysisEngine');
 const sportsDb = require('../services/sportsDbService');
+const ledger = require('../services/predictionLedgerService');
 
 /**
  * GET /api/analysis/:fixtureId
@@ -43,6 +44,10 @@ router.get('/:fixtureId', async (req, res) => {
     const result = await computeFullAnalysis({
       fixtureId, home, away, homeTeamName, awayTeamName, league, season, sportKey,
     });
+    if (kickoff && homeTeamName && awayTeamName) {
+      ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName })
+        .catch(err => console.error('[prediction-capture]', err));
+    }
     res.json({
       ...result,
       homeTeam: homeTeamName,
