@@ -2,6 +2,7 @@ const express = require('express');
 const User = require('../models/User');
 const LoginEvent = require('../models/LoginEvent');
 const ledger = require('../services/predictionLedgerService');
+const ModelCalibration = require('../models/ModelCalibration');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { requireAdmin } = require('../middleware/adminMiddleware');
 
@@ -40,4 +41,12 @@ router.get('/model-performance', async (req, res) => {
   catch (error) { console.error('[model-performance]', error); res.status(500).json({ error: 'Model karnesi alınamadı.' }); }
 });
 
+router.get('/model-calibration', async (req, res) => {
+  try {
+    const rows = await ModelCalibration.find({}).sort({active:-1,trainedAt:-1}).limit(60).lean();
+    res.json({rows:rows.map(row => ({ league:row.league, market:row.market, active:row.active,
+      offset:row.logitOffset, trainCount:row.trainCount, validationCount:row.validationCount,
+      baselineBrier:row.baselineBrier, adjustedBrier:row.adjustedBrier, trainedAt:row.trainedAt }))});
+  } catch (error) { res.status(500).json({error:'Kalibrasyon verisi alınamadı.'}); }
+});
 module.exports = router;
