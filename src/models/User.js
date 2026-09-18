@@ -44,6 +44,24 @@ const userSchema = new mongoose.Schema({
   verificationExpires: { type: Date, default: null },
   resetTokenHash: { type: String, default: null },
   resetExpires: { type: Date, default: null },
+
+  // Topluluk, Edge Coin ve rank sistemi
+  xp: { type: Number, default: 0, min: 0 },
+  edgeCoins: { type: Number, default: 0, min: 0 },
+  walletVersion: { type: Number, default: 0, min: 0 },
+  correctPicks: { type: Number, default: 0, min: 0 },
+  wrongPicks: { type: Number, default: 0, min: 0 },
+  currentStreak: { type: Number, default: 0, min: 0 },
+  bestStreak: { type: Number, default: 0, min: 0 },
+  totalCoinsWon: { type: Number, default: 0, min: 0 },
+  totalCoinsSpent: { type: Number, default: 0, min: 0 },
+  dailyLoginStreak: { type: Number, default: 0, min: 0 },
+  lastDailyClaimAt: { type: Date, default: null },
+
+  // Güvenli maç sohbeti tercihleri
+  chatRulesAcceptedAt: { type: Date, default: null },
+  chatSuspendedUntil: { type: Date, default: null },
+  blockedChatUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   createdAt: {
     type: Date,
     default: Date.now,
