@@ -68,7 +68,7 @@ router.post('/register', async (req, res) => {
  * body: { username, password }
  */
 router.post('/login', async (req, res) => {
-  const { username, password, timezone } = req.body;
+  const { username, password, timezone, geoConsent } = req.body;
 
   if (!username || !password) {
     return res.status(400).json({ error: 'Kullanici adi ve sifre zorunlu.' });
@@ -94,7 +94,7 @@ router.post('/login', async (req, res) => {
 
     const token = generateToken(user);
     res.json({ token, username: user.username, emailVerified: true, isAdmin: user.role === 'admin' });
-    recordLoginEvent({ user, req, clientTimezone: timezone }).catch(error => {
+    recordLoginEvent({ user, req, clientTimezone: timezone, geoConsent: geoConsent === true }).catch(error => {
       console.error('[auth/login-audit] Hata:', error.message);
     });
   } catch (err) {
