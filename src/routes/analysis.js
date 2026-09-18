@@ -42,7 +42,7 @@ router.get('/:fixtureId', async (req, res) => {
 
   try {
     const result = await computeFullAnalysis({
-      fixtureId, home, away, homeTeamName, awayTeamName, league, season, sportKey,
+      fixtureId, home, away, homeTeamName, awayTeamName, league, leagueName, season, sportKey,
     });
     if (kickoff && homeTeamName && awayTeamName) {
       ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName })
