@@ -134,6 +134,7 @@ function startPrecomputeCron() {
   cron.schedule('15 */3 * * *', () => ledger.settlePending().catch(err => console.error('[prediction-ledger]', err)));
   ledger.settlePending().then(() => modelCalibration.retrain()).catch(err => console.error('[prediction-ledger]', err));
   cron.schedule('45 3 * * *', () => modelCalibration.retrain().catch(err => console.error('[model-calibration]', err)));
+  cron.schedule('0 4 * * *', () => require('../models/LoginEvent').deleteMany({loginAt:{$lt:new Date(Date.now()-90*86400000)}}).catch(err => console.error('[login-audit-retention]', err)));
 }
 
 function startOddsSnapshotCron() {
