@@ -1,6 +1,7 @@
 const express = require('express');
 const User = require('../models/User');
 const LoginEvent = require('../models/LoginEvent');
+const ledger = require('../services/predictionLedgerService');
 const { requireAuth } = require('../middleware/authMiddleware');
 const { requireAdmin } = require('../middleware/adminMiddleware');
 
@@ -32,6 +33,11 @@ router.get('/users', async (req, res) => {
     console.error('[admin/users] Hata:', error.message);
     res.status(500).json({ error: 'Kullanici listesi alinamadi.' });
   }
+});
+
+router.get('/model-performance', async (req, res) => {
+  try { res.json(await ledger.performance()); }
+  catch (error) { console.error('[model-performance]', error); res.status(500).json({ error: 'Model karnesi alınamadı.' }); }
 });
 
 module.exports = router;
