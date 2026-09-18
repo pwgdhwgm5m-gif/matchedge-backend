@@ -113,7 +113,6 @@ router.get('/:fixtureId', async (req, res) => {
 router.post('/:fixtureId', async (req, res) => {
   const user = await currentUser(req);
   if (!user) return res.status(401).json({ error: 'Kullanıcı bulunamadı.' });
-  if (!user.emailVerified) return res.status(403).json({ error: 'Mesaj yazmak için e-posta doğrulaması gerekli.' });
   if (user.chatSuspendedUntil && user.chatSuspendedUntil > new Date()) {
     return res.status(403).json({ error: 'Sohbet erişimin geçici olarak durduruldu.' });
   }
