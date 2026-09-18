@@ -5,6 +5,7 @@ const footballApi = require('../services/footballApiService');
 const oddsApi = require('../services/oddsApiService');
 const sportsDb = require('../services/sportsDbService');
 const { computeFullAnalysis } = require('../services/analysisEngine');
+const ledger = require('../services/predictionLedgerService');
 
 const PRECOMPUTE_TSDB_LEAGUES = {
   '4339': '71',   // Türkiye Süper Lig (TFF scraper)
@@ -105,6 +106,7 @@ async function precomputeTodaysMatches() {
       };
 
       cache.set(`precomputed:${fixture.fixtureId}`, precomputed, config.cache.ttlPrecomputed);
+      await ledger.capture(result, { fixtureId: fixture.fixtureId, kickoff: fixture.kickoff, league: fixture.leagueName, homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName });
     } catch (err) {
       console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
     }
@@ -128,6 +130,8 @@ function startPrecomputeCron() {
   console.log('[precompute] Cron zamanlandi: her gun 06:00 ve 13:00');
 
   precomputeTodaysMatches();
+  cron.schedule('15 */3 * * *', () => ledger.settlePending().catch(err => console.error('[prediction-ledger]', err)));
+  ledger.settlePending().catch(err => console.error('[prediction-ledger]', err));
 }
 
 function startOddsSnapshotCron() {
