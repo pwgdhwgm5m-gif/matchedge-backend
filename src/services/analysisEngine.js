@@ -8,6 +8,7 @@ const motivation = require('./motivationService');
 const tffScraper = require('./tffScraper');
 const sportsDb = require('./sportsDbService');
 const premiumIntelligence = require('./premiumIntelligenceService');
+const modelCalibration = require('./modelCalibrationService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -15,7 +16,7 @@ const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
 const SUPERLIG_LEAGUE_ID = '71';
 
-async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, season, sportKey }) {
+async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, leagueName, season, sportKey }) {
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
   const isMappedLeague = leagueIdNum && !!sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)];
@@ -189,8 +190,11 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const homeLambda = +(homeLambdaBase * motivationHome.multiplier).toFixed(2);
   const awayLambda = +(awayLambdaBase * motivationAway.multiplier).toFixed(2);
 
-  const matchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
-  const marketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
+  const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
+  const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
+  const calibrated = await modelCalibration.apply({league: leagueName || String(league || ''), match: rawMatchProbabilities, goals: rawMarketProbabilities});
+  const matchProbabilities = calibrated.match;
+  const marketProbabilities = calibrated.goals;
   const cornerMetrics = poisson.estimateCornerMetrics(homeLambda, awayLambda);
   const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda);
 
@@ -264,6 +268,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     awayLambda,
     matchProbabilities: blendedMatchProbabilities,
     modelOnlyProbabilities: matchProbabilities,
+    rawModelProbabilities: rawMatchProbabilities,
+    rawMarketProbabilities,
+    calibrationApplied: calibrated.applied,
     marketImpliedProbabilities,
     marketProbabilities,
     cornerMetrics,
