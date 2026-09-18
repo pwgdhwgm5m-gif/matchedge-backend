@@ -6,6 +6,7 @@ const oddsApi = require('../services/oddsApiService');
 const sportsDb = require('../services/sportsDbService');
 const { computeFullAnalysis } = require('../services/analysisEngine');
 const ledger = require('../services/predictionLedgerService');
+const modelCalibration = require('../services/modelCalibrationService');
 
 const PRECOMPUTE_TSDB_LEAGUES = {
   '4339': '71',   // Türkiye Süper Lig (TFF scraper)
@@ -131,7 +132,8 @@ function startPrecomputeCron() {
 
   precomputeTodaysMatches();
   cron.schedule('15 */3 * * *', () => ledger.settlePending().catch(err => console.error('[prediction-ledger]', err)));
-  ledger.settlePending().catch(err => console.error('[prediction-ledger]', err));
+  ledger.settlePending().then(() => modelCalibration.retrain()).catch(err => console.error('[prediction-ledger]', err));
+  cron.schedule('45 3 * * *', () => modelCalibration.retrain().catch(err => console.error('[model-calibration]', err)));
 }
 
 function startOddsSnapshotCron() {
