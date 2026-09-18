@@ -3,6 +3,7 @@ const router = express.Router();
 const cache = require('../utils/cache');
 const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
+const cupFixtures = require('../services/cupFixtureService');
 
 /** GET /api/matches?date=2026-09-16 */
 router.get('/', async (req, res) => {
@@ -13,13 +14,14 @@ router.get('/', async (req, res) => {
   // livescore kaynagiyla "bindiriliyor" (bkz. results.js'deki ayni desen /
   // sportsDbService.applyLiveOverlay). Aksi halde bugunun listesindeki canli
   // bir mac, uzun cache suresi boyunca eski skorla kalabiliyordu.
-  const [result, liveResult] = await Promise.all([
+  const [result, liveResult, supplemental] = await Promise.all([
     cache.getOrFetch(
       `fixtures:${date}`,
       config.cache.ttlStatic,
       () => sportsDb.getMatchesByDate(date)
     ),
     cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
+    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
   ]);
 
   if (!result.ok) {
@@ -30,6 +32,8 @@ router.get('/', async (req, res) => {
   let simplified = rawEvents
     .map(sportsDb.transformEvent)
     .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
+
+  simplified = cupFixtures.mergeUnique(simplified, supplemental.ok ? supplemental.matches : []);
 
   if (liveResult.ok) {
     const rawLive = (liveResult.data?.livescore || []).filter(

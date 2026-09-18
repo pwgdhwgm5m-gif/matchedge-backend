@@ -38,6 +38,9 @@ const LEAGUE_ID_MAP = {
   '40': 4338,   // Belcika First Division A
   '46': 4340,   // Danimarka Superligaen
   '64': 4330,   // Iskocya Premiership
+  '252': 4629,  // Hirvatistan HNL
+  '189': 4691,  // Romanya Liga I
+  '4510': 4510, // Portekiz Kupasi
 };
 
 /**
@@ -69,6 +72,8 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4339', // Turkiye Super Lig
   '4621', // Avusturya Bundesliga
   '4675', // Isvicre Super League
+  '4629', // Hirvatistan HNL
+  '4691', // Romanya Liga I
   // --- Amerika 1. Ligleri ---
   '4346', // ABD MLS
   '4350', // Meksika Liga MX
@@ -90,6 +95,7 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '5071', // UEFA Konferans Ligi
   '4503', // FIFA Kulupler Dunya Kupasi
   '4570', // Ingiltere Ligi Kupasi (Carabao Cup / EFL Cup)
+  '4510', // Portekiz Kupasi
 ]);
 
 function isWhitelistedLeague(leagueId) {
@@ -214,6 +220,8 @@ function transformEvent(e) {
     isLive: isLive,
     homeTeam: e.strHomeTeam || '',
     awayTeam: e.strAwayTeam || '',
+    homeId: e.idHomeTeam || null,
+    awayId: e.idAwayTeam || null,
     homeBadge: e.strHomeTeamBadge || null,
     awayBadge: e.strAwayTeamBadge || null,
     homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : 0,

@@ -1,11 +1,8 @@
 const express = require('express');
 const Coupon = require('../models/Coupon');
-const CommunityPick = require('../models/CommunityPick');
-const User = require('../models/User');
 const { requireAuth } = require('../middleware/authMiddleware');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
-const { COUPON_STAKE, ensureWallet, calculatePayout } = require('../services/gamificationService');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -43,9 +40,7 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
 router.get('/', async (req, res) => {
   try {
     const coupons = await Coupon.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(100);
-    const user = await User.findById(req.user.userId);
-    if (user && ensureWallet(user)) await user.save();
-    res.json({ coupons, edgeCoins: user?.edgeCoins || 0, stakeCoins: COUPON_STAKE });
+    res.json({ coupons });
   } catch (error) {
     res.status(500).json({ error: 'Kuponlar alınamadı.' });
   }
@@ -53,48 +48,22 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const { fixtureId, homeTeam, awayTeam, league, kickoff, selections } = req.body;
-  let safeSelections = Array.isArray(selections)
-    ? selections.filter(item => ALLOWED_KEYS.has(item.key)).slice(0, 3).map(item => ({
+  const safeSelections = Array.isArray(selections)
+    ? selections.filter(item => ALLOWED_KEYS.has(item.key)).slice(0, 9).map(item => ({
         key: item.key, market: String(item.market || '').slice(0, 30),
         label: String(item.label || '').slice(0, 50), probability: Number(item.probability) || null,
       }))
     : [];
   if (!fixtureId || !homeTeam || !awayTeam || !safeSelections.length) return res.status(400).json({ error: 'Maç ve seçim gerekli.' });
-  let debited = false;
   try {
-    const existingKeys = await CommunityPick.find({ userId: req.user.userId, fixtureId: String(fixtureId), key: { $in: safeSelections.map(s => s.key) } }).distinct('key');
-    safeSelections = safeSelections.filter(selection => !existingKeys.includes(selection.key));
-    if (!safeSelections.length) return res.status(409).json({ error: 'Bu seçimleri daha önce Tribün Analizi’ne ekledin.' });
     const date = kickoff ? new Date(kickoff) : null;
-    if (!date || Number.isNaN(date.getTime())) return res.status(400).json({ error: 'Maç başlangıç saati eksik.' });
-    if (date.getTime() <= Date.now()) return res.status(409).json({ error: 'Başlamış maç için Edge Coin kuponu oluşturulamaz.' });
-    const walletUser = await User.findById(req.user.userId);
-    if (!walletUser) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
-    if (ensureWallet(walletUser)) await walletUser.save();
-    const chargedUser = await User.findOneAndUpdate(
-      { _id: walletUser._id, edgeCoins: { $gte: COUPON_STAKE } },
-      { $inc: { edgeCoins: -COUPON_STAKE, totalCoinsSpent: COUPON_STAKE } },
-      { new: true }
-    );
-    if (!chargedUser) return res.status(409).json({ error: 'Bu kupon için yeterli Edge Coin yok.' });
-    debited = true;
-    const payout = calculatePayout(safeSelections);
     const coupon = await Coupon.create({
       userId: req.user.userId, fixtureId, homeTeam, awayTeam, league, kickoff: date,
       matchDate: date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : null,
       selections: safeSelections,
-      stakeCoins: COUPON_STAKE,
-      payoutMultiplier: payout.multiplier,
-      potentialPayout: payout.payout,
     });
-    await Promise.all(safeSelections.map(selection => CommunityPick.findOneAndUpdate(
-      { userId: req.user.userId, fixtureId: String(fixtureId), key: selection.key },
-      { userId: req.user.userId, fixtureId: String(fixtureId), homeTeam, awayTeam, league: league || '', kickoff: date, key: selection.key, market: selection.market, label: selection.label },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    )));
-    res.status(201).json({ coupon, edgeCoins: chargedUser.edgeCoins });
+    res.status(201).json({ coupon });
   } catch (error) {
-    if (debited) await User.findByIdAndUpdate(req.user.userId, { $inc: { edgeCoins: COUPON_STAKE, totalCoinsSpent: -COUPON_STAKE } }).catch(() => {});
     res.status(500).json({ error: 'Kupon oluşturulamadı.' });
   }
 });
@@ -124,35 +93,6 @@ router.post('/settle', async (req, res) => {
       coupon.status = coupon.selections.some(s => s.result === 'lost') ? 'lost' : coupon.selections.every(s => s.result === 'won') ? 'won' : 'pending';
       coupon.settledAt = coupon.status === 'pending' ? null : new Date();
       coupon.markModified('selections');
-
-      if (coupon.status !== 'pending' && !coupon.rewardsProcessed) {
-        const won = coupon.selections.filter(s => s.result === 'won').length;
-        const lost = coupon.selections.filter(s => s.result === 'lost').length;
-        const xp = won * 10 + lost * 2 + (coupon.status === 'won' && coupon.selections.length > 1 ? 5 : 0);
-        const coins = coupon.stakeCoins > 0
-          ? (coupon.status === 'won' ? coupon.potentialPayout : 0)
-          : won * 10 + (coupon.status === 'won' && coupon.selections.length > 1 ? 5 * coupon.selections.length : 0);
-        const user = await User.findById(coupon.userId);
-        if (user) {
-          user.xp = (user.xp || 0) + xp;
-          if (ensureWallet(user)) user.edgeCoins = 100;
-          user.edgeCoins = (user.edgeCoins || 0) + coins;
-          user.totalCoinsWon = (user.totalCoinsWon || 0) + coins;
-          user.correctPicks = (user.correctPicks || 0) + won;
-          user.wrongPicks = (user.wrongPicks || 0) + lost;
-          user.currentStreak = lost ? 0 : (user.currentStreak || 0) + won;
-          user.bestStreak = Math.max(user.bestStreak || 0, user.currentStreak || 0);
-          await user.save();
-        }
-        coupon.rewardsProcessed = true;
-        coupon.xpAwarded = xp;
-        coupon.coinsAwarded = coins;
-        coupon.netCoinResult = coins - (coupon.stakeCoins || 0);
-      }
-      await Promise.all(coupon.selections.map(selection => CommunityPick.updateOne(
-        { userId: coupon.userId, fixtureId: coupon.fixtureId, key: selection.key },
-        { result: selection.result, settledAt: new Date() }
-      ))).catch(() => {});
       await coupon.save();
     }
     res.json({ checked: coupons.length });
@@ -163,10 +103,8 @@ router.post('/settle', async (req, res) => {
 });
 
 router.delete('/:id', async (req, res) => {
-  const coupon = await Coupon.findOne({ _id: req.params.id, userId: req.user.userId });
-  if (!coupon) return res.status(404).json({ error: 'Kupon bulunamadı.' });
-  if (coupon.status === 'pending') return res.status(409).json({ error: 'Aktif Edge Coin kuponu silinemez.' });
-  await coupon.deleteOne();
+  const result = await Coupon.deleteOne({ _id: req.params.id, userId: req.user.userId });
+  if (!result.deletedCount) return res.status(404).json({ error: 'Kupon bulunamadı.' });
   res.json({ deleted: true });
 });
 

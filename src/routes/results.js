@@ -4,6 +4,7 @@ const cache = require('../utils/cache');
 const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
+const cupFixtures = require('../services/cupFixtureService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -22,7 +23,7 @@ router.get('/', async (req, res) => {
   // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
   // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
   // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
-  const [result, liveResult, verifiedResult] = await Promise.all([
+  const [result, liveResult, verifiedResult, supplemental] = await Promise.all([
     cache.getOrFetch(
       `results:${date}`,
       config.cache.ttlLive,
@@ -30,6 +31,7 @@ router.get('/', async (req, res) => {
     ),
     cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
     cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
+    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
   ]);
 
   if (!result.ok) {
@@ -40,6 +42,8 @@ router.get('/', async (req, res) => {
   let simplified = rawEvents
     .map(sportsDb.transformEvent)
     .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
+
+  simplified = cupFixtures.mergeUnique(simplified, supplemental.ok ? supplemental.matches : []);
 
   if (liveResult.ok) {
     const rawLive = (liveResult.data?.livescore || []).filter(

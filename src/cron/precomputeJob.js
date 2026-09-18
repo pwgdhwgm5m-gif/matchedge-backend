@@ -24,6 +24,9 @@ const PRECOMPUTE_TSDB_LEAGUES = {
   '4338': '40',   // Belcika First Division A
   '4340': '46',   // Danimarka Superligaen
   '4330': '64',   // Iskocya Premiership
+  '4629': '252',  // Hirvatistan HNL
+  '4691': '189',  // Romanya Liga I
+  '4510': '4510', // Portekiz Kupasi
 };
 
 const DAYS_AHEAD = 7;
