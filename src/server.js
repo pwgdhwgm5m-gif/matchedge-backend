@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const config = require('./config/config');
 const { connectDB } = require('./db');
+const { bootstrapAdmin } = require('./services/adminBootstrapService');
 
 const matchesRoute = require('./routes/matches');
 const analysisRoute = require('./routes/analysis');
@@ -74,6 +75,11 @@ app.use((err, req, res, next) => {
 app.listen(config.port, async () => {
   console.log(`SoccerEdge Pro backend ${config.port} portunda calisiyor (${config.nodeEnv})`);
   await connectDB();
+  try {
+    await bootstrapAdmin();
+  } catch (error) {
+    console.error('[admin-bootstrap] Provisioning failed:', error.message);
+  }
   startPrecomputeCron();
   startOddsSnapshotCron();
   startKeepAlive();
