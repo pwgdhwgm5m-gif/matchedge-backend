@@ -86,7 +86,7 @@ router.post('/login', async (req, res) => {
     }
 
     const now = new Date();
-    if (user.username === config.adminUsername) user.role = 'admin';
+    // Administrative role is assigned only during protected provisioning.
     user.lastLoginAt = now;
     user.lastActiveAt = now;
     user.loginCount = (user.loginCount || 0) + 1;
