@@ -3,8 +3,7 @@ const LoginEvent = require('../models/LoginEvent');
 const config = require('../config/config');
 
 function clientIp(req) {
-  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  return forwarded || req.ip || req.socket?.remoteAddress || '';
+  return req.ip || req.socket?.remoteAddress || '';
 }
 
 function isPublicIp(ip) {
@@ -46,15 +45,18 @@ async function resolveApproximateLocation(ip, fallbackCountryCode, clientTimezon
   }
 }
 
-async function recordLoginEvent({ user, req, clientTimezone }) {
+async function recordLoginEvent({ user, req, clientTimezone, geoConsent }) {
   const ip = clientIp(req);
-  const location = await resolveApproximateLocation(ip, req.headers['cf-ipcountry'], clientTimezone);
+  const location = geoConsent === true
+    ? await resolveApproximateLocation(ip, req.headers['cf-ipcountry'], clientTimezone)
+    : { country:'', city:'', district:'', region:'', countryCode:'', timezone:clientTimezone || '' };
   const ipHash = ip
     ? crypto.createHmac('sha256', config.jwtSecret).update(ip).digest('hex')
     : '';
 
   await LoginEvent.create({
     userId: user._id,
+    geoConsent: geoConsent === true,
     ...location,
     ipHash,
     userAgent: String(req.headers['user-agent'] || '').slice(0, 240),
