@@ -33,7 +33,7 @@ router.post('/daily-claim',async(req,res)=>{
  res.json({reward:state.reward,message:state.reward+' Edge Coin kazandın!',profile:publicUser(updated)});
 });
 router.get('/leaderboard',async(req,res)=>{
- const users=await User.find({emailVerified:true}).sort({xp:-1,correctPicks:-1,createdAt:1}).limit(50).lean();
+ const users=await User.find({}).sort({xp:-1,correctPicks:-1,createdAt:1}).limit(50).lean();
  const leaderboard=users.map((u,i)=>publicUser(u,i+1));
  const me=await getWalletUser(req.user.userId);
  const myPosition=me?await User.countDocuments({xp:{$gt:me.xp||0}})+1:null;
