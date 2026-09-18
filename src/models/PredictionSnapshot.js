@@ -11,6 +11,7 @@ const predictionSchema = new mongoose.Schema({
   awayLambda: Number,
   dataQualityScore: Number,
   probabilities: { type: mongoose.Schema.Types.Mixed, required: true },
+  rawProbabilities: { type: mongoose.Schema.Types.Mixed, default: null },
   status: { type: String, enum: ['pending','settled'], default: 'pending', index: true },
   actual: { type: mongoose.Schema.Types.Mixed, default: null },
   settledAt: Date,
