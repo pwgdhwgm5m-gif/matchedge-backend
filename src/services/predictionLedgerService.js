@@ -25,6 +25,11 @@ async function capture(a, fixture) {
       league: fixture.league || '', homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
       capturedAt: new Date(), homeLambda: a.homeLambda, awayLambda: a.awayLambda,
       dataQualityScore: a.dataQualityScore, probabilities: values,
+      rawProbabilities: a.rawModelProbabilities ? {
+        home: percent(a.rawModelProbabilities.homeWinProbability), draw: percent(a.rawModelProbabilities.drawProbability),
+        away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),
+        btts: percent(a.rawMarketProbabilities?.bttsPercent),
+      } : values,
     } }, { upsert: true });
   return Boolean(result.upsertedCount);
 }
