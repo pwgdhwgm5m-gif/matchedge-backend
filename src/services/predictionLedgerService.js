@@ -29,6 +29,7 @@ async function capture(a, fixture) {
   return Boolean(result.upsertedCount);
 }
 function outcomes(m) {
+  if (m.homeScore == null || m.awayScore == null) return null;
   const h = Number(m.homeScore), a = Number(m.awayScore);
   if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
   return { home: h > a ? 1 : 0, draw: h === a ? 1 : 0, away: a > h ? 1 : 0,
@@ -37,7 +38,9 @@ function outcomes(m) {
 async function settlePending() {
   const pending = await Prediction.find({ status: 'pending', kickoff: { $lt: new Date() } })
     .sort({ kickoff: 1 }).limit(150).lean();
-  const days = [...new Set(pending.map(p => p.kickoff.toISOString().slice(0,10)))];
+  const day = (date, offset) => new Date(date.getTime() + offset * 86400000).toISOString().slice(0,10);
+  const days = [...new Set(pending.flatMap(p => [-1,0,1].map(n => day(p.kickoff,n))))];
+  const found = new Map();
   let settled = 0;
   for (const date of days) {
     const [raw, verified] = await Promise.all([
@@ -45,8 +48,10 @@ async function settlePending() {
     let matches = raw.ok ? (raw.data?.events || []).map(sportsDb.transformEvent) : [];
     if (verified.ok) matches = footballDataOrg.mergeVerifiedScores(matches, verified.matches);
     const byId = new Map(matches.filter(m => m.statusShort === 'FT').map(m => [String(m.fixtureId), m]));
-    for (const p of pending.filter(x => x.kickoff.toISOString().slice(0,10) === date)) {
-      const match = byId.get(p.fixtureId);
+    for (const [id, match] of byId) found.set(id, match);
+  }
+  for (const p of pending) {
+      const match = found.get(p.fixtureId);
       const actual = match && outcomes(match);
       if (!actual) continue;
       const result = await Prediction.updateOne(
@@ -54,7 +59,6 @@ async function settlePending() {
         { $set: { status: 'settled', actual, settledAt: new Date() } });
       settled += result.modifiedCount;
     }
-  }
   return settled;
 }
 async function performance() {
