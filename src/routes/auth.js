@@ -46,20 +46,17 @@ router.post('/register', async (req, res) => {
 
     const passwordHash = await hashPassword(password);
 
-    const rawVerificationToken = generateRawToken();
-    const verificationTokenHash = hashToken(rawVerificationToken);
-    const verificationExpires = new Date(Date.now() + VERIFICATION_VALID_HOURS * 60 * 60 * 1000);
-
+    // E-posta doğrulaması geçici olarak kapalıdır.
+    // Yeniden etkinleştirildiğinde token üretimi ve gönderimi bu noktaya geri alınabilir.
     const user = await User.create({
       username, email, passwordHash,
-      verificationTokenHash, verificationExpires,
+      emailVerified: true,
+      verificationTokenHash: null,
+      verificationExpires: null,
     });
 
-    // E-posta gonderimi best-effort - basarisiz olsa da kayit tamamlanir
-    sendVerificationEmail(user.email, rawVerificationToken);
-
     const token = generateToken(user);
-    res.status(201).json({ token, username: user.username, emailVerified: user.emailVerified });
+    res.status(201).json({ token, username: user.username, emailVerified: true });
   } catch (err) {
     console.error('[auth/register] Hata:', err.message);
     res.status(500).json({ error: 'Kayit olusturulamadi. Veritabani baglantisini kontrol et.' });
@@ -96,7 +93,7 @@ router.post('/login', async (req, res) => {
     await user.save();
 
     const token = generateToken(user);
-    res.json({ token, username: user.username, emailVerified: user.emailVerified, isAdmin: user.role === 'admin' });
+    res.json({ token, username: user.username, emailVerified: true, isAdmin: user.role === 'admin' });
     recordLoginEvent({ user, req, clientTimezone: timezone }).catch(error => {
       console.error('[auth/login-audit] Hata:', error.message);
     });
@@ -112,7 +109,7 @@ router.post('/login', async (req, res) => {
 router.get('/me', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.userId);
   if (!user) return res.status(404).json({ error: 'Kullanici bulunamadi.' });
-  res.json({ username: user.username, email: user.email, emailVerified: user.emailVerified, isAdmin: user.role === 'admin' });
+  res.json({ username: user.username, email: user.email, emailVerified: true, isAdmin: user.role === 'admin' });
 });
 
 /**
@@ -120,6 +117,7 @@ router.get('/me', requireAuth, async (req, res) => {
  * body: { token }
  */
 router.post('/verify-email', async (req, res) => {
+  return res.status(503).json({ error: 'Bu ozellik gecici olarak kullanima kapali.' });
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token eksik.' });
 
@@ -151,6 +149,7 @@ router.post('/verify-email', async (req, res) => {
  * body: { email }
  */
 router.post('/resend-verification', async (req, res) => {
+  return res.status(503).json({ error: 'Bu ozellik gecici olarak kullanima kapali.' });
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'E-posta zorunlu.' });
 
@@ -177,6 +176,7 @@ router.post('/resend-verification', async (req, res) => {
  * body: { email }
  */
 router.post('/forgot-password', async (req, res) => {
+  return res.status(503).json({ error: 'Bu ozellik gecici olarak kullanima kapali.' });
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'E-posta zorunlu.' });
 
@@ -202,6 +202,7 @@ router.post('/forgot-password', async (req, res) => {
  * body: { token, newPassword }
  */
 router.post('/reset-password', async (req, res) => {
+  return res.status(503).json({ error: 'Bu ozellik gecici olarak kullanima kapali.' });
   const { token, newPassword } = req.body;
   if (!token || !newPassword) {
     return res.status(400).json({ error: 'Token ve yeni sifre zorunlu.' });
