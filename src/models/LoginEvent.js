@@ -10,7 +10,9 @@ const loginEventSchema = new mongoose.Schema({
   countryCode: { type: String, default: '' },
   timezone: { type: String, default: '' },
   ipHash: { type: String, default: '' },
+  geoConsent: { type: Boolean, default: false },
   userAgent: { type: String, default: '' },
 });
 
+loginEventSchema.index({loginAt:1}, {expireAfterSeconds:90*24*60*60});
 module.exports = mongoose.model('LoginEvent', loginEventSchema);
