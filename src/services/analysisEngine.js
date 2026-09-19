@@ -17,10 +17,13 @@ const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
 const SUPERLIG_LEAGUE_ID = '71';
 
-async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, leagueName, season, sportKey }) {
+async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey }) {
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
-  const isMappedLeague = leagueIdNum && !!sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)];
+  const mappedTsdbLeagueId = leagueIdNum ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null;
+  const directTsdbLeagueId = tsdbLeagueId ? String(tsdbLeagueId) : null;
+  const effectiveTsdbLeagueId = directTsdbLeagueId || (mappedTsdbLeagueId ? String(mappedTsdbLeagueId) : null);
+  const isMappedLeague = Boolean(effectiveTsdbLeagueId && sportsDb.isWhitelistedLeague(effectiveTsdbLeagueId));
   const useOwnSource = isSuperLig || isMappedLeague;
 
   // API-Football (footballApiService) askida oldugu icin form verisi:
@@ -31,22 +34,22 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const homeFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
     : isMappedLeague
-      ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15)
+      ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId)
       : () => footballApi.getTeamForm(home, 15);
   const awayFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
     : isMappedLeague
-      ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15)
+      ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId)
       : () => footballApi.getTeamForm(away, 15);
   const homeFormCacheKey = isSuperLig
     ? `tff-form:${homeTeamName}`
     : isMappedLeague
-      ? `tsdb-form:${leagueIdNum}:${homeTeamName}`
+      ? `tsdb-form:v2:${effectiveTsdbLeagueId}:${homeTeamName}`
       : `form:${home}`;
   const awayFormCacheKey = isSuperLig
     ? `tff-form:${awayTeamName}`
     : isMappedLeague
-      ? `tsdb-form:${leagueIdNum}:${awayTeamName}`
+      ? `tsdb-form:v2:${effectiveTsdbLeagueId}:${awayTeamName}`
       : `form:${away}`;
 
   // H2H artik ayri bir API cagrisi degil - Süper Lig/eslesen liglerde zaten
@@ -66,12 +69,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         table: table.map(r => ({ teamId: r.kulupID, teamName: r.name, rank: r.rank, points: r.points, description: null })),
       }))
     : isMappedLeague
-      ? () => sportsDb.getLeagueStandingsFormatted(sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)], currentSeason)
+      ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
       : () => (league && season ? footballApi.getStandings(league, season) : Promise.resolve({ ok: false }));
   const standingsCacheKey = isSuperLig
     ? 'tff-standings'
     : isMappedLeague
-      ? `tsdb-standings:${leagueIdNum}:${currentSeason}`
+      ? `tsdb-standings:v2:${effectiveTsdbLeagueId}:${currentSeason}`
       : `standings:${league}:${season}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
@@ -186,8 +189,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const awayAttack = awayAttackBase * awayInjuryImpact.attackMultiplier * awayFatigue * awayStreakMult;
   const awayDefenseWeak = awayDefenseWeakBase * awayInjuryImpact.defenseWeaknessMultiplier;
 
-  const tsdbLeagueId = isSuperLig ? 4339 : (isMappedLeague ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null);
-  const leagueBase = tsdbLeagueId ? await accuracy.leagueBaselines(tsdbLeagueId, currentSeason) : null;
+  const analysisTsdbLeagueId = isSuperLig ? '4339' : (isMappedLeague ? effectiveTsdbLeagueId : null);
+  const leagueBase = analysisTsdbLeagueId ? await accuracy.leagueBaselines(analysisTsdbLeagueId, currentSeason) : null;
   const leagueHomeGoals = leagueBase?.homeGoals || LEAGUE_AVG_HOME_GOALS;
   const leagueAwayGoals = leagueBase?.awayGoals || LEAGUE_AVG_AWAY_GOALS;
 
