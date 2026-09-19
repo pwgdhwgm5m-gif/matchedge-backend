@@ -415,7 +415,7 @@ async function getTeamLastEvents(teamId) {
  * @param {string} teamName
  * @param {number|string} fotmobLeagueId
  */
-async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
+async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbLeagueIdOverride) {
   const n = count || 15;
 
   const teamId = await resolveTeamId(teamName);
@@ -438,7 +438,7 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count) {
   }
 
   // --- Fallback: eski yontem (ligin son olaylari icinden isimle filtrele) ---
-  const tsdbLeagueId = LEAGUE_ID_MAP[String(fotmobLeagueId)];
+  const tsdbLeagueId = tsdbLeagueIdOverride || LEAGUE_ID_MAP[String(fotmobLeagueId)];
   if (!tsdbLeagueId) {
     return { ok: false, error: 'league_not_mapped' };
   }
