@@ -35,10 +35,10 @@ router.post('/daily-claim',async(req,res)=>{
  res.json({reward:state.reward,message:state.reward+' Edge Coin kazandın!',profile:publicUser(updated)});
 });
 router.get('/leaderboard',async(req,res)=>{
- const users=await User.find({xp:{$gte:250}}).sort({xp:-1,correctPicks:-1,createdAt:1}).limit(50).lean();
+ const users=await User.find({xp:{$gte:100}}).sort({xp:-1,correctPicks:-1,createdAt:1}).limit(50).lean();
  const leaderboard=users.map((u,i)=>publicUser(u,i+1));
  const me=await getWalletUser(req.user.userId);
- const myPosition=me && (me.xp||0)>=250 ? await User.countDocuments({xp:{$gt:me.xp||0}})+1 : null;
+ const myPosition=me && (me.xp||0)>=100 ? await User.countDocuments({xp:{$gt:me.xp||0}})+1 : null;
  res.json({leaderboard,me:me?publicUser(me,myPosition):null});
 });
 router.get('/fixture/:fixtureId',async(req,res)=>{
