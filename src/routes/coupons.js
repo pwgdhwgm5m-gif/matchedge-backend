@@ -135,6 +135,9 @@ async function settleAllPendingCoupons() {
 router.get('/', async (req, res) => {
   try {
     await settlePending(req.user.userId);
+    // Keep completed slips for 7 days, then remove them automatically.
+    const retentionCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    await Coupon.deleteMany({ userId: req.user.userId, status: { $ne: 'pending' }, settledAt: { $ne: null, $lt: retentionCutoff } });
     const coupons = await Coupon.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(100);
     res.json({ coupons });
   } catch (error) {
