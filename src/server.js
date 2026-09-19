@@ -9,6 +9,7 @@ const analysisRoute = require('./routes/analysis');
 const liveRoute = require('./routes/live');
 const oddsHistoryRoute = require('./routes/oddsHistory');
 const resultsRoute = require('./routes/results');
+const marketOddsRoute = require('./routes/marketOdds');
 const authRoute = require('./routes/auth');
 const notesRoute = require('./routes/notes');
 const favoritesRoute = require('./routes/favorites');
@@ -52,6 +53,7 @@ app.use('/api/analysis', analysisRoute);
 app.use('/api/live', liveRoute);
 app.use('/api/odds-history', oddsHistoryRoute);
 app.use('/api/results', resultsRoute);
+app.use('/api/market-odds', marketOddsRoute);
 app.get('/run-backfill', async (req, res) => {
   const providedSecret = req.headers['x-backfill-secret'] || req.query.secret;
   if (!config.backfillSecret || providedSecret !== config.backfillSecret) {
