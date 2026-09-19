@@ -122,63 +122,37 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { fixtureId, homeTeam, awayTeam, league, kickoff, selections, stakeCoins } = req.body;
-  const safeSelections = Array.isArray(selections)
-    ? selections.filter(item => ALLOWED_KEYS.has(item.key)).slice(0, 8).map(item => ({
-        key: item.key,
-        market: String(item.market || '').slice(0, 30),
-        label: String(item.label || '').slice(0, 50),
-        probability: Number(item.probability) || null,
-      }))
-    : [];
-  if (!fixtureId || !homeTeam || !awayTeam || !safeSelections.length) return res.status(400).json({ error: 'Maç ve seçim gerekli.' });
-
-  const date = kickoff ? new Date(kickoff) : null;
-  if (date && !Number.isNaN(date.getTime()) && date.getTime() <= Date.now()) {
-    return res.status(409).json({ error: 'Başlamış maç kupona eklenemez.' });
-  }
-
-  try {
-    let user = await User.findById(req.user.userId);
-    if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
-    if (ensureWallet(user)) await user.save();
-
-    const stake = ALLOWED_STAKES.includes(Number(stakeCoins)) ? Number(stakeCoins) : COUPON_STAKE;
-    user = await User.findOneAndUpdate(
-      { _id: req.user.userId, edgeCoins: { $gte: stake } },
-      { $inc: { edgeCoins: -stake, totalCoinsSpent: stake } },
-      { new: true }
-    );
-    if (!user) return res.status(402).json({ error: 'Bu kupon için yeterli Edge Coin yok.' });
-
-    const payout = calculatePayout(safeSelections, stake);
+  const { legs, stakeCoins } = req.body;
+  const rawLegs = Array.isArray(legs) ? legs.slice(0,8) : [];
+  const safeLegs = rawLegs.map(leg => {
+    const s=leg?.selection||{};
+    if(!leg?.fixtureId||!leg?.homeTeam||!leg?.awayTeam||!ALLOWED_KEYS.has(s.key)) return null;
+    const date=leg.kickoff?new Date(leg.kickoff):null;
+    return {fixtureId:String(leg.fixtureId),homeTeam:String(leg.homeTeam).slice(0,80),awayTeam:String(leg.awayTeam).slice(0,80),
+      league:String(leg.league||'').slice(0,80),kickoff:date,matchDate:date&&!Number.isNaN(date.getTime())?date.toISOString().slice(0,10):null,
+      selection:{key:s.key,market:String(s.market||'').slice(0,30),label:String(s.label||'').slice(0,50),probability:Number(s.probability)||null}};
+  }).filter(Boolean);
+  if(!safeLegs.length) return res.status(400).json({error:'En az bir geçerli seçim gerekli.'});
+  if(new Set(safeLegs.map(x=>x.fixtureId)).size!==safeLegs.length) return res.status(400).json({error:'Her maçtan yalnızca bir seçim eklenebilir.'});
+  if(safeLegs.some(x=>x.kickoff&&!Number.isNaN(x.kickoff.getTime())&&x.kickoff.getTime()<=Date.now())) return res.status(409).json({error:'Başlamış maç kupona eklenemez.'});
+  try{
+    let user=await User.findById(req.user.userId); if(!user)return res.status(404).json({error:'Kullanıcı bulunamadı.'});
+    if(ensureWallet(user))await user.save();
+    const stake=ALLOWED_STAKES.includes(Number(stakeCoins))?Number(stakeCoins):COUPON_STAKE;
+    user=await User.findOneAndUpdate({_id:req.user.userId,edgeCoins:{$gte:stake}},{$inc:{edgeCoins:-stake,totalCoinsSpent:stake}},{new:true});
+    if(!user)return res.status(402).json({error:'Bu kupon için yeterli Edge Coin yok.'});
+    const payout=calculatePayout(safeLegs.map(x=>x.selection),stake);
     let coupon;
-    try {
-      coupon = await Coupon.create({
-        userId: req.user.userId, fixtureId, homeTeam, awayTeam, league, kickoff: date,
-        matchDate: date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : null,
-        selections: safeSelections, stakeCoins: stake,
-        payoutMultiplier: payout.multiplier, potentialPayout: payout.payout,
-      });
-    } catch (error) {
-      await User.findByIdAndUpdate(req.user.userId, {
-        $inc: { edgeCoins: stake, totalCoinsSpent: -stake }
-      });
-      throw error;
-    }
-
-    await Promise.all(safeSelections.map(selection => CommunityPick.updateOne(
-      { userId: req.user.userId, fixtureId: String(fixtureId), key: selection.key },
-      { $set: { homeTeam, awayTeam, league: league || '', kickoff: date, market: selection.market, label: selection.label, result: 'pending', settledAt: null } },
-      { upsert: true }
+    try{
+      coupon=await Coupon.create({userId:req.user.userId,legs:safeLegs,stakeCoins:stake,payoutMultiplier:payout.multiplier,potentialPayout:payout.payout});
+    }catch(error){await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:stake,totalCoinsSpent:-stake}});throw error}
+    await Promise.all(safeLegs.map(leg=>CommunityPick.updateOne(
+      {userId:req.user.userId,fixtureId:leg.fixtureId,key:leg.selection.key},
+      {$set:{homeTeam:leg.homeTeam,awayTeam:leg.awayTeam,league:leg.league,kickoff:leg.kickoff,market:leg.selection.market,label:leg.selection.label,result:'pending',settledAt:null}},{upsert:true}
     )));
-    res.status(201).json({ coupon, balance: user.edgeCoins });
-  } catch (error) {
-    console.error('[coupons/create]', error.message);
-    res.status(500).json({ error: 'Kupon oluşturulamadı.' });
-  }
+    res.status(201).json({coupon,balance:user.edgeCoins});
+  }catch(error){console.error('[coupons/create]',error.message);res.status(500).json({error:'Kupon oluşturulamadı.'})}
 });
-
 router.post('/settle', async (req, res) => {
   try {
     const checked = await settlePending(req.user.userId);
