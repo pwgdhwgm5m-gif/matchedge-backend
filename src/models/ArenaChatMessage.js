@@ -8,4 +8,5 @@ const arenaChatSchema=new mongoose.Schema({
  reportReasons:[{reporter:{type:mongoose.Schema.Types.ObjectId,ref:'User'},reason:{type:String,enum:['abuse','spam','hate','sexual','personal_info','other']},createdAt:{type:Date,default:Date.now}}]
 },{timestamps:true});
 arenaChatSchema.index({createdAt:-1});
+arenaChatSchema.index({createdAt:1},{expireAfterSeconds:86400});
 module.exports=mongoose.model('ArenaChatMessage',arenaChatSchema);
