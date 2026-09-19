@@ -24,7 +24,7 @@ router.get('/', async (req, res) => {
   // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
   // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
   // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
-  const [result, liveResult, verifiedResult, supplemental, oddsFallback] = await Promise.all([
+  const [result, liveResult, verifiedResult, supplemental] = await Promise.all([
     cache.getOrFetch(
       `results:${date}`,
       config.cache.ttlLive,
@@ -48,8 +48,9 @@ router.get('/', async (req, res) => {
 
   // Keep the screen usable if the primary fixture source is temporarily unavailable.
   // Odds events supply fixture identity; verified score sources below can still enrich matches.
-  if (simplified.length === 0 && oddsFallback?.ok && Array.isArray(oddsFallback.matches)) {
-    simplified = oddsFallback.matches;
+  if (simplified.length===0 && (!result||!result.ok)) {
+    const oddsFallback=await cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date));
+    if(oddsFallback?.ok&&Array.isArray(oddsFallback.matches)) simplified=oddsFallback.matches;
   }
 
   if (liveResult.ok) {
