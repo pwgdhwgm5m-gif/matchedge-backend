@@ -186,6 +186,16 @@ function calculateDataQualityScore(successfulSources, totalSources, dataAgeMinut
  * bir TAHMIN uretiyoruz. Bu gercek istatistik degil, turetilmis bir
  * yaklasimdir - ileride gercek korner verisiyle kalibre edilebilir.
  */
+function estimateCornerMetricsFromExpected(homeExpected, awayExpected) {
+  const expectedTotal = Math.max(0.5, Number(homeExpected || 0) + Number(awayExpected || 0));
+  let cumulative = 0;
+  for (let k = 0; k <= 8; k++) cumulative += poissonProbability(expectedTotal, k);
+  const over85Percent = +((1 - cumulative) * 100).toFixed(1);
+  const homeShare = expectedTotal ? Number(homeExpected || 0) / expectedTotal : 0.5;
+  return { expectedTotal:+expectedTotal.toFixed(1), minExpected:Math.max(0,Math.floor(expectedTotal-2)),
+    over85Percent:Math.max(0,Math.min(100,over85Percent)), homeShare:+(homeShare*100).toFixed(1), awayShare:+((1-homeShare)*100).toFixed(1), source:'historical-corners' };
+}
+
 function estimateCornerMetrics(homeLambda, awayLambda) {
   const totalGoalExpectation = homeLambda + awayLambda;
   const leagueAvgGoals = 2.5; // referans lig ortalamasi
@@ -221,6 +231,7 @@ module.exports = {
   findStrongestSignal,
   calculateDataQualityScore,
   estimateCornerMetrics,
+  estimateCornerMetricsFromExpected,
   buildScoreMatrix,
   dixonColesTau,
   DEFAULT_RHO,
