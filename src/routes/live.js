@@ -208,6 +208,33 @@ router.get('/:fixtureId', async (req, res) => {
       : null,
     tv: tvResult.available ? tvResult.broadcasts : [],
     highlightVideo: highlightsResult.available ? highlightsResult.videoUrl : null,
+    // Stable live-card prediction payload. The frontend must never have to
+    // dereference pre-match fields that are absent from /api/live/:fixtureId.
+    livePrediction: (() => {
+      const minute = Number(match.minute || 0);
+      const home = Number(goalProximity?.home ?? momentum?.home ?? 50);
+      const away = Number(goalProximity?.away ?? momentum?.away ?? 50);
+      const total = home + away;
+      if (!Number.isFinite(home) || !Number.isFinite(away) || total <= 0) {
+        return { available: false, market: null, selection: null, probability: null, dataHealth: null };
+      }
+      const hp = +(home / total * 100).toFixed(1);
+      const ap = +(away / total * 100).toFixed(1);
+      const selection = hp >= ap ? match.homeTeam : match.awayTeam;
+      const probability = Math.max(hp, ap);
+      const evidence = [
+        statsResult.available,
+        Number(homeRawStats.shotsOnTarget) + Number(awayRawStats.shotsOnTarget) > 0,
+        Number(homeRawStats.corners) + Number(awayRawStats.corners) > 0,
+        xgSource === 'thesportsdb' || xgSource === 'bsd'
+      ].filter(Boolean).length;
+      const dataHealth = Math.round((evidence / 4) * 100);
+      // Do not manufacture a strong prediction from an empty 50/50 fallback.
+      if (evidence === 0 || (hp === 50 && ap === 50)) {
+        return { available: false, market: null, selection: null, probability: null, dataHealth };
+      }
+      return { available: true, market: 'Live pressure', selection, probability, dataHealth, minute, source: xgSource };
+    })(),
     valueAlert: { triggered: false },
     fromCache: { fixture: fromCacheFlag, stats: statsResult.fromCache },
   });
