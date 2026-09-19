@@ -84,6 +84,20 @@ async function settlePending(userId) {
   }
   return coupons.length;
 }
+async function settleAllPendingCoupons() {
+  const userIds = await Coupon.distinct('userId', { status: 'pending', 'legs.0': { $exists: true } });
+  let usersChecked = 0;
+  for (const userId of userIds) {
+    try {
+      await settlePending(userId);
+      usersChecked += 1;
+    } catch (error) {
+      console.warn('[coupons/auto-settle]', String(userId), error.message);
+    }
+  }
+  return usersChecked;
+}
+
 router.get('/', async (req, res) => {
   try {
     await settlePending(req.user.userId);
@@ -145,4 +159,5 @@ router.delete('/:id', async (req, res) => {
   res.json({ deleted: true });
 });
 
+router.settleAllPendingCoupons = settleAllPendingCoupons;
 module.exports = router;
