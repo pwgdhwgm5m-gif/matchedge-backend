@@ -6,6 +6,13 @@ const chatMessageSchema = new mongoose.Schema({
   author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
   authorName: { type: String, required: true, maxlength: 30 },
   text: { type: String, required: true, maxlength: 280 },
+  kind: { type:String, enum:['message','pick'], default:'message' },
+  pick: { key:String, market:String, label:String, probability:Number },
+  reactions: {
+    edge: [{ type:mongoose.Schema.Types.ObjectId, ref:'User' }],
+    agree: [{ type:mongoose.Schema.Types.ObjectId, ref:'User' }],
+    fire: [{ type:mongoose.Schema.Types.ObjectId, ref:'User' }]
+  },
   status: {
     type: String,
     enum: ['visible', 'under_review', 'removed'],
