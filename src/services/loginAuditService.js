@@ -63,4 +63,57 @@ async function recordLoginEvent({ user, req, clientTimezone, geoConsent }) {
   });
 }
 
-module.exports = { recordLoginEvent };
+async function setLocationConsent({ userId, req, clientTimezone, consent }) {
+  const clearedLocation = {
+    city: '', district: '', region: '', country: '', countryCode: '',
+    timezone: clientTimezone || '',
+  };
+
+  if (consent !== true) {
+    await LoginEvent.updateMany(
+      { userId },
+      {
+        $set: {
+          geoConsent: false,
+          geoConsentAt: null,
+          ...clearedLocation,
+        },
+      }
+    );
+    return { consent: false };
+  }
+
+  const ip = clientIp(req);
+  const location = await resolveApproximateLocation(
+    ip,
+    req.headers['cf-ipcountry'],
+    clientTimezone
+  );
+  const update = {
+    geoConsent: true,
+    geoConsentAt: new Date(),
+    ...location,
+  };
+
+  const latest = await LoginEvent.findOneAndUpdate(
+    { userId },
+    { $set: update },
+    { sort: { loginAt: -1 }, new: true }
+  );
+
+  if (!latest) {
+    const ipHash = ip
+      ? crypto.createHmac('sha256', config.jwtSecret).update(ip).digest('hex')
+      : '';
+    await LoginEvent.create({
+      userId,
+      ...update,
+      ipHash,
+      userAgent: String(req.headers['user-agent'] || '').slice(0, 240),
+    });
+  }
+
+  return { consent: true, location };
+}
+
+module.exports = { recordLoginEvent, setLocationConsent };
