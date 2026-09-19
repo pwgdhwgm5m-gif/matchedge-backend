@@ -21,6 +21,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
   const isMappedLeague = leagueIdNum && !!sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)];
+  const useOwnSource = isSuperLig || isMappedLeague;
 
   // API-Football (footballApiService) askida oldugu icin form verisi:
   // - Süper Lig -> TFF.org scraper
@@ -112,7 +113,6 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? awayFixturesResult.value.data?.response || []
     : [];
 
-  const useOwnSource = isSuperLig || isMappedLeague;
   const homeTeamIdForStats = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
     ? homeFixturesResult.value.teamId
     : home;
