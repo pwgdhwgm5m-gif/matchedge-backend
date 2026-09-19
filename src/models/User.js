@@ -67,6 +67,8 @@ const userSchema = new mongoose.Schema({
   // Güvenli maç sohbeti tercihleri
   chatRulesAcceptedAt: { type: Date, default: null },
   chatSuspendedUntil: { type: Date, default: null },
+  chatModerationWarnings: { type: Number, default: 0, min: 0 },
+  lastChatWarningAt: { type: Date, default: null },
   blockedChatUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   createdAt: {
     type: Date,
