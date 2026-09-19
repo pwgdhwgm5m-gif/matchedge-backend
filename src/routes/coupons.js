@@ -46,8 +46,42 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
 async function settlePending(userId) {
   const coupons=await Coupon.find({userId,status:'pending'}).sort({createdAt:-1}).limit(30);
   for(const coupon of coupons){
-    // Legacy one-match coupons keep the old settlement path below this migration boundary.
-    if(!coupon.legs?.length) continue;
+    // Migrate/settle legacy one-match coupons created before multi-leg slips.
+    if(!coupon.legs?.length){
+      if(!coupon.fixtureId || !coupon.matchDate || !(coupon.selections||[]).length) continue;
+      const [raw,verified]=await Promise.all([sportsDb.getMatchesByDate(coupon.matchDate),footballDataOrg.getMatchesByDate(coupon.matchDate)]);
+      let matches=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
+      if(verified.ok)matches=footballDataOrg.mergeVerifiedScores(matches,verified.matches);
+      matches=await sportsDb.attachHalftimeScores(matches);
+      const match=matches.find(m=>String(m.fixtureId)===String(coupon.fixtureId));
+      if(!match||match.statusShort!=='FT')continue;
+      let corners=null;
+      if(coupon.selections.some(s=>String(s.key||'').startsWith('corners'))){
+        const stats=await sportsDb.getEventStatsFormatted(coupon.fixtureId);
+        if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
+      }
+      for(const selection of coupon.selections){
+        if(selection.result!=='pending')continue;
+        selection.result=settleSelection(selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
+        await CommunityPick.updateOne({userId,fixtureId:coupon.fixtureId,key:selection.key},{$set:{result:selection.result,settledAt:new Date()}});
+      }
+      const legacyResults=coupon.selections.map(s=>s.result);
+      coupon.status=legacyResults.some(x=>x==='lost')?'lost':legacyResults.some(x=>x==='pending')?'pending':legacyResults.some(x=>x==='won')?'won':'void';
+      coupon.finalScore={home:match.homeScore,away:match.awayScore};
+      coupon.settledAt=coupon.status==='pending'?null:new Date();
+      coupon.markModified('selections');
+      await coupon.save();
+      if(coupon.status!=='pending'&&!coupon.rewardedAt){
+        const claimed=await Coupon.findOneAndUpdate({_id:coupon._id,rewardedAt:null},{$set:{rewardedAt:new Date()}},{new:true});
+        if(claimed){
+          const wins=coupon.selections.filter(s=>s.result==='won').length;
+          if(coupon.status==='won') await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,totalCoinsWon:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,correctPicks:wins}});
+          else if(coupon.status==='lost') await User.findByIdAndUpdate(userId,{$inc:{wrongPicks:coupon.selections.filter(s=>s.result==='lost').length}});
+          else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
+        }
+      }
+      continue;
+    }
     for(const leg of coupon.legs){
       if(leg.selection.result!=='pending') continue;
       if(!leg.matchDate) continue;
@@ -151,10 +185,29 @@ router.post('/settle', async (req, res) => {
   }
 });
 
+router.delete('/:id/legs/:fixtureId', async (req,res)=>{
+  const coupon=await Coupon.findOne({_id:req.params.id,userId:req.user.userId});
+  if(!coupon)return res.status(404).json({error:'Kupon bulunamadı.'});
+  if(coupon.status!=='pending')return res.status(409).json({error:'Sonuçlanmış kupon değiştirilemez.'});
+  const leg=(coupon.legs||[]).find(l=>String(l.fixtureId)===String(req.params.fixtureId));
+  if(!leg)return res.status(404).json({error:'Maç kuponda bulunamadı.'});
+  if(leg.kickoff&&new Date(leg.kickoff).getTime()<=Date.now())return res.status(409).json({error:'Başlamış maç kupondan silinemez.'});
+  coupon.legs=coupon.legs.filter(l=>String(l.fixtureId)!==String(req.params.fixtureId));
+  if(!coupon.legs.length){await coupon.deleteOne();return res.json({deleted:true,couponDeleted:true})}
+  const payout=calculatePayout(coupon.legs.map(x=>x.selection),coupon.stakeCoins||COUPON_STAKE);
+  coupon.payoutMultiplier=payout.multiplier;coupon.potentialPayout=payout.payout;coupon.markModified('legs');await coupon.save();
+  res.json({deleted:true,coupon});
+});
+
 router.delete('/:id', async (req, res) => {
   const coupon = await Coupon.findOne({ _id: req.params.id, userId: req.user.userId });
   if (!coupon) return res.status(404).json({ error: 'Kupon bulunamadı.' });
-  if (coupon.status === 'pending') return res.status(409).json({ error: 'Bekleyen kupon silinemez.' });
+  if(coupon.status==='pending'){
+    const allKickoffs=(coupon.legs||[]).map(l=>l.kickoff).filter(Boolean);
+    if(coupon.kickoff)allKickoffs.push(coupon.kickoff);
+    if(allKickoffs.some(k=>new Date(k).getTime()<=Date.now()))return res.status(409).json({error:'Başlamış maç içeren kupon silinemez.'});
+    await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE,totalCoinsSpent:-(coupon.stakeCoins||COUPON_STAKE)}});
+  }
   await coupon.deleteOne();
   res.json({ deleted: true });
 });
