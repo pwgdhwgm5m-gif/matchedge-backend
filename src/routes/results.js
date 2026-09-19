@@ -5,6 +5,7 @@ const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const cupFixtures = require('../services/cupFixtureService');
+const oddsApi = require('../services/oddsApiService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -23,7 +24,7 @@ router.get('/', async (req, res) => {
   // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
   // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
   // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
-  const [result, liveResult, verifiedResult, supplemental] = await Promise.all([
+  const [result, liveResult, verifiedResult, supplemental, oddsFallback] = await Promise.all([
     cache.getOrFetch(
       `results:${date}`,
       config.cache.ttlLive,
@@ -32,18 +33,24 @@ router.get('/', async (req, res) => {
     cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
     cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
     cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
+    cache.getOrFetch(`odds-events:${date}`, config.cache.ttlStatic, () => oddsApi.getFixtureEventsByDate(date)),
   ]);
 
-  if (!result.ok) {
-    return res.status(502).json({ error: 'Sonuc verisi alinamadi' });
-  }
-
-  const rawEvents = result.data?.events || [];
+  const rawEvents = result && result.ok ? (result.data?.events || []) : [];
   let simplified = rawEvents
     .map(sportsDb.transformEvent)
     .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
 
-  simplified = cupFixtures.mergeUnique(simplified, supplemental.ok ? supplemental.matches : []);
+  const supplementalMatches = Array.isArray(supplemental)
+    ? supplemental
+    : (Array.isArray(supplemental?.matches) ? supplemental.matches : []);
+  simplified = cupFixtures.mergeUnique(simplified, supplementalMatches);
+
+  // Keep the screen usable if the primary fixture source is temporarily unavailable.
+  // Odds events supply fixture identity; verified score sources below can still enrich matches.
+  if (simplified.length === 0 && oddsFallback?.ok && Array.isArray(oddsFallback.matches)) {
+    simplified = oddsFallback.matches;
+  }
 
   if (liveResult.ok) {
     const rawLive = (liveResult.data?.livescore || []).filter(
@@ -68,7 +75,7 @@ router.get('/', async (req, res) => {
   res.json({
     date,
     matches: simplified,
-    fromCache: result.fromCache,
+    fromCache: !!result?.fromCache,
     verificationSource: verifiedResult.ok ? 'football-data.org' : 'thesportsdb-fallback',
   });
 });
