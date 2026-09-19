@@ -10,7 +10,7 @@ const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require(
 const router = express.Router();
 router.use(requireAuth);
 
-const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond']);
+const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver95', 'cornersUnder95', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond']);
 
 function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   const total = home + away;
@@ -21,8 +21,11 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   if (key === 'under25') return total < 2.5 ? 'won' : 'lost';
   if (key === 'bttsYes') return home > 0 && away > 0 ? 'won' : 'lost';
   if (key === 'bttsNo') return home === 0 || away === 0 ? 'won' : 'lost';
-  if (key === 'cornersOver85') return corners == null ? 'void' : corners > 8.5 ? 'won' : 'lost';
-  if (key === 'cornersUnder85') return corners == null ? 'void' : corners < 8.5 ? 'won' : 'lost';
+  if (key === 'cornersOver95') return corners == null ? 'void' : corners >= 10 ? 'won' : 'lost';
+  if (key === 'cornersUnder95') return corners == null ? 'void' : corners <= 9 ? 'won' : 'lost';
+  // Legacy 8.5 coupons remain settleable.
+  if (key === 'cornersOver85') return corners == null ? 'void' : corners >= 9 ? 'won' : 'lost';
+  if (key === 'cornersUnder85') return corners == null ? 'void' : corners <= 8 ? 'won' : 'lost';
   if (halftimeHome == null || halftimeAway == null) return 'void';
   const secondHome = home - halftimeHome;
   const secondAway = away - halftimeAway;
