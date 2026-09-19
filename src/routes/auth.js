@@ -8,7 +8,7 @@ const {
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const { requireAuth } = require('../middleware/authMiddleware');
 const config = require('../config/config');
-const { recordLoginEvent } = require('../services/loginAuditService');
+const { recordLoginEvent, setLocationConsent } = require('../services/loginAuditService');
 
 const VERIFICATION_VALID_HOURS = 24;
 const RESET_VALID_MINUTES = 60;
@@ -110,6 +110,30 @@ router.get('/me', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.userId);
   if (!user) return res.status(404).json({ error: 'Kullanici bulunamadi.' });
   res.json({ username: user.username, email: user.email, emailVerified: true, isAdmin: user.role === 'admin' });
+});
+
+/**
+ * POST /api/auth/location-consent
+ * body: { consent: boolean, timezone?: string }
+ */
+router.post('/location-consent', requireAuth, async (req, res) => {
+  const { consent, timezone } = req.body || {};
+  if (typeof consent !== 'boolean') {
+    return res.status(400).json({ error: 'Konum tercihi true veya false olmali.' });
+  }
+
+  try {
+    const result = await setLocationConsent({
+      userId: req.user.userId,
+      req,
+      clientTimezone: timezone,
+      consent,
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('[auth/location-consent] Hata:', err.message);
+    res.status(500).json({ error: 'Konum tercihi kaydedilemedi.' });
+  }
 });
 
 /**
