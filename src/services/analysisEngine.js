@@ -80,12 +80,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         : cache.getOrFetch(`h2h:${fixtureId}`, config.cache.ttlStatic, () =>
             footballApi.getH2H(home, away)
           ),
-      cache.getOrFetch(`odds:${sportKey || 'soccer_epl'}`, config.cache.ttlStatic, () =>
-        oddsApi.getOddsForLeague(sportKey || 'soccer_epl')
-      ),
-      cache.getOrFetch(`injuries:${fixtureId}`, config.cache.ttlStatic, () =>
-        footballApi.getInjuries(fixtureId)
-      ),
+      config.oddsApi.key
+        ? cache.getOrFetch(`odds:${sportKey || 'soccer_epl'}`, config.cache.ttlStatic, () => oddsApi.getOddsForLeague(sportKey || 'soccer_epl'))
+        : Promise.resolve({ok:false,error:'odds_disabled'}),
+      config.apiFootball.sources.length && !useOwnSource
+        ? cache.getOrFetch(`injuries:${fixtureId}`, config.cache.ttlStatic, () => footballApi.getInjuries(fixtureId))
+        : Promise.resolve({ok:false,error:'injuries_unavailable'}),
       cache.getOrFetch(homeFormCacheKey, config.cache.ttlStatic, homeFormFetcher),
       cache.getOrFetch(awayFormCacheKey, config.cache.ttlStatic, awayFormFetcher),
       cache.getOrFetch(standingsCacheKey, config.cache.ttlStatic, standingsFetcher),
