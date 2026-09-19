@@ -41,9 +41,11 @@ router.get('/:fixtureId', async (req, res) => {
   }
 
   try {
-    const result = await computeFullAnalysis({
+    const analysisPromise = computeFullAnalysis({
       fixtureId, home, away, homeTeamName, awayTeamName, league, leagueName, season, sportKey,
     });
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 15000));
+    const result = await Promise.race([analysisPromise, timeoutPromise]);
     if (kickoff && homeTeamName && awayTeamName) {
       ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName })
         .catch(err => console.error('[prediction-capture]', err));
