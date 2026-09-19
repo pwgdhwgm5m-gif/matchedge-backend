@@ -9,6 +9,7 @@ const tffScraper = require('./tffScraper');
 const sportsDb = require('./sportsDbService');
 const premiumIntelligence = require('./premiumIntelligenceService');
 const modelCalibration = require('./modelCalibrationService');
+const accuracy = require('./accuracyEngineService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -185,17 +186,34 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const awayAttack = awayAttackBase * awayInjuryImpact.attackMultiplier * awayFatigue * awayStreakMult;
   const awayDefenseWeak = awayDefenseWeakBase * awayInjuryImpact.defenseWeaknessMultiplier;
 
-  const homeLambdaBase = poisson.calculateExpectedGoals(homeAttack, awayDefenseWeak, LEAGUE_AVG_HOME_GOALS, 1);
-  const awayLambdaBase = poisson.calculateExpectedGoals(awayAttack, homeDefenseWeak, LEAGUE_AVG_AWAY_GOALS, 1);
-  const homeLambda = +(homeLambdaBase * motivationHome.multiplier).toFixed(2);
-  const awayLambda = +(awayLambdaBase * motivationAway.multiplier).toFixed(2);
+  const tsdbLeagueId = isSuperLig ? 4339 : (isMappedLeague ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null);
+  const leagueBase = tsdbLeagueId ? await accuracy.leagueBaselines(tsdbLeagueId, currentSeason) : null;
+  const leagueHomeGoals = leagueBase?.homeGoals || LEAGUE_AVG_HOME_GOALS;
+  const leagueAwayGoals = leagueBase?.awayGoals || LEAGUE_AVG_AWAY_GOALS;
+
+  const homeLambdaBase = poisson.calculateExpectedGoals(homeAttack, awayDefenseWeak, leagueHomeGoals, 1);
+  const awayLambdaBase = poisson.calculateExpectedGoals(awayAttack, homeDefenseWeak, leagueAwayGoals, 1);
+  let homeLambda = +(homeLambdaBase * motivationHome.multiplier).toFixed(2);
+  let awayLambda = +(awayLambdaBase * motivationAway.multiplier).toFixed(2);
+
+  // Premium TheSportsDB event stats: blend real historical xG into pre-match lambdas.
+  // Falls back to the goal model whenever xG coverage/sample is insufficient.
+  const [homeAdvanced, awayAdvanced] = await Promise.all([
+    accuracy.teamAdvancedForm(homeFixtures, homeTeamIdForStats, 8),
+    accuracy.teamAdvancedForm(awayFixtures, awayTeamIdForStats, 8),
+  ]);
+  homeLambda = accuracy.blendLambda(homeLambda, homeAdvanced, awayAdvanced, leagueHomeGoals);
+  awayLambda = accuracy.blendLambda(awayLambda, awayAdvanced, homeAdvanced, leagueAwayGoals);
 
   const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
   const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
   const calibrated = await modelCalibration.apply({league: leagueName || String(league || ''), match: rawMatchProbabilities, goals: rawMarketProbabilities});
   const matchProbabilities = calibrated.match;
   const marketProbabilities = calibrated.goals;
-  const cornerMetrics = poisson.estimateCornerMetrics(homeLambda, awayLambda);
+  const cornerProjection = accuracy.cornerProjection(homeAdvanced, awayAdvanced);
+  const cornerMetrics = cornerProjection
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample })
+    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'goal-intensity-fallback' });
   const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda);
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
@@ -257,6 +275,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     modelProbabilities: matchProbabilities,
     goalMarkets: marketProbabilities,
     cornerMetrics,
+    advancedStats: { home: homeAdvanced, away: awayAdvanced, leagueBaseline: leagueBase },
     dataHealth: premium.dataHealth,
     premium,
     halfMarkets,
