@@ -50,49 +50,23 @@ async function getEventsForLeague(sportKey) {
 }
 
 async function getFixtureEventsByDate(dateStr) {
-  if (!config.oddsApi.key) return { ok: false, error: 'no_odds_api_key', matches: [] };
-
-  const keys = config.trackedLeagues || [];
-  const settled = await Promise.all(keys.map(async (sportKey) => {
-    const result = await getEventsForLeague(sportKey);
-    if (!result.ok || !Array.isArray(result.data)) return [];
-    return result.data
-      .filter(event => String(event.commence_time || '').slice(0, 10) === dateStr)
-      .map(event => ({
-        fixtureId: `odds:${event.id}`,
-        league: sportKey,
-        leagueId: sportKey,
-        kickoff: event.commence_time || null,
-        statusShort: 'NS',
-        minute: null,
-        isLive: false,
-        homeId: null,
-        awayId: null,
-        homeTeam: event.home_team || '',
-        awayTeam: event.away_team || '',
-        homeBadge: null,
-        awayBadge: null,
-        homeScore: 0,
-        awayScore: 0,
-        halftimeHome: null,
-        halftimeAway: null,
-        source: 'the-odds-api-events',
-      }));
-  }));
-
-  const matches = settled.flat();
-  const seen = new Set();
-  return {
-    ok: true,
-    matches: matches.filter(match => {
-      const key = [match.kickoff, normalizeTeamName(match.homeTeam), normalizeTeamName(match.awayTeam)].join('|');
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    }),
-  };
+  if (!oddsEnabled()) return { ok:false,error:'odds_api_disabled_or_circuit_open',matches:[] };
+  const keys=config.trackedLeagues||[]; const matches=[];
+  // Fallback only: sequential and stop immediately when the provider rate-limits/auth-fails.
+  for (const sportKey of keys) {
+    if(!oddsEnabled()) break;
+    const result=await getEventsForLeague(sportKey);
+    if(!result.ok) { if(!oddsEnabled()) break; continue; }
+    if(!Array.isArray(result.data)) continue;
+    for(const event of result.data) if(String(event.commence_time||'').slice(0,10)===dateStr) matches.push({
+      fixtureId:`odds:${event.id}`,league:sportKey,leagueId:sportKey,kickoff:event.commence_time||null,statusShort:'NS',minute:null,isLive:false,
+      homeId:null,awayId:null,homeTeam:event.home_team||'',awayTeam:event.away_team||'',homeBadge:null,awayBadge:null,homeScore:0,awayScore:0,
+      halftimeHome:null,halftimeAway:null,source:'the-odds-api-events'
+    });
+  }
+  const seen=new Set();
+  return {ok:true,matches:matches.filter(match=>{const key=[match.kickoff,normalizeTeamName(match.homeTeam),normalizeTeamName(match.awayTeam)].join('|');if(seen.has(key))return false;seen.add(key);return true;})};
 }
-
 async function hasMatchesToday(sportKey, windowHours = 30) {
   const result = await getEventsForLeague(sportKey);
 
