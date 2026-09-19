@@ -97,6 +97,9 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4503', // FIFA Kulupler Dunya Kupasi
   '4570', // Ingiltere Ligi Kupasi (Carabao Cup / EFL Cup)
   '4510', // Portekiz Kupasi
+  '4902', // Hollanda KNVB Beker / Dutch KNVB Cup
+  '4960', // Turkiye Kupasi (TheSportsDB current competition id)
+  '4903', // Almanya Super Cup
 ]);
 
 function isWhitelistedLeague(leagueId) {
