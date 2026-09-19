@@ -61,6 +61,8 @@ const userSchema = new mongoose.Schema({
   totalCoinsSpent: { type: Number, default: 0, min: 0 },
   dailyLoginStreak: { type: Number, default: 0, min: 0 },
   lastDailyClaimAt: { type: Date, default: null },
+  weeklyChallengeKey: { type: String, default: null },
+  weeklyChallengeRewards: { slips: { type: Boolean, default: false }, legs: { type: Boolean, default: false }, perfect: { type: Boolean, default: false } },
 
   // Güvenli maç sohbeti tercihleri
   chatRulesAcceptedAt: { type: Date, default: null },
