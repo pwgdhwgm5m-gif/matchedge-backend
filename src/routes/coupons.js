@@ -41,75 +41,46 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
 }
 
 async function settlePending(userId) {
-  const coupons = await Coupon.find({ userId, status: 'pending' }).sort({ createdAt: -1 }).limit(30);
-  const dates = [...new Set(coupons.map(c => c.matchDate).filter(Boolean))];
-  const matchesByDate = new Map();
-  for (const date of dates) {
-    const [raw, verified] = await Promise.all([sportsDb.getMatchesByDate(date), footballDataOrg.getMatchesByDate(date)]);
-    let matches = raw.ok ? (raw.data?.events || []).map(sportsDb.transformEvent) : [];
-    if (verified.ok) matches = footballDataOrg.mergeVerifiedScores(matches, verified.matches);
-    matches = await sportsDb.attachHalftimeScores(matches);
-    matchesByDate.set(date, matches);
-  }
-
-  for (const coupon of coupons) {
-    const match = (matchesByDate.get(coupon.matchDate) || []).find(m => String(m.fixtureId) === String(coupon.fixtureId));
-    if (!match || match.statusShort !== 'FT') continue;
-    let corners = null;
-    if (coupon.selections.some(s => s.key.startsWith('corners'))) {
-      const stats = await sportsDb.getEventStatsFormatted(coupon.fixtureId);
-      if (stats.available && stats.stats?.corners) corners = Number(stats.stats.corners.home || 0) + Number(stats.stats.corners.away || 0);
+  const coupons=await Coupon.find({userId,status:'pending'}).sort({createdAt:-1}).limit(30);
+  for(const coupon of coupons){
+    // Legacy one-match coupons keep the old settlement path below this migration boundary.
+    if(!coupon.legs?.length) continue;
+    for(const leg of coupon.legs){
+      if(leg.selection.result!=='pending') continue;
+      if(!leg.matchDate) continue;
+      const [raw,verified]=await Promise.all([sportsDb.getMatchesByDate(leg.matchDate),footballDataOrg.getMatchesByDate(leg.matchDate)]);
+      let matches=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
+      if(verified.ok)matches=footballDataOrg.mergeVerifiedScores(matches,verified.matches);
+      matches=await sportsDb.attachHalftimeScores(matches);
+      const match=matches.find(m=>String(m.fixtureId)===String(leg.fixtureId));
+      if(!match||match.statusShort!=='FT')continue;
+      let corners=null;
+      if(leg.selection.key.startsWith('corners')){
+        const stats=await sportsDb.getEventStatsFormatted(leg.fixtureId);
+        if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
+      }
+      leg.selection.result=settleSelection(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
+      leg.finalScore={home:match.homeScore,away:match.awayScore};
+      await CommunityPick.updateOne({userId,fixtureId:leg.fixtureId,key:leg.selection.key},{$set:{result:leg.selection.result,settledAt:new Date()}});
     }
-    coupon.selections.forEach(selection => {
-      selection.result = settleSelection(selection.key, match.homeScore, match.awayScore, corners, match.halftimeHome, match.halftimeAway);
-    });
-    coupon.finalScore = { home: match.homeScore, away: match.awayScore };
-    coupon.status = coupon.selections.some(s => s.result === 'lost')
-      ? 'lost'
-      : coupon.selections.some(s => s.result === 'pending')
-        ? 'pending'
-        : coupon.selections.some(s => s.result === 'won') ? 'won' : 'void';
-    coupon.settledAt = coupon.status === 'pending' ? null : new Date();
-    coupon.markModified('selections');
-    await coupon.save();
-
-    await Promise.all(coupon.selections.map(selection => CommunityPick.updateOne(
-      { userId, fixtureId: coupon.fixtureId, key: selection.key },
-      { $set: { result: selection.result, settledAt: coupon.settledAt } }
-    )));
-
-    if (coupon.status !== 'pending' && !coupon.rewardedAt) {
-      const claimed = await Coupon.findOneAndUpdate(
-        { _id: coupon._id, rewardedAt: null },
-        { $set: { rewardedAt: new Date() } },
-        { new: true }
-      );
-      if (claimed) {
-        const legWins = coupon.selections.filter(s => s.result === 'won').length;
-        if (coupon.status === 'won') {
-          const payout = coupon.potentialPayout || COUPON_STAKE;
-          const xp = 20 + (legWins * 5);
-          const updated = await User.findByIdAndUpdate(userId, {
-            $inc: { edgeCoins: payout, totalCoinsWon: payout, xp, correctPicks: legWins, currentStreak: 1 }
-          }, { new: true });
-          if (updated && updated.currentStreak > updated.bestStreak) {
-            updated.bestStreak = updated.currentStreak;
-            await updated.save();
-          }
-        } else if (coupon.status === 'lost') {
-          await User.findByIdAndUpdate(userId, {
-            $inc: { wrongPicks: coupon.selections.filter(s => s.result === 'lost').length },
-            $set: { currentStreak: 0 }
-          });
-        } else {
-          await User.findByIdAndUpdate(userId, { $inc: { edgeCoins: coupon.stakeCoins || COUPON_STAKE } });
-        }
+    const results=coupon.legs.map(l=>l.selection.result);
+    coupon.status=results.some(x=>x==='lost')?'lost':results.some(x=>x==='pending')?'pending':results.some(x=>x==='won')?'won':'void';
+    coupon.settledAt=coupon.status==='pending'?null:new Date(); coupon.markModified('legs'); await coupon.save();
+    if(coupon.status!=='pending'&&!coupon.rewardedAt){
+      const claimed=await Coupon.findOneAndUpdate({_id:coupon._id,rewardedAt:null},{$set:{rewardedAt:new Date()}},{new:true});
+      if(claimed){
+        const wins=coupon.legs.filter(l=>l.selection.result==='won').length;
+        if(coupon.status==='won'){
+          const payout=coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,xp=20+wins*5+(wins>=5?25:0);
+          const updated=await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:payout,totalCoinsWon:payout,xp,correctPicks:wins,currentStreak:1}},{new:true});
+          if(updated&&updated.currentStreak>updated.bestStreak){updated.bestStreak=updated.currentStreak;await updated.save()}
+        }else if(coupon.status==='lost')await User.findByIdAndUpdate(userId,{$inc:{wrongPicks:coupon.legs.filter(l=>l.selection.result==='lost').length},$set:{currentStreak:0}});
+        else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
       }
     }
   }
   return coupons.length;
 }
-
 router.get('/', async (req, res) => {
   try {
     await settlePending(req.user.userId);
