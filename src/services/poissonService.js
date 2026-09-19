@@ -188,11 +188,17 @@ function calculateDataQualityScore(successfulSources, totalSources, dataAgeMinut
  */
 function estimateCornerMetricsFromExpected(homeExpected, awayExpected) {
   const expectedTotal = Math.max(0.5, Number(homeExpected || 0) + Number(awayExpected || 0));
-  let cumulative = 0;
-  for (let k = 0; k <= 8; k++) cumulative += poissonProbability(expectedTotal, k);
-  const over85Percent = +((1 - cumulative) * 100).toFixed(1);
+  let cumulative85 = 0, cumulative95 = 0;
+  for (let k = 0; k <= 9; k++) {
+    const p = poissonProbability(expectedTotal, k);
+    if (k <= 8) cumulative85 += p;
+    cumulative95 += p;
+  }
+  const over85Percent = +((1 - cumulative85) * 100).toFixed(1);
+  const over95Percent = +((1 - cumulative95) * 100).toFixed(1);
   const homeShare = expectedTotal ? Number(homeExpected || 0) / expectedTotal : 0.5;
   return { expectedTotal:+expectedTotal.toFixed(1), minExpected:Math.max(0,Math.floor(expectedTotal-2)),
+    over95Percent:Math.max(0,Math.min(100,over95Percent)), under95Percent:Math.max(0,Math.min(100,+(100-over95Percent).toFixed(1))),
     over85Percent:Math.max(0,Math.min(100,over85Percent)), homeShare:+(homeShare*100).toFixed(1), awayShare:+((1-homeShare)*100).toFixed(1), source:'historical-corners' };
 }
 
@@ -207,16 +213,23 @@ function estimateCornerMetrics(homeLambda, awayLambda) {
   // Muhafazakar alt sinir: beklenen degerin ~2.5 altini "guvenli minimum" sayiyoruz
   const minExpected = Math.max(4, Math.round(expectedTotal - 2.5));
 
-  // 8.5 ustu olma olasiligi - ayni Poisson yaklasimini korner sayisina uyguluyoruz
-  let cumulative = 0;
-  for (let k = 0; k <= 8; k++) cumulative += poissonProbability(expectedTotal, k);
-  const over85Percent = +((1 - cumulative) * 100).toFixed(1);
+  // Ana korner marketi 9.5. 8.5 alani sadece eski kayitlarla geriye uyumluluk icin korunur.
+  let cumulative85 = 0, cumulative95 = 0;
+  for (let k = 0; k <= 9; k++) {
+    const p = poissonProbability(expectedTotal, k);
+    if (k <= 8) cumulative85 += p;
+    cumulative95 += p;
+  }
+  const over85Percent = +((1 - cumulative85) * 100).toFixed(1);
+  const over95Percent = +((1 - cumulative95) * 100).toFixed(1);
 
   const homeShare = totalGoalExpectation ? homeLambda / totalGoalExpectation : 0.5;
 
   return {
     expectedTotal,
     minExpected,
+    over95Percent: Math.max(0, Math.min(100, over95Percent)),
+    under95Percent: Math.max(0, Math.min(100, +(100 - over95Percent).toFixed(1))),
     over85Percent: Math.max(0, Math.min(100, over85Percent)),
     homeShare: +(homeShare * 100).toFixed(1),
     awayShare: +((1 - homeShare) * 100).toFixed(1),
