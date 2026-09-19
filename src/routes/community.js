@@ -59,10 +59,19 @@ router.get('/edge-dna',async(req,res)=>{
  res.json({total:picks.length,user:{won:userWon,accuracy:picks.length?Math.round(userWon/picks.length*100):0},ai:{won:aiWon,total:aiTotal,accuracy:aiTotal?Math.round(aiWon/aiTotal*100):0},bestMarkets:market.slice(0,5),bestLeagues:league.slice(0,5)});
 });
 router.get('/weekly-challenge',async(req,res)=>{
- const start=weekStart(),coupons=await Coupon.find({userId:req.user.userId,createdAt:{$gte:start}}).lean();
+ const start=weekStart(),end=new Date(start.getTime()+7*86400000),weekKey=start.toISOString().slice(0,10);
+ const coupons=await Coupon.find({userId:req.user.userId,createdAt:{$gte:start,$lt:end}}).lean();
  const settled=coupons.filter(x=>x.status!=='pending'),perfect=settled.filter(x=>x.status==='won'&&(x.legs?.length||0)>=5).length;
- const legs=coupons.reduce((n,x)=>n+(x.legs?.length||0),0);
- res.json({startsAt:start,endsAt:new Date(start.getTime()+7*86400000),progress:{slips:coupons.length,legs,perfect},goals:{slips:3,legs:10,perfect:1}});
+ const legs=coupons.reduce((n,x)=>n+(x.legs?.length||0),0),progress={slips:coupons.length,legs,perfect},goals={slips:3,legs:10,perfect:1};
+ let user=await getWalletUser(req.user.userId);if(!user)return res.status(404).json({error:'Kullanıcı bulunamadı.'});
+ if(user.weeklyChallengeKey!==weekKey){user.weeklyChallengeKey=weekKey;user.weeklyChallengeRewards={slips:false,legs:false,perfect:false};await user.save()}
+ const claimed=user.weeklyChallengeRewards||{slips:false,legs:false,perfect:false},earned=[];
+ let xp=0,coins=0;
+ if(progress.slips>=goals.slips&&!claimed.slips){claimed.slips=true;xp+=20;earned.push({key:'slips',xp:20,coins:0})}
+ if(progress.legs>=goals.legs&&!claimed.legs){claimed.legs=true;xp+=30;earned.push({key:'legs',xp:30,coins:0})}
+ if(progress.perfect>=goals.perfect&&!claimed.perfect){claimed.perfect=true;xp+=100;coins+=50;earned.push({key:'perfect',xp:100,coins:50})}
+ if(earned.length){user.xp=(user.xp||0)+xp;user.edgeCoins=(user.edgeCoins||0)+coins;user.weeklyChallengeRewards=claimed;await user.save()}
+ res.json({startsAt:start,endsAt:end,progress,goals,rewards:{slips:{xp:20,coins:0},legs:{xp:30,coins:0},perfect:{xp:100,coins:50}},claimed,earned,profile:publicUser(user)});
 });
 router.post('/mini-leagues',async(req,res)=>{
  const name=String(req.body.name||'').trim().slice(0,40);if(name.length<3)return res.status(400).json({error:'Lig adı en az 3 karakter olmalı.'});
