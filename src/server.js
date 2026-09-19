@@ -85,4 +85,15 @@ app.listen(config.port, async () => {
   startPrecomputeCron();
   startOddsSnapshotCron();
   startKeepAlive();
+  // CoinEdge coupons are settled in the background even if the user never opens Kuponum.
+  const settleCoupons = async () => {
+    try {
+      const checked = await couponsRoute.settleAllPendingCoupons();
+      if (checked) console.log('[coupons/auto-settle] users checked:', checked);
+    } catch (error) {
+      console.warn('[coupons/auto-settle]', error.message);
+    }
+  };
+  setTimeout(settleCoupons, 30000);
+  setInterval(settleCoupons, 10 * 60 * 1000);
 });
