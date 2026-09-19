@@ -142,7 +142,7 @@ function startPrecomputeCron() {
   cron.schedule('0 6,13 * * *', precomputeTodaysMatches);
   console.log('[precompute] Cron zamanlandi: her gun 06:00 ve 13:00');
 
-  precomputeTodaysMatches();
+  // Startup'ta 50 agir analiz calistirma: kullanici isteklerine oncelik ver. Ilk tur 06:00/13:00 cronunda.
   cron.schedule('15 */3 * * *', () => ledger.settlePending().catch(err => console.error('[prediction-ledger]', err)));
   ledger.settlePending().then(() => modelCalibration.retrain()).catch(err => console.error('[prediction-ledger]', err));
   cron.schedule('45 3 * * *', () => modelCalibration.retrain().catch(err => console.error('[model-calibration]', err)));
