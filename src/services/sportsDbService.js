@@ -11,7 +11,7 @@ const config = require('../config/config');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const V2_BASE_URL = 'https://www.thesportsdb.com/api/v2/json';
-const API_KEY = process.env.SPORTSDB_API_KEY || '123';
+const API_KEY = process.env.SPORTSDB_API_KEY || process.env.THESPORTSDB_KEY || config.sportsDb.key || '3';
 
 // TheSportsDB'nin gercekten kullandigi durum kodlari (V2 canli skor ornek
 // verisinden dogrulandi). "Match Finished" gibi baska API'lerden (orn.
