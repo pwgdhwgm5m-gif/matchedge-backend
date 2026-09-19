@@ -150,6 +150,7 @@ function startPrecomputeCron() {
 }
 
 function startOddsSnapshotCron() {
+  if (!config.oddsApi.key) { console.log('[odds-snapshot] DEVRE DISI: ODDS_API_KEY yok.'); return; }
   cron.schedule(config.oddsSnapshotCron, async () => {
     for (const sportKey of config.trackedLeagues) {
       try {
@@ -162,7 +163,7 @@ function startOddsSnapshotCron() {
   });
   console.log(`[odds-snapshot] Cron zamanlandi: "${config.oddsSnapshotCron}" - ${config.trackedLeagues.length} lig takip ediliyor`);
 
-  config.trackedLeagues.forEach(sportKey => oddsApi.recordOddsSnapshot(sportKey));
+  // Startup'ta 34 ligi ayni anda vurmak 429 firtinasi yaratiyordu. Ilk tarama cron saatinde yapilir.
 }
 
 module.exports = { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron, precomputeTodaysMatches };
