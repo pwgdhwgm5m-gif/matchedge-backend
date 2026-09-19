@@ -1,7 +1,7 @@
 const RANKS=[
  {min:0,name:'Çaylak',icon:'🌱'},{min:100,name:'Analist',icon:'📊'},{min:300,name:'Uzman',icon:'🎯'},{min:700,name:'Usta',icon:'🏆'},{min:1500,name:'Efsane',icon:'👑'}
 ];
-const DAILY_REWARDS=[3,4,5,6,8,10,15];
+const DAILY_REWARDS=[20,25,30,35,40,45,55];
 const COUPON_STAKE=10;
 const ALLOWED_STAKES=[10,20,50];
 function rankForXp(xp=0){return [...RANKS].reverse().find(r=>xp>=r.min)||RANKS[0]}
