@@ -198,9 +198,21 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
 
   // Premium TheSportsDB event stats: blend real historical xG into pre-match lambdas.
   // Falls back to the goal model whenever xG coverage/sample is insufficient.
+  let advancedHomeFixtures = homeFixtures, advancedAwayFixtures = awayFixtures;
+  let advancedHomeId = homeTeamIdForStats, advancedAwayId = awayTeamIdForStats;
+  // Super Lig form is TFF-backed, whose event IDs are not TheSportsDB IDs.
+  // Resolve a TSDB copy only for premium event-stat lookups so IDs can never cross sources.
+  if (isSuperLig) {
+    const [th, ta] = await Promise.all([
+      sportsDb.getTeamFixturesForAnalysis(homeTeamName, 71, 10),
+      sportsDb.getTeamFixturesForAnalysis(awayTeamName, 71, 10),
+    ]);
+    if (th?.ok) { advancedHomeFixtures = th.data?.response || []; advancedHomeId = th.teamId; }
+    if (ta?.ok) { advancedAwayFixtures = ta.data?.response || []; advancedAwayId = ta.teamId; }
+  }
   const [homeAdvanced, awayAdvanced] = await Promise.all([
-    accuracy.teamAdvancedForm(homeFixtures, homeTeamIdForStats, 8),
-    accuracy.teamAdvancedForm(awayFixtures, awayTeamIdForStats, 8),
+    accuracy.teamAdvancedForm(advancedHomeFixtures, advancedHomeId, 8),
+    accuracy.teamAdvancedForm(advancedAwayFixtures, advancedAwayId, 8),
   ]);
   homeLambda = accuracy.blendLambda(homeLambda, homeAdvanced, awayAdvanced, leagueHomeGoals);
   awayLambda = accuracy.blendLambda(awayLambda, awayAdvanced, homeAdvanced, leagueAwayGoals);
