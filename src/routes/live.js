@@ -222,18 +222,30 @@ router.get('/:fixtureId', async (req, res) => {
       const ap = +(away / total * 100).toFixed(1);
       const selection = hp >= ap ? match.homeTeam : match.awayTeam;
       const probability = Math.max(hp, ap);
-      const evidence = [
-        statsResult.available,
-        Number(homeRawStats.shotsOnTarget) + Number(awayRawStats.shotsOnTarget) > 0,
-        Number(homeRawStats.corners) + Number(awayRawStats.corners) > 0,
-        xgSource === 'thesportsdb' || xgSource === 'bsd'
-      ].filter(Boolean).length;
+      const hasRealXg = xgSource === 'thesportsdb' || xgSource === 'bsd';
+      const hasShots = Number(homeRawStats.shotsOnTarget) + Number(awayRawStats.shotsOnTarget) > 0;
+      const hasCorners = Number(homeRawStats.corners) + Number(awayRawStats.corners) > 0;
+      const hasEstimatedXg = Number(homeLiveXg) + Number(awayLiveXg) > 0;
+      const evidence = [statsResult.available, hasShots, hasCorners, hasRealXg].filter(Boolean).length;
       const dataHealth = Math.round((evidence / 4) * 100);
-      // Do not manufacture a strong prediction from an empty 50/50 fallback.
-      if (evidence === 0 || (hp === 50 && ap === 50)) {
+      // A live estimate is allowed when it is driven by observed match events.
+      // 50/50 is not a prediction; keep that unavailable until one side has evidence.
+      if ((!hasShots && !hasCorners && !hasRealXg && !hasEstimatedXg) || (hp === 50 && ap === 50)) {
         return { available: false, market: null, selection: null, probability: null, dataHealth };
       }
-      return { available: true, market: 'Live pressure', selection, probability, dataHealth, minute, source: xgSource };
+      return {
+        available: true,
+        market: hasRealXg ? 'Goal proximity' : 'Estimated goal proximity',
+        selection,
+        probability,
+        dataHealth,
+        minute,
+        source: xgSource,
+        homeXg: Number(homeLiveXg),
+        awayXg: Number(awayLiveXg),
+        homeProximity: hp,
+        awayProximity: ap
+      };
     })(),
     valueAlert: { triggered: false },
     fromCache: { fixture: fromCacheFlag, stats: statsResult.fromCache },
