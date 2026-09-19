@@ -119,7 +119,7 @@ async function settlePending(userId) {
   return coupons.length;
 }
 async function settleAllPendingCoupons() {
-  const userIds = await Coupon.distinct('userId', { status: 'pending', 'legs.0': { $exists: true } });
+  const userIds = await Coupon.distinct('userId', { status: 'pending' });
   let usersChecked = 0;
   for (const userId of userIds) {
     try {
