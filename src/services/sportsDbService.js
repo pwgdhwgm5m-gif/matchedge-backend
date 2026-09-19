@@ -41,6 +41,7 @@ const LEAGUE_ID_MAP = {
   '252': 4629,  // Hirvatistan HNL
   '189': 4691,  // Romanya Liga I
   '4510': 4510, // Portekiz Kupasi
+  '71': 4339,   // Turkiye Super Lig
 };
 
 /**
