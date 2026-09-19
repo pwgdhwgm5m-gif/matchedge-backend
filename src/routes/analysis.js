@@ -42,7 +42,7 @@ router.get('/:fixtureId', async (req, res) => {
 
   try {
     const analysisPromise = computeFullAnalysis({
-      fixtureId, home, away, homeTeamName, awayTeamName, league, leagueName, season, sportKey,
+      fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey,
     });
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 15000));
     const result = await Promise.race([analysisPromise, timeoutPromise]);
