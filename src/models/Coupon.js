@@ -16,7 +16,7 @@ const couponSchema = new mongoose.Schema({
   league: { type: String, default: '' },
   kickoff: { type: Date, default: null },
   matchDate: { type: String, default: null },
-  selections: { type: [selectionSchema], validate: value => value.length > 0 && value.length <= 3 },
+  selections: { type: [selectionSchema], validate: value => value.length > 0 && value.length <= 8 },
   status: { type: String, enum: ['pending', 'won', 'lost', 'void'], default: 'pending' },
   stakeCoins: { type: Number, default: 10, min: 0 },
   payoutMultiplier: { type: Number, default: 1 },
