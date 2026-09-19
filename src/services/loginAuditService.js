@@ -47,9 +47,12 @@ async function resolveApproximateLocation(ip, fallbackCountryCode, clientTimezon
 
 async function recordLoginEvent({ user, req, clientTimezone, geoConsent }) {
   const ip = clientIp(req);
-  const location = geoConsent === true
-    ? await resolveApproximateLocation(ip, req.headers['cf-ipcountry'], clientTimezone)
-    : { country:'', city:'', district:'', region:'', countryCode:'', timezone:clientTimezone || '' };
+  // Approximate IP-based location only; does not request browser/GPS location permission.
+  const location = await resolveApproximateLocation(
+    ip,
+    req.headers['cf-ipcountry'],
+    clientTimezone
+  );
   const ipHash = ip
     ? crypto.createHmac('sha256', config.jwtSecret).update(ip).digest('hex')
     : '';
