@@ -17,6 +17,10 @@ const ledger = require('../services/predictionLedgerService');
  *     icin - hesaplamaya girmez, sadece yaniti tamamlar
  */
 router.get('/:fixtureId', async (req, res) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.removeHeader('ETag');
   const { fixtureId } = req.params;
   const {
     home, away, season, sportKey,
