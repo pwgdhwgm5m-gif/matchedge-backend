@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
   // livescore kaynagiyla "bindiriliyor" (bkz. results.js'deki ayni desen /
   // sportsDbService.applyLiveOverlay). Aksi halde bugunun listesindeki canli
   // bir mac, uzun cache suresi boyunca eski skorla kalabiliyordu.
-  const [result, liveResult, supplemental, oddsFallback] = await Promise.all([
+  const [result, liveResult, supplemental] = await Promise.all([
     cache.getOrFetch(
       `fixtures:${date}`,
       config.cache.ttlStatic,
@@ -40,13 +40,12 @@ router.get('/', async (req, res) => {
 
   // TheSportsDB hata verirse veya whitelist sonrasi liste bos kalirsa,
   // kota harcamayan The Odds API /events verisini fikstur fallback'i olarak kullan.
-  if (simplified.length === 0 && oddsFallback?.ok && Array.isArray(oddsFallback.matches)) {
-    simplified = oddsFallback.matches;
+  let oddsFallback=null;
+  if (simplified.length===0 && (!result || !result.ok)) {
+    oddsFallback=await cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date));
+    if(oddsFallback?.ok&&Array.isArray(oddsFallback.matches)) simplified=oddsFallback.matches;
   }
-
-  if (simplified.length === 0 && (!result || !result.ok) && (!oddsFallback || !oddsFallback.ok)) {
-    return res.status(502).json({ error: 'Fikstur verisi alinamadi' });
-  }
+  if (simplified.length===0 && (!result||!result.ok) && (!oddsFallback||!oddsFallback.ok)) return res.status(502).json({error:'Fikstur verisi alinamadi'});
 
   if (liveResult.ok) {
     const rawLive = (liveResult.data?.livescore || []).filter(
