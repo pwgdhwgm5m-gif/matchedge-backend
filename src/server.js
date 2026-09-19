@@ -25,6 +25,8 @@ app.set('trust proxy', 1);
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static('public'));
+app.get('/admin', (req, res) => res.sendFile(require('path').join(process.cwd(), 'public', 'admin.html')));
 
 // Basit istek loglama - performans sorunlarini gozlemlemek icin
 app.use((req, res, next) => {
