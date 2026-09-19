@@ -28,8 +28,9 @@ async function getOddsForLeague(sportKey = 'soccer_epl') {
  * Bu sayede 35 ligin hepsini degil, sadece gercekten mac gunu olanlari
  * gercek (kotali) oran istegiyle tariyoruz.
  */
-async function hasMatchesToday(sportKey, windowHours = 30) {
-  const result = await fetchT(
+async function getEventsForLeague(sportKey) {
+  if (!config.oddsApi.key) return { ok: false, error: 'no_odds_api_key' };
+  return fetchT(
     {
       method: 'GET',
       url: `${config.oddsApi.baseUrl}/sports/${sportKey}/events`,
@@ -38,6 +39,54 @@ async function hasMatchesToday(sportKey, windowHours = 30) {
     5000,
     `The Odds API Events (${sportKey})`
   );
+}
+
+async function getFixtureEventsByDate(dateStr) {
+  if (!config.oddsApi.key) return { ok: false, error: 'no_odds_api_key', matches: [] };
+
+  const keys = config.trackedLeagues || [];
+  const settled = await Promise.all(keys.map(async (sportKey) => {
+    const result = await getEventsForLeague(sportKey);
+    if (!result.ok || !Array.isArray(result.data)) return [];
+    return result.data
+      .filter(event => String(event.commence_time || '').slice(0, 10) === dateStr)
+      .map(event => ({
+        fixtureId: `odds:${event.id}`,
+        league: sportKey,
+        leagueId: sportKey,
+        kickoff: event.commence_time || null,
+        statusShort: 'NS',
+        minute: null,
+        isLive: false,
+        homeId: null,
+        awayId: null,
+        homeTeam: event.home_team || '',
+        awayTeam: event.away_team || '',
+        homeBadge: null,
+        awayBadge: null,
+        homeScore: 0,
+        awayScore: 0,
+        halftimeHome: null,
+        halftimeAway: null,
+        source: 'the-odds-api-events',
+      }));
+  }));
+
+  const matches = settled.flat();
+  const seen = new Set();
+  return {
+    ok: true,
+    matches: matches.filter(match => {
+      const key = [match.kickoff, normalizeTeamName(match.homeTeam), normalizeTeamName(match.awayTeam)].join('|');
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  };
+}
+
+async function hasMatchesToday(sportKey, windowHours = 30) {
+  const result = await getEventsForLeague(sportKey);
 
   if (!result.ok || !Array.isArray(result.data)) return false;
 
@@ -216,6 +265,8 @@ function blendWithMarket(modelProbs, marketProbs, modelWeight = 0.5) {
 
 module.exports = {
   getOddsForLeague,
+  getEventsForLeague,
+  getFixtureEventsByDate,
   hasMatchesToday,
   recordOddsSnapshot,
   getOddsHistory,
