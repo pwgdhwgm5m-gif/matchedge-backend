@@ -1,7 +1,7 @@
 const Prediction = require('../models/PredictionSnapshot');
 const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
-const VERSION = 'poisson-dixon-coles-2026-09';
+const VERSION = 'accuracy-v2-xg-corners-league-2026-09';
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
   const m = a.modelOnlyProbabilities || {};
