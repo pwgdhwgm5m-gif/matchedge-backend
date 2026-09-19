@@ -3,7 +3,10 @@ const LoginEvent = require('../models/LoginEvent');
 const config = require('../config/config');
 
 function clientIp(req) {
-  return req.ip || req.socket?.remoteAddress || '';
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const real = String(req.headers['x-real-ip'] || '').trim();
+  const raw = forwarded || real || req.ip || req.socket?.remoteAddress || '';
+  return String(raw).replace(/^::ffff:/, '').trim();
 }
 
 function isPublicIp(ip) {
@@ -11,38 +14,42 @@ function isPublicIp(ip) {
 }
 
 async function resolveApproximateLocation(ip, fallbackCountryCode, clientTimezone) {
-  const fallback = {
-    country: '',
-    city: '',
-    district: '',
-    region: '',
-    countryCode: fallbackCountryCode || '',
-    timezone: clientTimezone || '',
-  };
+  const fallback = { country:'', city:'', district:'', region:'', countryCode:fallbackCountryCode||'', timezone:clientTimezone||'' };
   if (!isPublicIp(ip)) return fallback;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1800);
-  try {
-    const response = await fetch(`https://ipwho.is/${encodeURIComponent(ip)}`, { signal: controller.signal });
-    if (!response.ok) return fallback;
-    const data = await response.json();
-    if (!data.success) return fallback;
-    return {
-      // For Turkish addresses the provider's region is the province/city,
-      // while city is the smaller locality. Keep both labels explicit.
-      city: data.region || data.city || '',
-      district: data.city && data.city !== data.region ? data.city : '',
-      region: data.region || '',
-      country: data.country || '',
-      countryCode: data.country_code || fallbackCountryCode || '',
-      timezone: data.timezone?.id || clientTimezone || '',
-    };
-  } catch {
-    return fallback;
-  } finally {
-    clearTimeout(timer);
+  const normalize = d => ({
+    city: d.region || d.regionName || d.city || '',
+    district: d.city && d.city !== (d.region || d.regionName) ? d.city : (d.district || ''),
+    region: d.region || d.regionName || '',
+    country: d.country || '',
+    countryCode: d.country_code || d.countryCode || fallbackCountryCode || '',
+    timezone: d.timezone?.id || d.timezone || clientTimezone || ''
+  });
+  const providers = [
+    async signal => {
+      const r=await fetch('https://ipwho.is/'+encodeURIComponent(ip),{signal});
+      if(!r.ok) throw new Error('ipwho');
+      const d=await r.json();
+      if(d.success===false) throw new Error('ipwho');
+      return normalize(d);
+    },
+    async signal => {
+      const r=await fetch('http://ip-api.com/json/'+encodeURIComponent(ip)+'?fields=status,country,countryCode,regionName,city,district,timezone',{signal});
+      if(!r.ok) throw new Error('ipapi');
+      const d=await r.json();
+      if(d.status!=='success') throw new Error('ipapi');
+      return normalize(d);
+    }
+  ];
+  for (const provider of providers) {
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),2500);
+    try {
+      const loc=await provider(controller.signal);
+      if(loc.city || loc.district || loc.region) return loc;
+    } catch (_) {
+    } finally { clearTimeout(timer); }
   }
+  return fallback;
 }
 
 async function recordLoginEvent({ user, req, clientTimezone, geoConsent }) {
