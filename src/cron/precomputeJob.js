@@ -31,6 +31,15 @@ const PRECOMPUTE_TSDB_LEAGUES = {
   '4510': '4510', // Portekiz Kupasi
 };
 
+const TSDB_SPORT_KEYS = {
+  '4339':'soccer_turkey_super_league','4328':'soccer_epl','4335':'soccer_spain_la_liga',
+  '4332':'soccer_italy_serie_a','4331':'soccer_germany_bundesliga','4334':'soccer_france_ligue_one',
+  '4337':'soccer_netherlands_eredivisie','4336':'soccer_greece_super_league','4358':'soccer_norway_eliteserien',
+  '4347':'soccer_sweden_allsvenskan','4422':'soccer_poland_ekstraklasa','4355':'soccer_russia_premier_league',
+  '4344':'soccer_portugal_primeira_liga','4636':'soccer_finland_veikkausliiga','4338':'soccer_belgium_first_div',
+  '4340':'soccer_denmark_superliga','4330':'soccer_spl'
+};
+
 const DAYS_AHEAD = 7;
 
 function formatDate(d) {
@@ -68,6 +77,7 @@ async function precomputeTodaysMatches() {
         league: fotmobLeague,
         leagueName: e.strLeague,
         season: new Date().getFullYear(),
+        sportKey: TSDB_SPORT_KEYS[String(e.idLeague)] || null,
         kickoff: sportsDb.toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00'))),
 
       });
@@ -94,7 +104,9 @@ async function precomputeTodaysMatches() {
         homeTeamName: fixture.homeTeamName,
         awayTeamName: fixture.awayTeamName,
         league: fixture.league,
+        leagueName: fixture.leagueName,
         season: fixture.season,
+        sportKey: fixture.sportKey,
       });
 
       const precomputed = {
