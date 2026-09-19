@@ -11,6 +11,7 @@ const loginEventSchema = new mongoose.Schema({
   timezone: { type: String, default: '' },
   ipHash: { type: String, default: '' },
   geoConsent: { type: Boolean, default: false },
+  geoConsentAt: { type: Date, default: null },
   userAgent: { type: String, default: '' },
 });
 
