@@ -15,13 +15,24 @@ const RESET_VALID_MINUTES = 60;
 
 /**
  * POST /api/auth/register
- * body: { username, email, password }
+ * body: { username, email, password, dateOfBirth }
  */
 router.post('/register', async (req, res) => {
-  const { username, email, password } = req.body;
+  const { username, email, password, dateOfBirth } = req.body;
 
-  if (!username || !email || !password) {
-    return res.status(400).json({ error: 'Kullanici adi, e-posta ve sifre zorunlu.' });
+  if (!username || !email || !password || !dateOfBirth) {
+    return res.status(400).json({ error: 'Kullanici adi, e-posta, sifre ve dogum tarihi zorunlu.' });
+  }
+  const birthDate = new Date(`${dateOfBirth}T00:00:00Z`);
+  if (Number.isNaN(birthDate.getTime())) {
+    return res.status(400).json({ error: 'Gecerli bir dogum tarihi gir.' });
+  }
+  const today = new Date();
+  let age = today.getUTCFullYear() - birthDate.getUTCFullYear();
+  const monthDiff = today.getUTCMonth() - birthDate.getUTCMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getUTCDate() < birthDate.getUTCDate())) age--;
+  if (age < 18) {
+    return res.status(403).json({ error: 'SoccerEdge Pro yalnizca 18 yas ve uzeri kullanicilar icindir.' });
   }
   if (username.length < 3) {
     return res.status(400).json({ error: 'Kullanici adi en az 3 karakter olmali.' });
@@ -50,6 +61,7 @@ router.post('/register', async (req, res) => {
     // Yeniden etkinleştirildiğinde token üretimi ve gönderimi bu noktaya geri alınabilir.
     const user = await User.create({
       username, email, passwordHash,
+      dateOfBirth: birthDate,
       emailVerified: true,
       verificationTokenHash: null,
       verificationExpires: null,
