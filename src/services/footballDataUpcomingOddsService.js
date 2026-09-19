@@ -70,4 +70,22 @@ async function getUpcomingOdds({force=false}={}) {
   return {source:'football-data.co.uk',cached:false,rows};
 }
 
-module.exports={getUpcomingOdds,parseUpcoming,UPCOMING_URL};
+
+function normalizeTeamName(value){
+  return String(value||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\b(fc|cf|afc|sc|fk|sk|club|calcio)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function findMatchOdds(rows,home,away){
+  const h=normalizeTeamName(home), a=normalizeTeamName(away);
+  if(!h||!a) return null;
+  const exact=rows.find(r=>normalizeTeamName(r.homeTeam)===h&&normalizeTeamName(r.awayTeam)===a);
+  if(!exact) return null;
+  const o=exact.odds||{};
+  if(!(o.home&&o.draw&&o.away)) return null;
+  return {...o,source:'football-data.co.uk',homeTeam:exact.homeTeam,awayTeam:exact.awayTeam,date:exact.date,time:exact.time};
+}
+async function getMatchOdds(home,away){
+  try{const data=await getUpcomingOdds();return findMatchOdds(data.rows,home,away);}
+  catch(_){return null;}
+}
+module.exports={getUpcomingOdds,getMatchOdds,findMatchOdds,normalizeTeamName,parseUpcoming,UPCOMING_URL};
