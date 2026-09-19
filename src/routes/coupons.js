@@ -5,7 +5,7 @@ const CommunityPick = require('../models/CommunityPick');
 const { requireAuth } = require('../middleware/authMiddleware');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
-const { ensureWallet, COUPON_STAKE, calculatePayout } = require('../services/gamificationService');
+const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require('../services/gamificationService');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -122,9 +122,9 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/', async (req, res) => {
-  const { fixtureId, homeTeam, awayTeam, league, kickoff, selections } = req.body;
+  const { fixtureId, homeTeam, awayTeam, league, kickoff, selections, stakeCoins } = req.body;
   const safeSelections = Array.isArray(selections)
-    ? selections.filter(item => ALLOWED_KEYS.has(item.key)).slice(0, 3).map(item => ({
+    ? selections.filter(item => ALLOWED_KEYS.has(item.key)).slice(0, 8).map(item => ({
         key: item.key,
         market: String(item.market || '').slice(0, 30),
         label: String(item.label || '').slice(0, 50),
@@ -143,25 +143,26 @@ router.post('/', async (req, res) => {
     if (!user) return res.status(404).json({ error: 'Kullanıcı bulunamadı.' });
     if (ensureWallet(user)) await user.save();
 
+    const stake = ALLOWED_STAKES.includes(Number(stakeCoins)) ? Number(stakeCoins) : COUPON_STAKE;
     user = await User.findOneAndUpdate(
-      { _id: req.user.userId, edgeCoins: { $gte: COUPON_STAKE } },
-      { $inc: { edgeCoins: -COUPON_STAKE, totalCoinsSpent: COUPON_STAKE } },
+      { _id: req.user.userId, edgeCoins: { $gte: stake } },
+      { $inc: { edgeCoins: -stake, totalCoinsSpent: stake } },
       { new: true }
     );
     if (!user) return res.status(402).json({ error: 'Bu kupon için yeterli Edge Coin yok.' });
 
-    const payout = calculatePayout(safeSelections);
+    const payout = calculatePayout(safeSelections, stake);
     let coupon;
     try {
       coupon = await Coupon.create({
         userId: req.user.userId, fixtureId, homeTeam, awayTeam, league, kickoff: date,
         matchDate: date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 10) : null,
-        selections: safeSelections, stakeCoins: COUPON_STAKE,
+        selections: safeSelections, stakeCoins: stake,
         payoutMultiplier: payout.multiplier, potentialPayout: payout.payout,
       });
     } catch (error) {
       await User.findByIdAndUpdate(req.user.userId, {
-        $inc: { edgeCoins: COUPON_STAKE, totalCoinsSpent: -COUPON_STAKE }
+        $inc: { edgeCoins: stake, totalCoinsSpent: -stake }
       });
       throw error;
     }
