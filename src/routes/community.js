@@ -1,6 +1,8 @@
 const express=require('express');
 const User=require('../models/User');
 const CommunityPick=require('../models/CommunityPick');
+const Coupon=require('../models/Coupon');
+const MiniLeague=require('../models/MiniLeague');
 const {requireAuth}=require('../middleware/authMiddleware');
 const {rankForXp,dailyState,ensureWallet}=require('../services/gamificationService');
 const router=express.Router();
@@ -44,5 +46,36 @@ router.get('/fixture/:fixtureId',async(req,res)=>{
  const rows=await CommunityPick.aggregate([{$match:{fixtureId}},{$group:{_id:{key:'$key',label:'$label',market:'$market'},count:{$sum:1}}},{$sort:{count:-1}}]);
  const totalUsers=await CommunityPick.distinct('userId',{fixtureId}),totalVotes=rows.reduce((n,r)=>n+r.count,0);
  res.json({fixtureId,totalUsers:totalUsers.length,totalVotes,selections:rows.map(r=>({key:r._id.key,label:r._id.label,market:r._id.market,count:r.count,percent:totalVotes?Math.round((r.count/totalVotes)*100):0}))});
+});
+
+function weekStart(){const d=new Date();d.setUTCHours(0,0,0,0);const day=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()-day+1);return d}
+router.get('/edge-dna',async(req,res)=>{
+ const picks=await CommunityPick.find({userId:req.user.userId,result:{$in:['won','lost']}}).lean();
+ const group=(keyFn)=>{const m={};for(const p of picks){const k=keyFn(p)||'Diğer';m[k]??={name:k,won:0,total:0};m[k].total++;if(p.result==='won')m[k].won++}return Object.values(m).map(x=>({...x,accuracy:Math.round(x.won/x.total*100)})).sort((a,b)=>b.accuracy-a.accuracy||b.total-a.total)};
+ const market=group(p=>p.market),league=group(p=>p.league);
+ const snapshots=require('../models/PredictionSnapshot');const settled=await snapshots.find({status:'settled'}).sort({settledAt:-1}).limit(500).lean();
+ let aiWon=0,aiTotal=0;for(const s of settled){const p=s.probabilities||{};const keys=['home','draw','away'];const best=keys.sort((a,b)=>(p[b]||0)-(p[a]||0))[0];const actual=s.outcome?.homeScore>s.outcome?.awayScore?'home':s.outcome?.homeScore<s.outcome?.awayScore?'away':'draw';if(p[best]!=null){aiTotal++;if(best===actual)aiWon++}}
+ const userWon=picks.filter(p=>p.result==='won').length;
+ res.json({total:picks.length,user:{won:userWon,accuracy:picks.length?Math.round(userWon/picks.length*100):0},ai:{won:aiWon,total:aiTotal,accuracy:aiTotal?Math.round(aiWon/aiTotal*100):0},bestMarkets:market.slice(0,5),bestLeagues:league.slice(0,5)});
+});
+router.get('/weekly-challenge',async(req,res)=>{
+ const start=weekStart(),coupons=await Coupon.find({userId:req.user.userId,createdAt:{$gte:start}}).lean();
+ const settled=coupons.filter(x=>x.status!=='pending'),perfect=settled.filter(x=>x.status==='won'&&(x.legs?.length||0)>=5).length;
+ const legs=coupons.reduce((n,x)=>n+(x.legs?.length||0),0);
+ res.json({startsAt:start,endsAt:new Date(start.getTime()+7*86400000),progress:{slips:coupons.length,legs,perfect},goals:{slips:3,legs:10,perfect:1}});
+});
+router.post('/mini-leagues',async(req,res)=>{
+ const name=String(req.body.name||'').trim().slice(0,40);if(name.length<3)return res.status(400).json({error:'Lig adı en az 3 karakter olmalı.'});
+ let code;do{code=Math.random().toString(36).slice(2,8).toUpperCase()}while(await MiniLeague.exists({code}));
+ const league=await MiniLeague.create({name,code,ownerId:req.user.userId,members:[req.user.userId]});res.status(201).json({league});
+});
+router.post('/mini-leagues/join',async(req,res)=>{
+ const code=String(req.body.code||'').trim().toUpperCase();const league=await MiniLeague.findOneAndUpdate({code},{$addToSet:{members:req.user.userId}},{new:true});
+ if(!league)return res.status(404).json({error:'Davet kodu bulunamadı.'});res.json({league});
+});
+router.get('/mini-leagues',async(req,res)=>{
+ const leagues=await MiniLeague.find({members:req.user.userId}).lean(),out=[];
+ for(const l of leagues){const users=await User.find({_id:{$in:l.members}}).sort({xp:-1,correctPicks:-1}).lean();out.push({...l,members:users.map((u,i)=>({...publicUser(u,i+1),id:undefined}))})}
+ res.json({leagues:out});
 });
 module.exports=router;
