@@ -3,9 +3,13 @@ const { fetchT } = require('../utils/fetchWithTimeout');
 const cache = require('../utils/cache');
 const { teamNamesMatch, normalizeTeamName } = require('../utils/textNormalize');
 
+let oddsCircuitOpenUntil=0;
+function oddsEnabled(){return Boolean(config.oddsApi.key)&&Date.now()>=oddsCircuitOpenUntil}
+function markOddsFailure(result){const status=result?.status||result?.error?.status||result?.error?.response?.status;const err=String(result?.error||'');if(status===401||status===403||status===429||/http_(401|403|429)/.test(err)){oddsCircuitOpenUntil=Date.now()+(status===429||/429/.test(err)?6*60*60*1000:24*60*60*1000);console.warn('[odds-api] circuit breaker aktif; gereksiz istekler gecici olarak durduruldu.')}}
 /** Belirli bir lig icin coklu bookmaker oranlari */
 async function getOddsForLeague(sportKey = 'soccer_epl') {
-  return fetchT(
+  if(!oddsEnabled()) return {ok:false,error:'odds_api_disabled_or_circuit_open'};
+  const result=await fetchT(
     {
       method: 'GET',
       url: `${config.oddsApi.baseUrl}/sports/${sportKey}/odds`,
@@ -19,6 +23,8 @@ async function getOddsForLeague(sportKey = 'soccer_epl') {
     6000,
     'The Odds API'
   );
+  if(!result.ok) markOddsFailure(result);
+  return result;
 }
 
 /**
@@ -29,8 +35,8 @@ async function getOddsForLeague(sportKey = 'soccer_epl') {
  * gercek (kotali) oran istegiyle tariyoruz.
  */
 async function getEventsForLeague(sportKey) {
-  if (!config.oddsApi.key) return { ok: false, error: 'no_odds_api_key' };
-  return fetchT(
+  if (!oddsEnabled()) return { ok: false, error: 'odds_api_disabled_or_circuit_open' };
+  const result=await fetchT(
     {
       method: 'GET',
       url: `${config.oddsApi.baseUrl}/sports/${sportKey}/events`,
@@ -39,6 +45,8 @@ async function getEventsForLeague(sportKey) {
     5000,
     `The Odds API Events (${sportKey})`
   );
+  if(!result.ok) markOddsFailure(result);
+  return result;
 }
 
 async function getFixtureEventsByDate(dateStr) {
