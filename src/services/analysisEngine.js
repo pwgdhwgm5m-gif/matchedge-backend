@@ -10,6 +10,7 @@ const sportsDb = require('./sportsDbService');
 const premiumIntelligence = require('./premiumIntelligenceService');
 const modelCalibration = require('./modelCalibrationService');
 const accuracy = require('./accuracyEngineService');
+const footballDataOdds = require('./footballDataUpcomingOddsService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -234,9 +235,16 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
     : null;
-  const matchOdds = (oddsRaw && homeTeamName && awayTeamName)
+  const primaryMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
+  // Football-Data is an additive, fail-open fallback. It is used only when
+  // the existing odds provider has no match and both team names match exactly
+  // after normalization. Any fetch/rate-limit/parse failure returns null.
+  const footballDataMatchOdds = (!primaryMatchOdds && homeTeamName && awayTeamName)
+    ? await footballDataOdds.getMatchOdds(homeTeamName, awayTeamName)
+    : null;
+  const matchOdds = primaryMatchOdds || footballDataMatchOdds;
   const marketImpliedProbabilities = oddsApi.normalizeImpliedProbabilities(matchOdds);
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, 0.5);
 
@@ -335,6 +343,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       ? { ok: true, derived: true, data: { response: derivedH2HFixtures } }
       : (h2hResult.status === 'fulfilled' ? h2hResult.value : null),
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
+    marketOdds: matchOdds,
+    marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'api-football'),
   };
 }
