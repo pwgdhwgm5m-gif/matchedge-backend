@@ -104,6 +104,7 @@ router.get('/:fixtureId', async (req, res) => {
       xp: profile.xp || 0,
       edgeCoins: profile.edgeCoins || 0,
       accuracy: total ? Math.round((profile.correctPicks / total) * 100) : 0,
+      kind:item.kind||'message',pick:item.pick||null,reactions:{edge:item.reactions?.edge?.length||0,agree:item.reactions?.agree?.length||0,fire:item.reactions?.fire?.length||0},
     }}),
     rulesAccepted: Boolean(user.chatRulesAcceptedAt),
     suspendedUntil: user.chatSuspendedUntil || null,
@@ -135,6 +136,8 @@ router.post('/:fixtureId', async (req, res) => {
     author: user._id,
     authorName: user.username,
     text: moderation.text,
+    kind:req.body.kind==='pick'?'pick':'message',
+    pick:req.body.kind==='pick'?{key:String(req.body.pick?.key||'').slice(0,40),market:String(req.body.pick?.market||'').slice(0,40),label:String(req.body.pick?.label||'').slice(0,80),probability:Number(req.body.pick?.probability)||null}:undefined,
   });
   res.status(201).json({
     message: {
@@ -147,10 +150,18 @@ router.post('/:fixtureId', async (req, res) => {
       rank: rankForXp(user.xp || 0),
       xp: user.xp || 0,
       edgeCoins: user.edgeCoins || 0,
+      kind:message.kind||'message',pick:message.pick||null,reactions:{edge:0,agree:0,fire:0},
     },
   });
 });
 
+router.post('/message/:messageId/react',async(req,res)=>{
+ if(!validId(req.params.messageId))return res.status(400).json({error:'Geçersiz mesaj.'});
+ const type=['edge','agree','fire'].includes(req.body.type)?req.body.type:null;if(!type)return res.status(400).json({error:'Geçersiz reaksiyon.'});
+ const m=await ChatMessage.findById(req.params.messageId);if(!m||m.status!=='visible')return res.status(404).json({error:'Mesaj bulunamadı.'});
+ const arr=m.reactions?.[type]||[],i=arr.findIndex(x=>String(x)===String(req.user.userId));if(i>=0)arr.splice(i,1);else arr.push(req.user.userId);m.reactions[type]=arr;await m.save();
+ res.json({reactions:{edge:m.reactions.edge.length,agree:m.reactions.agree.length,fire:m.reactions.fire.length}});
+});
 router.delete('/message/:messageId', async (req, res) => {
   if (!validId(req.params.messageId)) return res.status(400).json({ error: 'Geçersiz mesaj.' });
   const message = await ChatMessage.findOneAndUpdate(
