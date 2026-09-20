@@ -51,6 +51,27 @@ router.get('/users', async (req, res) => {
   }
 });
 
+router.get('/premium-lab', async (req, res) => {
+  try {
+    const performance = await ledger.performance();
+    res.json({
+      access: 'admin-only',
+      public: false,
+      features: {
+        aiCouponBuilder: { status: 'staged', source: 'strongest-pick + market-board + risk/diversification' },
+        matchSimulation: { status: 'staged', source: 'poisson/dixon-coles model' },
+        valueFinder: { status: 'core-ready', source: 'model vs market implied probability' },
+        similarMatches: { status: 'staged', source: 'historical feature matching' },
+        patternFinder: { status: 'staged', source: 'comparable-match outcomes' },
+        verifiedPerformance: { status: 'live-ledger', strongestPick: performance.strongestPick || null }
+      }
+    });
+  } catch (error) {
+    console.error('[premium-lab]', error);
+    res.status(500).json({ error: 'Premium Lab durumu alınamadı.' });
+  }
+});
+
 router.get('/model-performance', async (req, res) => {
   try { res.json(await ledger.performance()); }
   catch (error) { console.error('[model-performance]', error); res.status(500).json({ error: 'Model karnesi alınamadı.' }); }
