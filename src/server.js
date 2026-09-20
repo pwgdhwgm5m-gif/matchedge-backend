@@ -106,4 +106,14 @@ app.listen(config.port, async () => {
   };
   setTimeout(settleCoupons, 30000);
   setInterval(settleCoupons, 10 * 60 * 1000);
+  // Prediction ledger settlement also trains persistent Elo/attack/defence ratings.
+  const settlePredictions = async () => {
+    try {
+      const ledger=require('./services/predictionLedgerService');
+      const settled=await ledger.settlePending();
+      if(settled) console.log('[prediction-ledger/auto-settle]',settled,'fixtures settled and power ratings updated');
+    } catch(error){ console.warn('[prediction-ledger/auto-settle]',error.message); }
+  };
+  setTimeout(settlePredictions, 45000);
+  setInterval(settlePredictions, 15 * 60 * 1000);
 });
