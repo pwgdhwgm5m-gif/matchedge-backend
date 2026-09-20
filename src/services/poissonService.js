@@ -240,12 +240,32 @@ function estimateCornerMetrics(homeLambda, awayLambda) {
 function estimateLeagueParameters(fixtures, options={}) {
   const now=Number(options.now||Date.now()), halfLifeDays=Math.max(45,Number(options.halfLifeDays||240));
   const rows=(fixtures||[]).filter(f=>f?.goals?.home!=null&&f?.goals?.away!=null&&Number.isFinite(Number(f.goals.home))&&Number.isFinite(Number(f.goals.away)));
-  let wh=0,wa=0,w=0,low={z00:0,z01:0,z10:0,z11:0,total:0};
-  for(const f of rows){const t=new Date(f.fixture?.date||f.date||now).getTime(),age=Math.max(0,(now-t)/86400000),wt=Math.pow(.5,age/halfLifeDays),h=Number(f.goals.home),a=Number(f.goals.away);wh+=wt*h;wa+=wt*a;w+=wt;if(h<=1&&a<=1){low['z'+h+a]+=wt;low.total+=wt;}}
+  let wh=0,wa=0,w=0;
+  const weighted=[];
+  for(const f of rows){
+    const t=new Date(f.fixture?.date||f.date||now).getTime(),age=Math.max(0,(now-t)/86400000),wt=Math.pow(.5,age/halfLifeDays),h=Number(f.goals.home),a=Number(f.goals.away);
+    wh+=wt*h;wa+=wt*a;w+=wt;weighted.push({h,a,wt});
+  }
   const homeAvg=w?wh/w:1.45,awayAvg=w?wa/w:1.15,homeAdvantage=clamp(homeAvg/Math.max(.65,awayAvg),.92,1.35);
-  const lowDrawShare=low.total?(low.z00+low.z11)/low.total:.5;
-  const rho=clamp(-.13-(lowDrawShare-.5)*.16,-.22,.04);
-  return {rho:+rho.toFixed(4),homeAdvantage:+homeAdvantage.toFixed(4),homeAvg:+homeAvg.toFixed(3),awayAvg:+awayAvg.toFixed(3),sample:rows.length,halfLifeDays};
+  // Fit rho against the four Dixon-Coles low-score cells using weighted
+  // maximum likelihood. League averages are used as stable baseline lambdas;
+  // recency weights make the estimate responsive without overreacting.
+  let rho=DEFAULT_RHO,fitLogLikelihood=null;
+  if(weighted.length>=20){
+    let best=-Infinity,bestRho=DEFAULT_RHO;
+    for(let r=-.25;r<=.10+1e-9;r+=.0025){
+      let ll=0,valid=true;
+      for(const x of weighted){
+        if(x.h>1||x.a>1)continue;
+        const tau=dixonColesTau(x.h,x.a,homeAvg,awayAvg,r);
+        if(!(tau>0)||!Number.isFinite(tau)){valid=false;break;}
+        ll+=x.wt*Math.log(tau);
+      }
+      if(valid&&ll>best){best=ll;bestRho=r;}
+    }
+    rho=clamp(bestRho,-.25,.10);fitLogLikelihood=Number.isFinite(best)?+best.toFixed(4):null;
+  }
+  return {rho:+rho.toFixed(4),homeAdvantage:+homeAdvantage.toFixed(4),homeAvg:+homeAvg.toFixed(3),awayAvg:+awayAvg.toFixed(3),sample:rows.length,halfLifeDays,rhoMethod:weighted.length>=20?'weighted-low-score-mle':'default-small-sample',fitLogLikelihood};
 }
 
 module.exports = {
