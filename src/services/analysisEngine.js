@@ -374,7 +374,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     : null;
   const matchOdds = primaryMatchOdds || footballDataMatchOdds;
   const marketImpliedProbabilities = oddsApi.normalizeImpliedProbabilities(matchOdds);
-  const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, 0.5);
+  // V2 ensemble: model weight is earned by evidence quality. Sparse-data games
+  // lean more on de-vigged market consensus; mature-data games lean on SoccerEdge.
+  const v2ModelWeight = marketImpliedProbabilities ? Math.max(.45,Math.min(.78,.38 + .40*evidenceStrength)) : 1;
+  const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
 
   const homeFirstHalf = isSuperLig
     ? { firstHalfScoringRate: null }
@@ -506,7 +509,11 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
       sportmonks: smMarketEvidence,
       calibrationApplied: calibrated.applied,
-      probabilities: { raw:rawMatchProbabilities, calibrated:matchProbabilities, marketBlended:blendedMatchProbabilities }
+      architecture:'analysis-v2',
+      analysisStrength:{ score:Math.round(evidenceStrength*100), sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
+      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:'normalized-overround' },
+      probabilityPipeline:['opponent-strength','robust-form','chance-quality-dedup','dixon-coles','calibration','evidence-shrinkage','market-ensemble'],
+      probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable'),
   };
