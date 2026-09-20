@@ -1,7 +1,7 @@
 const Prediction = require('../models/PredictionSnapshot');
 const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
-const VERSION = 'analysis-v2-dixon-coles-ensemble-2026-09';
+const VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
   const m = a.modelOnlyProbabilities || {};
@@ -101,6 +101,29 @@ async function sportmonksBacktest() {
     improved:r.wins,worsened:r.losses
   })) };
 }
+
+function metricRows(predictions){
+ const groups=new Map(), bins=new Map();
+ for(const p of predictions) for(const [market,probability] of Object.entries(p.probabilities||{})){
+  const actual=p.actual?.[market]; if(!Number.isFinite(probability)||![0,1].includes(actual))continue;
+  for(const key of ['all:'+market,(p.league||'Unknown')+':'+market]){
+   if(!groups.has(key))groups.set(key,{league:key.startsWith('all:')?'all':p.league||'Unknown',market,count:0,brier:0,ll:0,pred:0,actual:0});
+   const g=groups.get(key),q=Math.max(.001,Math.min(.999,probability));g.count++;g.brier+=(q-actual)**2;g.ll+=-(actual*Math.log(q)+(1-actual)*Math.log(1-q));g.pred+=q;g.actual+=actual;
+   const bi=Math.min(9,Math.floor(q*10)),bk=key+':'+bi;if(!bins.has(bk))bins.set(bk,{key,bi,n:0,p:0,a:0});const b=bins.get(bk);b.n++;b.p+=q;b.a+=actual;
+  }
+ }
+ return [...groups.entries()].map(([key,g])=>{const bs=[...bins.values()].filter(b=>b.key===key),ece=bs.reduce((s,b)=>s+(b.n/g.count)*Math.abs(b.p/b.n-b.a/b.n),0);return {league:g.league,market:g.market,count:g.count,brier:+(g.brier/g.count).toFixed(4),logLoss:+(g.ll/g.count).toFixed(4),ece:+ece.toFixed(4),predictedPercent:+(100*g.pred/g.count).toFixed(1),actualPercent:+(100*g.actual/g.count).toFixed(1)};});
+}
+async function walkForwardAudit(){
+ const predictions=await Prediction.find({status:'settled'}).sort({kickoff:1}).select('modelVersion league probabilities rawProbabilities actual kickoff').lean();
+ const byVersion={};
+ for(const p of predictions){if(!byVersion[p.modelVersion])byVersion[p.modelVersion]=[];byVersion[p.modelVersion].push(p);}
+ const versions=Object.entries(byVersion).map(([version,rows])=>({version,snapshots:rows.length,metrics:metricRows(rows)}));
+ const bias=[];
+ for(const row of metricRows(predictions)){if(row.count<20)continue;const gap=+(row.predictedPercent-row.actualPercent).toFixed(1);if(Math.abs(gap)>=5)bias.push({league:row.league,market:row.market,count:row.count,gapPercent:gap,direction:gap>0?'overprediction':'underprediction',ece:row.ece});}
+ return {version:VERSION,totalSnapshots:predictions.length,versions,biasFlags:bias.sort((a,b)=>Math.abs(b.gapPercent)-Math.abs(a.gapPercent))};
+}
+
 async function performance() {
   const predictions = await Prediction.find({ status: 'settled' })
     .select('league probabilities actual kickoff').lean();
@@ -129,4 +152,4 @@ async function performance() {
   }));
   return { version:VERSION, snapshots:predictions.length, scoring:['brier','logLoss','calibrationGap'], rows };
 }
-module.exports = { capture, settlePending, performance, sportmonksBacktest, VERSION };
+module.exports = { capture, settlePending, performance, sportmonksBacktest, walkForwardAudit, VERSION };
