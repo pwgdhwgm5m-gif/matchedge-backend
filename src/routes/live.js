@@ -160,16 +160,20 @@ router.get('/:fixtureId', async (req, res) => {
   const isFinished = match.statusShort === 'FT';
   const extrasTtl = isFinished ? 60 * 60 * 6 : 60;
 
+  const bounded = (promise, fallback, ms = 2800) => Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(fallback), ms))
+  ]);
   const [timelineResult, statsResult, lineupResult, tvResult, highlightsResult] = await Promise.all([
-    cache.getOrFetch(`tsdb-timeline:${fixtureId}`, extrasTtl, () => sportsDb.getEventTimelineFormatted(fixtureId)),
-    cache.getOrFetch(`tsdb-stats:${fixtureId}`, extrasTtl, () => sportsDb.getEventStatsFormatted(fixtureId)),
-    cache.getOrFetch(`tsdb-lineup:${fixtureId}`, extrasTtl, () => sportsDb.getEventLineupFormatted(fixtureId)),
-    cache.getOrFetch(`tsdb-tv:${fixtureId}`, extrasTtl, () => sportsDb.getEventTVFormatted(fixtureId)),
-    cache.getOrFetch(`tsdb-highlights:${fixtureId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(fixtureId)),
+    bounded(cache.getOrFetch(`tsdb-timeline:${fixtureId}`, extrasTtl, () => sportsDb.getEventTimelineFormatted(fixtureId)), {available:false,events:[],timeout:true}),
+    bounded(cache.getOrFetch(`tsdb-stats:${fixtureId}`, extrasTtl, () => sportsDb.getEventStatsFormatted(fixtureId)), {available:false,stats:{},timeout:true}),
+    bounded(cache.getOrFetch(`tsdb-lineup:${fixtureId}`, extrasTtl, () => sportsDb.getEventLineupFormatted(fixtureId)), {available:false,timeout:true}),
+    bounded(cache.getOrFetch(`tsdb-tv:${fixtureId}`, extrasTtl, () => sportsDb.getEventTVFormatted(fixtureId)), {available:false,broadcasts:[],timeout:true}),
+    bounded(cache.getOrFetch(`tsdb-highlights:${fixtureId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(fixtureId)), {available:false,timeout:true}),
   ]);
 
   const stats = statsResult.available ? statsResult.stats : {};
-  const smLiveDetail = await cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay());
+  const smLiveDetail = await bounded(cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay()), {ok:false,error:'sportmonks_timeout'}, 2800);
   const smMatch = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;
   const smStats = smMatch?.stats || {};
 
@@ -218,7 +222,7 @@ router.get('/:fixtureId', async (req, res) => {
     awayLiveXg = stats.xg.away;
     xgSource = 'thesportsdb';
   } else {
-    const bsdXg = await bsdService.getRealXgForMatch(match.homeTeam, match.awayTeam, match.kickoff, isFinished);
+    const bsdXg = await bounded(bsdService.getRealXgForMatch(match.homeTeam, match.awayTeam, match.kickoff, isFinished), {available:false,error:'bsd_timeout'}, 2200);
     if (bsdXg.available && !bsdXg.estimated) {
       homeLiveXg = bsdXg.home;
       awayLiveXg = bsdXg.away;
@@ -249,7 +253,7 @@ router.get('/:fixtureId', async (req, res) => {
     xgSource,
     momentum,
     goalProximity,
-    possession: (smStats.possessionHome != null && smStats.possessionAway != null) ? { home: smStats.possessionHome, away: smStats.possessionAway } : (stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 }),
+    possession: (smStats.possessionHome != null && smStats.possessionAway != null) ? { home: smStats.possessionHome, away: smStats.possessionAway } : (stats.possession && stats.possession.home != null && stats.possession.away != null ? { home: stats.possession.home, away: stats.possession.away } : null),
     liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
     stats: {
       shotsOnTargetHome: homeRawStats.shotsOnTarget,
