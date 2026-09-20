@@ -100,6 +100,7 @@ function transformFixture(f) {
   return {
     sportmonksId: f.id,
     leagueId: f.league_id,
+    leagueName: f.league?.name || null,
     seasonId: f.season_id,
     homeTeam: participantName(f, 'home'),
     awayTeam: participantName(f, 'away'),
@@ -284,14 +285,26 @@ function aggregateTeamHistory(fixtures, teamId) {
 
 async function getLeagueFixturesByDate(date, leagueId) {
   if (!date || !leagueId) return {ok:false,error:'date_or_league_missing',fixtures:[]};
-  const result=await request('/fixtures/between/'+date+'/'+date,{
-    include:'participants;scores;periods',
-    filters:'fixtureLeagues:'+leagueId,
-    per_page:50
-  });
-  if(!result.ok)return result;
-  const rows=Array.isArray(result.data?.data)?result.data.data:[];
-  return {ok:true,fixtures:rows.map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId))};
+  // SportMonks documents /fixtures/date/{date} for a single date. The
+  // previous code used /fixtures/between/{date}/{date}, which is not the
+  // documented date-range path and could return an incomplete set.
+  const all=[]; let page=1;
+  while(page<=20){
+    const result=await request('/fixtures/date/'+date,{
+      include:'league;participants;scores;periods',
+      filters:'fixtureLeagues:'+leagueId,
+      page,
+      per_page:50
+    });
+    if(!result.ok)return result;
+    const body=result.data||{}, rows=Array.isArray(body.data)?body.data:[];
+    all.push(...rows.map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId)));
+    const p=body.pagination||{};
+    if(p.has_more!==true || rows.length===0)break;
+    page=Number(p.current_page||page)+1;
+  }
+  const unique=new Map(all.map(x=>[String(x.sportmonksId),x]));
+  return {ok:true,fixtures:[...unique.values()]};
 }
 
 async function getFixturesByDate(date) {
