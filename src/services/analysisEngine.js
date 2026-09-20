@@ -11,6 +11,7 @@ const premiumIntelligence = require('./premiumIntelligenceService');
 const modelCalibration = require('./modelCalibrationService');
 const accuracy = require('./accuracyEngineService');
 const footballDataOdds = require('./footballDataUpcomingOddsService');
+const sportmonks = require('./sportmonksService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -221,13 +222,49 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   homeLambda = accuracy.blendLambda(homeLambda, homeAdvanced, awayAdvanced, leagueHomeGoals);
   awayLambda = accuracy.blendLambda(awayLambda, awayAdvanced, homeAdvanced, leagueAwayGoals);
 
+  // Sportmonks historical chance-quality layer. Only completed-match aggregates
+  // with a useful sample are allowed to nudge expected goals; bounds prevent
+  // sparse/noisy provider data from dominating the established model.
+  let sportmonksHistorical = null;
+  try {
+    const liveIndex = await Promise.race([
+      cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores()),
+      new Promise(resolve => setTimeout(() => resolve({ok:false}), 2500))
+    ]);
+    const smMatch = liveIndex.ok ? sportmonks.findMatch(liveIndex.fixtures, homeTeamName, awayTeamName) : null;
+    if (smMatch?.homeTeamId && smMatch?.awayTeamId) {
+      const [hh, ah] = await Promise.all([
+        Promise.race([cache.getOrFetch(`sportmonks:history:${smMatch.homeTeamId}`,1800,()=>sportmonks.getTeamFixtureHistory(smMatch.homeTeamId)),new Promise(r=>setTimeout(()=>r({ok:false}),2500))]),
+        Promise.race([cache.getOrFetch(`sportmonks:history:${smMatch.awayTeamId}`,1800,()=>sportmonks.getTeamFixtureHistory(smMatch.awayTeamId)),new Promise(r=>setTimeout(()=>r({ok:false}),2500))])
+      ]);
+      const sh = hh.ok ? sportmonks.aggregateTeamHistory(hh.fixtures, smMatch.homeTeamId) : null;
+      const sa = ah.ok ? sportmonks.aggregateTeamHistory(ah.fixtures, smMatch.awayTeamId) : null;
+      if ((sh?.sample || 0) >= 5 && (sa?.sample || 0) >= 5) {
+        sportmonksHistorical = { home:sh, away:sa };
+        const chance = a => {
+          const v=a?.averages||{}; let n=0,w=0;
+          [[v.shotsOnTarget,0.45,4.5],[v.shotsInsideBox,0.25,7],[v.bigChances,0.20,2.2],[v.shots,0.10,13]].forEach(([x,wt,base])=>{if(Number.isFinite(x)){n+=(x/base)*wt;w+=wt;}});
+          return w ? n/w : null;
+        };
+        const hc=chance(sh), ac=chance(sa);
+        if (hc!=null) homeLambda=+(homeLambda*Math.max(.90,Math.min(1.10,0.8+0.2*hc))).toFixed(2);
+        if (ac!=null) awayLambda=+(awayLambda*Math.max(.90,Math.min(1.10,0.8+0.2*ac))).toFixed(2);
+      }
+    }
+  } catch (_) {}
+
   const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
   const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
   const calibrated = await modelCalibration.apply({league: leagueName || String(league || ''), match: rawMatchProbabilities, goals: rawMarketProbabilities});
   const matchProbabilities = calibrated.match;
   const marketProbabilities = calibrated.goals;
   const cornerProjection = accuracy.cornerProjection(homeAdvanced, awayAdvanced);
-  const cornerMetrics = cornerProjection
+  const smCornerHome = sportmonksHistorical?.home?.averages?.corners;
+  const smCornerAway = sportmonksHistorical?.away?.averages?.corners;
+  const smCornerReady = Number.isFinite(smCornerHome) && Number.isFinite(smCornerAway) && sportmonksHistorical.home.sample >= 5 && sportmonksHistorical.away.sample >= 5;
+  const cornerMetrics = smCornerReady
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smCornerHome, smCornerAway), { sample: Math.min(sportmonksHistorical.home.sample,sportmonksHistorical.away.sample), source:'sportmonks-history' })
+    : cornerProjection
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample })
     : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'goal-intensity-fallback' });
   const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda);
@@ -345,6 +382,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     marketOdds: matchOdds,
     marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
+    sportmonksHistorical,
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'api-football'),
   };
 }
