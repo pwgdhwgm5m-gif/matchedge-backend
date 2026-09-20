@@ -9,6 +9,13 @@ const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require(
 
 const router = express.Router();
 router.use(requireAuth);
+const settlementInFlight = new Set();
+function settlePendingBackground(userId) {
+  const key=String(userId);
+  if(settlementInFlight.has(key)) return;
+  settlementInFlight.add(key);
+  settlePending(userId).catch(e=>console.warn('[coupons/background-settle]',key,e.message)).finally(()=>settlementInFlight.delete(key));
+}
 
 const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver95', 'cornersUnder95', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond']);
 
@@ -135,12 +142,14 @@ async function settleAllPendingCoupons() {
 
 router.get('/', async (req, res) => {
   try {
-    await settlePending(req.user.userId);
-    // Keep completed slips for 7 days, then remove them automatically.
+    // Never block the coupon screen on external score/stat providers.
+    // Settlement still runs automatically, but in the background with a
+    // per-user in-flight guard so repeated polling cannot fan out API calls.
+    settlePendingBackground(req.user.userId);
     const retentionCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    await Coupon.deleteMany({ userId: req.user.userId, status: { $ne: 'pending' }, settledAt: { $ne: null, $lt: retentionCutoff } });
-    const coupons = await Coupon.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(100);
-    res.json({ coupons });
+    Coupon.deleteMany({ userId: req.user.userId, status: { $ne: 'pending' }, settledAt: { $ne: null, $lt: retentionCutoff } }).catch(()=>{});
+    const coupons = await Coupon.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(100).lean();
+    res.json({ coupons, settlementRunning: settlementInFlight.has(String(req.user.userId)) });
   } catch (error) {
     console.error('[coupons/get]', error.message);
     res.status(500).json({ error: 'Kuponlar alınamadı.' });
