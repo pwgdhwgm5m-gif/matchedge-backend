@@ -132,7 +132,7 @@ async function getInplay() {
 async function getFixtureIntelligence(fixtureId) {
   if (!fixtureId) return { ok:false, error:'fixture_id_missing' };
   const result = await request('/fixtures/' + fixtureId, {
-    include: 'participants;lineups.player;events;statistics.type;sidelined.sideline.player',
+    include: 'participants;lineups.player;events.type;statistics.type;sidelined.sideline',
   });
   if (!result.ok) return result;
   const f = result.data?.data || {};
