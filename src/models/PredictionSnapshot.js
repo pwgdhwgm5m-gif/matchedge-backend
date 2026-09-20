@@ -6,6 +6,8 @@ const predictionSchema = new mongoose.Schema({
   league: { type: String, default: '' },
   homeTeam: { type: String, required: true },
   awayTeam: { type: String, required: true },
+  homeTeamId: { type: String, default: null },
+  awayTeamId: { type: String, default: null },
   capturedAt: { type: Date, default: Date.now },
   homeLambda: Number,
   awayLambda: Number,
