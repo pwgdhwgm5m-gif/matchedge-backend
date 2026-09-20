@@ -73,14 +73,16 @@ router.get('/:fixtureId', async (req, res) => {
       ]);
       if (intel.ok) {
         const lineupComplete = (intel.homeStarters?.length || 0) >= 11 && (intel.awayStarters?.length || 0) >= 11;
-        const smQualityBonus = 8 + (lineupComplete ? 5 : 0);
+        const verifiedStats = Object.values(intel.rawStatistics || {}).filter(v => v != null).length;
+        const smQualityBonus = Math.min(13, (verifiedStats >= 2 ? 3 : 0) + (verifiedStats >= 6 ? 3 : 0) + (verifiedStats >= 10 ? 2 : 0) + (lineupComplete ? 5 : 0));
         result = { ...result,
           dataQualityScore: Math.min(100, Number(result.dataQualityScore || 0) + smQualityBonus),
-          sportmonks: { fixtureId: sm.sportmonksId, verified: true, lineupComplete, homeStarters: intel.homeStarters, awayStarters: intel.awayStarters, homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics },
+          sportmonks: { fixtureId: sm.sportmonksId, verified: verifiedStats > 0 || lineupComplete, verifiedStats, lineupComplete, homeStarters: intel.homeStarters, awayStarters: intel.awayStarters, homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics },
           enhancedDataSource: 'sportmonks'
         };
         if (result.marketBoard) {
           const health = Math.min(100, Number(result.premium?.dataHealth?.score || 0) + smQualityBonus);
+          if (result.premium?.dataHealth) result.premium.dataHealth.score = health;
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
           result.marketBoard.topPredictions = result.marketBoard.allMarkets.slice(0,3);
           result.marketBoard.best = health >= 45 ? (result.marketBoard.allMarkets[0] || null) : null;
