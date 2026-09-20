@@ -41,28 +41,29 @@ async function buildCoupon({legs=3,risk='medium',league=''}={}){
  legs=clamp(Number(legs)||3,2,6);risk=['low','medium','high'].includes(risk)?risk:'medium';
  let rows=await available();if(league)rows=rows.filter(x=>String(x.league||'').toLowerCase().includes(String(league).toLowerCase()));
  const pool=rows.map(x=>candidateStrength(x,x.strongestPick||{},risk)).filter(Boolean);
- const picks=[],usedFixtures=new Set();
- while(picks.length<legs){
-  let best=null;
-  for(const z of pool){
-   if(usedFixtures.has(z.row.fixtureId))continue;
-   const adj=adjustedCandidate(z,picks);
-   if(adj.adjusted<PROFILE[risk].score)continue;
-   if(!best||adj.adjusted>best.adj.adjusted||(adj.adjusted===best.adj.adjusted&&z.prob>best.z.prob))best={z,adj};
-  }
-  if(!best)break;
-  const z=best.z;usedFixtures.add(z.row.fixtureId);z.correlationPenalty=best.adj.penalty;z.correlationReasons=best.adj.reasons;picks.push(z);
+ // V3 evidence layers: similar historical matches + prospective pattern performance + verified live 1X2 price when available.
+ const settled=await Prediction.find({status:'settled'}).select('fixtureId kickoff league homeTeam awayTeam homeLambda awayLambda dataQualityScore probabilities strongestPick actual').sort({kickoff:-1}).limit(1200).lean();
+ const pattern=await patternFinder({minProbability:PROFILE[risk].probability,minQuality:PROFILE[risk].quality,maxGap:8,league});
+ const patternByMarket=new Map((pattern.markets||[]).map(x=>[x.market,x]));
+ let liveValue={matches:[]};try{liveValue=await valueFinder({limit:80})}catch(_){}
+ const valueByFixture=new Map((liveValue.matches||[]).map(x=>[String(x.fixtureId),x]));
+ for(const z of pool){
+  const hist=settled.filter(h=>new Date(h.kickoff)<new Date(z.row.kickoff)).map(h=>({h,d:distance(z.row,h)})).filter(x=>x.d<.9).sort((a,b)=>a.d-b.d).slice(0,20);
+  const graded=hist.map(x=>pickActualHit(z.p.key,x.h.actual)).filter(x=>x!==null),wins=graded.filter(Boolean).length;
+  z.similarCount=graded.length;z.similarHitRate=graded.length?+(100*wins/graded.length).toFixed(1):null;
+  const pm=patternByMarket.get(z.family);z.patternCount=pm?.count||0;z.patternHitRate=pm?.hitRatePercent??null;
+  const priced=valueByFixture.get(String(z.row.fixtureId)),side=['home','draw','away'].includes(z.p.key)?z.p.key:null,vo=side?priced?.outcomes?.[side]:null;
+  z.marketOdds=vo?.odds??null;z.edgePercent=vo?.edgePercent??null;z.evPercent=vo?.expectedValuePercent??null;
+  const similarBonus=z.similarCount>=10?(z.similarHitRate>=70?4:z.similarHitRate>=60?2:z.similarHitRate<45?-4:0):0;
+  const patternBonus=z.patternCount>=30?(z.patternHitRate>=68?4:z.patternHitRate>=58?2:z.patternHitRate<45?-4:0):0;
+  const evBonus=z.evPercent==null?0:(z.evPercent>=8?6:z.evPercent>=3?3:z.evPercent<0?-8:0);
+  z.evidenceAdjustment=similarBonus+patternBonus+evBonus;z.strength=+(z.strength+z.evidenceAdjustment).toFixed(2);
  }
- const output=picks.map(z=>({fixtureId:z.row.fixtureId,kickoff:z.row.kickoff,league:z.row.league,match:z.row.homeTeam+' - '+z.row.awayTeam,key:z.p.key,market:z.p.market,label:z.p.label,probability:z.prob,score:z.score,dataQualityScore:z.q,strength:z.strength,correlationPenalty:z.correlationPenalty,correlationReasons:z.correlationReasons,simulationRuns:z.simulation?z.simulation.runs:0,simulationProbability:z.simulationProbability,modelSimulationGap:z.modelSimulationGap,simulationPenalty:z.simulationPenalty}));
- const rawJoint=output.length?output.reduce((v,x)=>v*(Number(x.probability)/100),1):0;
- // Conservative model-only adjustment for shared league/market/time exposures. This is not a statistical
- // correlation estimate; it is a selection-risk haircut until enough joint-outcome data is available.
- const totalPenalty=output.reduce((v,x)=>v+(Number(x.correlationPenalty)||0),0);
- const adjustedJoint=rawJoint*Math.max(.75,1-(totalPenalty/100));
- const avgProb=output.length?output.reduce((v,x)=>v+Number(x.probability),0)/output.length:0;
- const avgQuality=output.length?output.reduce((v,x)=>v+Number(x.dataQualityScore),0)/output.length:0;
- const confidence=output.length===legs?(avgProb>=70&&avgQuality>=70?'high':avgProb>=62&&avgQuality>=58?'medium':'guarded'):'incomplete';
- return{risk,requestedLegs:legs,count:output.length,complete:output.length===legs,estimatedCombinedHitPercent:+(rawJoint*100).toFixed(1),riskAdjustedCombinedHitPercent:+(adjustedJoint*100).toFixed(1),couponConfidence:confidence,correlationPenalty:+totalPenalty.toFixed(2),picks:output,selectionPolicy:{defaultLegs:3,weakFillerAllowed:false,oddsFilterApplied:false,correlationAware:true,simulationCrossCheck:'50000 deterministic Monte Carlo runs per eligible fixture',reason:'No verified live bookmaker odds feed is connected to Premium Lab yet.'},note:output.length===legs?'Model-only coupon estimate with diversification risk adjustment; market odds/EV are not used yet.':'Not enough individually qualifying picks. No weak leg was added just to complete the coupon.'};
+ const picks=[],usedFixtures=new Set();
+ while(picks.length<legs){let best=null;for(const z of pool){if(usedFixtures.has(z.row.fixtureId))continue;const adj=adjustedCandidate(z,picks);if(adj.adjusted<PROFILE[risk].score)continue;if(!best||adj.adjusted>best.adj.adjusted||(adj.adjusted===best.adj.adjusted&&z.prob>best.z.prob))best={z,adj}}if(!best)break;const z=best.z;usedFixtures.add(z.row.fixtureId);z.correlationPenalty=best.adj.penalty;z.correlationReasons=best.adj.reasons;picks.push(z)}
+ const output=picks.map(z=>({fixtureId:z.row.fixtureId,kickoff:z.row.kickoff,league:z.row.league,match:z.row.homeTeam+' - '+z.row.awayTeam,key:z.p.key,market:z.p.market,label:z.p.label,probability:z.prob,score:z.score,dataQualityScore:z.q,strength:z.strength,evidenceAdjustment:z.evidenceAdjustment,similarMatches:{count:z.similarCount,hitRatePercent:z.similarHitRate},pattern:{count:z.patternCount,hitRatePercent:z.patternHitRate},market:{odds:z.marketOdds,edgePercent:z.edgePercent,expectedValuePercent:z.evPercent},correlationPenalty:z.correlationPenalty,correlationReasons:z.correlationReasons,simulationRuns:z.simulation?z.simulation.runs:0,simulationProbability:z.simulationProbability,modelSimulationGap:z.modelSimulationGap,simulationPenalty:z.simulationPenalty}));
+ const rawJoint=output.length?output.reduce((v,x)=>v*(Number(x.probability)/100),1):0,totalPenalty=output.reduce((v,x)=>v+(Number(x.correlationPenalty)||0),0),adjustedJoint=rawJoint*Math.max(.75,1-(totalPenalty/100)),avgProb=output.length?output.reduce((v,x)=>v+Number(x.probability),0)/output.length:0,avgQuality=output.length?output.reduce((v,x)=>v+Number(x.dataQualityScore),0)/output.length:0,confidence=output.length===legs?(avgProb>=70&&avgQuality>=70?'high':avgProb>=62&&avgQuality>=58?'medium':'guarded'):'incomplete';
+ return{engine:'premium-coupon-v3',risk,requestedLegs:legs,count:output.length,complete:output.length===legs,estimatedCombinedHitPercent:+(rawJoint*100).toFixed(1),riskAdjustedCombinedHitPercent:+(adjustedJoint*100).toFixed(1),couponConfidence:confidence,correlationPenalty:+totalPenalty.toFixed(2),picks:output,selectionPolicy:{defaultLegs:3,weakFillerAllowed:false,correlationAware:true,simulationCrossCheck:'50000 deterministic Monte Carlo runs',similarMatches:true,patternFinder:true,liveOddsWhenAvailable:true,oddsFilterApplied:(liveValue.pricedMatches||0)>0,reason:(liveValue.pricedMatches||0)>0?'Verified live bookmaker prices are included where the selected market is priced.':'No verified current bookmaker prices were available; model/simulation/history layers remain active and no value claim is made.'},note:output.length===legs?'V3 multi-signal coupon: model + 50K simulation + similar matches + prospective patterns + live EV when available.':'Not enough individually qualifying picks. No weak leg was added just to complete the coupon.'};
 }
 
 function pickActualHit(key,a={}){if(key==='home'||key==='draw'||key==='away')return a[key]===1;if(key==='over25')return a.over25===1;if(key==='under25')return a.over25===0;if(key==='bttsYes')return a.btts===1;if(key==='bttsNo')return a.btts===0;return null}
