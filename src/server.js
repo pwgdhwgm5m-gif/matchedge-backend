@@ -106,6 +106,32 @@ app.listen(config.port, async () => {
   };
   setTimeout(settleCoupons, 30000);
   setInterval(settleCoupons, 10 * 60 * 1000);
+
+  // Delete finished slips every day at 00:00 Europe/Istanbul.
+  // Render runs in UTC, so calculate the next Istanbul midnight explicitly
+  // (Turkey stays UTC+3 year-round) and reschedule after every run.
+  const scheduleCouponMidnightCleanup = () => {
+    const now = new Date();
+    const istanbulNow = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    const nextIstanbulMidnightUtc = Date.UTC(
+      istanbulNow.getUTCFullYear(),
+      istanbulNow.getUTCMonth(),
+      istanbulNow.getUTCDate() + 1,
+      0, 0, 0
+    ) - 3 * 60 * 60 * 1000;
+    const delay = Math.max(1000, nextIstanbulMidnightUtc - now.getTime());
+    setTimeout(async () => {
+      try {
+        const deleted = await couponsRoute.cleanupFinishedCoupons();
+        console.log('[coupons/midnight-cleanup] finished coupons deleted:', deleted);
+      } catch (error) {
+        console.warn('[coupons/midnight-cleanup]', error.message);
+      } finally {
+        scheduleCouponMidnightCleanup();
+      }
+    }, delay);
+  };
+  scheduleCouponMidnightCleanup();
   // Prediction ledger settlement also trains persistent Elo/attack/defence ratings.
   const settlePredictions = async () => {
     try {
