@@ -94,6 +94,23 @@ function transformFixture(f) {
     halftimeAway: halftimeValue(scores, 'away'),
     kickoff: f.starting_at || null,
     stateId: f.state_id,
+    // SportMonks state ids: 1 NS, 2 1H, 3 HT, 4 BREAK, 5 FT,
+    // 6 ET, 7 PEN, 8 FT after ET, 9 FT after pens, 10 postponed,
+    // 11 suspended, 12 cancelled, 13 TBD, 14 interrupted, 15 abandoned,
+    // 16 delayed, 17 awarded, 18 2H, 19 awaiting updates, 20 deleted,
+    // 21 extra-time break, 22 1ET, 23 ET break, 24 2ET, 25 pen break, 26 pens.
+    statusShort: [5,8,9,17].includes(Number(f.state_id)) ? 'FT'
+      : [2,3,4,6,18,21,22,23,24,25,26].includes(Number(f.state_id)) ? 'LIVE'
+      : [10,11,12,14,15,16,20].includes(Number(f.state_id)) ? 'CANCELLED'
+      : 'NS',
+    isLive: [2,3,4,6,18,21,22,23,24,25,26].includes(Number(f.state_id)),
+    minute: (() => {
+      const periods = Array.isArray(f.periods) ? f.periods : [];
+      const active = [...periods].reverse().find(p => p.ticking === true || p.ended === null || p.ended_at == null);
+      const rawMinute = active?.minutes ?? active?.minute ?? f?.time?.minute ?? null;
+      const n = Number(rawMinute);
+      return Number.isFinite(n) ? n : null;
+    })(),
     stats: {
       shotsOnTargetHome: statisticValue(f,['shots on target','shots-on-target'],'home'),
       shotsOnTargetAway: statisticValue(f,['shots on target','shots-on-target'],'away'),
