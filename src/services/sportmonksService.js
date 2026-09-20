@@ -159,7 +159,7 @@ async function getLivescores() {
 
 function normalizeName(s='') {
   return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'').replace(/[^a-z0-9]/g,'');
+    .replace(/ı/g,'i').replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'').replace(/spor$/g,'').replace(/[^a-z0-9]/g,'');
 }
 
 function findMatch(fixtures, home, away) {
