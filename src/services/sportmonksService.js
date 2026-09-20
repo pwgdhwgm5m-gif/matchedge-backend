@@ -177,4 +177,44 @@ async function getVerifiedLiveData(home, away) {
   return { available:true, match };
 }
 
-module.exports = { request, getInplay, getLivescores, getFixtureIntelligence, transformFixture, findMatch, getVerifiedLiveData };
+async function getTeamFixtureHistory(teamId, days = 120) {
+  if (!teamId) return { ok:false, error:'team_id_missing', fixtures:[] };
+  const end = new Date();
+  const start = new Date(end.getTime() - Math.max(30, days) * 86400000);
+  const iso = d => d.toISOString().slice(0,10);
+  const result = await request('/fixtures/between/' + iso(start) + '/' + iso(end) + '/' + teamId, {
+    include: 'participants;scores;statistics.type',
+  });
+  if (!result.ok) return result;
+  const fixtures = (result.data?.data || []).map(transformFixture)
+    .filter(x => x.homeScore != null && x.awayScore != null)
+    .sort((a,b) => new Date(b.kickoff) - new Date(a.kickoff));
+  return { ok:true, fixtures };
+}
+
+function aggregateTeamHistory(fixtures, teamId) {
+  const rows = Array.isArray(fixtures) ? fixtures : [];
+  const values = [];
+  for (const f of rows.slice(0,10)) {
+    const raw = f.raw || {};
+    const homeId = participantId(raw,'home');
+    const awayId = participantId(raw,'away');
+    const loc = String(homeId) === String(teamId) ? 'Home' : String(awayId) === String(teamId) ? 'Away' : null;
+    if (!loc) continue;
+    const pick = key => f.stats?.[key + loc] ?? null;
+    values.push({
+      shotsOnTarget: pick('shotsOnTarget'), shots: pick('shots'), corners: pick('corners'),
+      shotsOffTarget: pick('shotsOffTarget'), attacks: pick('attacks'), dangerousAttacks: pick('dangerousAttacks'),
+      blockedShots: pick('blockedShots'), shotsInsideBox: pick('shotsInsideBox'), bigChances: pick('bigChances')
+    });
+  }
+  const keys=['shotsOnTarget','shots','corners','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
+  const averages={};
+  for (const k of keys) {
+    const nums=values.map(v=>v[k]).filter(Number.isFinite);
+    averages[k]=nums.length ? +(nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(2) : null;
+  }
+  return { sample: values.length, averages };
+}
+
+module.exports = { request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
