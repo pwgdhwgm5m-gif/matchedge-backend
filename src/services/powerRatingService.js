@@ -80,3 +80,30 @@ async function seedLeagueEventsFromSportmonks({leagueId,leagueName,days=365}){
  }catch(e){return {ok:false,error:e.message};}
 }
 module.exports.seedLeagueEventsFromSportmonks=seedLeagueEventsFromSportmonks;
+
+function simulateLeagueRatings(rows,leagueName){
+ const states=new Map(),get=(id,name)=>{id=String(id);if(!states.has(id))states.set(id,{league:String(leagueName),teamId:id,teamName:name||'',elo:BASE,attack:1,defense:1,games:0,lastFixtureId:null,lastMatchAt:null,season:''});return states.get(id)};
+ for(const x of rows){
+  const h=get(x.homeTeamId,x.homeTeam),a=get(x.awayTeamId,x.awayTeam),eh=expected(h.elo+55,a.elo),rs=score(Number(x.homeScore),Number(x.awayScore));
+  const margin=Math.abs(Number(x.homeScore)-Number(x.awayScore)),delta=24*(1+Math.min(.55,Math.log1p(margin)*.28))*(rs-eh);
+  const upd=(s,elo,gf,ga)=>{const n=s.games,priorGames=6,attackObs=clamp((gf+.35)/1.7,.45,1.8),defenseObs=clamp(1.7/(ga+.35),.45,1.8);s.elo=+elo.toFixed(1);s.attack=+clamp((s.attack*(n+priorGames)+attackObs)/(n+priorGames+1),.45,1.8).toFixed(3);s.defense=+clamp((s.defense*(n+priorGames)+defenseObs)/(n+priorGames+1),.45,1.8).toFixed(3);s.games=n+1;s.lastFixtureId=String(x.sportmonksId);s.lastMatchAt=x.kickoff?new Date(x.kickoff):new Date();s.season=String(x.seasonId||'')};
+  upd(h,h.elo+delta,Number(x.homeScore),Number(x.awayScore));upd(a,a.elo-delta,Number(x.awayScore),Number(x.homeScore));
+ }
+ return [...states.values()];
+}
+async function rebuildLeagueFromSportmonks({leagueId,leagueName,days=365}){
+ try{
+  if(!leagueId||!leagueName)return {ok:false,error:'leagueId_and_leagueName_required'};
+  const sportmonks=require('./sportmonksService'),PowerRating=require('../models/PowerRating'),PowerRatingEvent=require('../models/PowerRatingEvent');
+  const r=await sportmonks.getLeagueTeamsFromRecentFixtures(leagueId,days);if(!r?.ok)return {ok:false,error:r?.error||'league_history_unavailable'};
+  const uniq=new Map();for(const x of (r.fixtures||[]))if(x.sportmonksId&&x.homeTeamId&&x.awayTeamId&&x.homeScore!=null&&x.awayScore!=null)uniq.set(String(x.sportmonksId),x);
+  const rows=[...uniq.values()].sort((a,b)=>new Date(a.kickoff)-new Date(b.kickoff));if(!rows.length)return {ok:false,error:'no_completed_fixtures'};
+  const ratings=simulateLeagueRatings(rows,leagueName);
+  const ratingOps=ratings.map(x=>({updateOne:{filter:{league:String(leagueName),teamId:x.teamId},update:{$set:x},upsert:true}}));
+  const eventOps=rows.map(x=>({updateOne:{filter:{league:String(leagueName),fixtureId:String(x.sportmonksId)},update:{$set:{league:String(leagueName),fixtureId:String(x.sportmonksId),kickoff:x.kickoff?new Date(x.kickoff):null,homeTeamId:String(x.homeTeamId),awayTeamId:String(x.awayTeamId),processedAt:new Date()}},upsert:true}}));
+  await PowerRating.bulkWrite(ratingOps,{ordered:false});await PowerRatingEvent.bulkWrite(eventOps,{ordered:false});
+  const keep=ratings.map(x=>x.teamId);await PowerRating.deleteMany({league:String(leagueName),teamId:{$nin:keep}});
+  return {ok:true,league:leagueName,teams:ratings.length,totalFixtures:rows.length,rebuild:true};
+ }catch(e){return {ok:false,error:e.message};}
+}
+module.exports.rebuildLeagueFromSportmonks=rebuildLeagueFromSportmonks;
