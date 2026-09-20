@@ -7,6 +7,7 @@ const footballDataOrg = require('../services/footballDataOrgService');
 const cupFixtures = require('../services/cupFixtureService');
 const oddsApi = require('../services/oddsApiService');
 const sportmonks = require('../services/sportmonksService');
+const bsdService = require('../services/bsdService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -84,6 +85,25 @@ router.get('/', async (req, res) => {
   // mac zaman cizelgesinden hesaplayip dolduruyoruz (bkz. sportsDbService).
   // Sonucu cache'lendigi icin bu sadece her mac icin ilk seferde maliyetli.
   simplified = await sportsDb.attachHalftimeScores(simplified);
+
+  // Final HT fallback for matches that are already past half-time/finished.
+  // This mirrors the live route: SportMonks/football-data/TheSportsDB stay
+  // preferred, BSD is queried only when HT is still genuinely missing.
+  await Promise.all(simplified.map(async m => {
+    if (m.halftimeHome != null && m.halftimeAway != null) return;
+    const finished = String(m.statusShort || '').toUpperCase() === 'FT';
+    const pastHalf = m.isLive && Number(m.minute) > 45;
+    if (!finished && !pastHalf) return;
+    const ht = await Promise.race([
+      bsdService.getHalftimeScoreForMatch(m.homeTeam, m.awayTeam, m.kickoff),
+      new Promise(resolve => setTimeout(() => resolve({available:false}), 1800))
+    ]);
+    if (ht?.available) {
+      m.halftimeHome = ht.home;
+      m.halftimeAway = ht.away;
+      m.halftimeSource = ht.source || 'bsd';
+    }
+  }));
 
   res.json({
     date,
