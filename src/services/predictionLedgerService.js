@@ -28,6 +28,7 @@ async function capture(a, fixture) {
       dataQualityScore: a.dataQualityScore, probabilities: values,
       sportmonksEvidence: a.sportmonksMarketEvidence || null,
       marketBoardSnapshot: Array.isArray(a.marketBoard?.allMarkets) ? a.marketBoard.allMarkets.map(x => ({ key:x.key, market:x.market, probability:x.probability, score:x.score, sportmonksEvidence:x.sportmonksEvidence, sportmonksEvidenceBonus:x.sportmonksEvidenceBonus })) : null,
+      strongestPick: a.marketBoard?.best ? { key:a.marketBoard.best.key, market:a.marketBoard.best.market, label:a.marketBoard.best.label, probability:a.marketBoard.best.probability, score:a.marketBoard.best.score } : null,
       rawProbabilities: a.rawModelProbabilities ? {
         home: percent(a.rawModelProbabilities.homeWinProbability), draw: percent(a.rawModelProbabilities.drawProbability),
         away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),
@@ -152,6 +153,25 @@ async function pairedAudit(){
  return {version:VERSION,design:'paired-prospective-same-fixtures',baseline:'raw-pre-calibration-pipeline',snapshots:rows.length,readiness,minimums:{earlySignal:30,decisionEligible:100},comparisons:guardedComparisons};
 }
 
+function strongestPickHit(p){
+  const key=p.strongestPick?.key,a=p.actual||{};
+  if(!key)return null;
+  if(key==='home'||key==='draw'||key==='away') return a[key]===1;
+  if(key==='over25')return a.over25===1;
+  if(key==='under25')return a.over25===0;
+  if(key==='bttsYes')return a.btts===1;
+  if(key==='bttsNo')return a.btts===0;
+  return null;
+}
+async function strongestPickPerformance(){
+  const rows=await Prediction.find({status:'settled',strongestPick:{$ne:null}})
+    .select('league kickoff homeTeam awayTeam strongestPick actual').sort({kickoff:1}).lean();
+  const evaluated=rows.map(p=>({p,hit:strongestPickHit(p)})).filter(x=>x.hit!==null);
+  const wins=evaluated.filter(x=>x.hit).length, losses=evaluated.length-wins;
+  return {count:evaluated.length,wins,losses,hitRatePercent:evaluated.length?+(100*wins/evaluated.length).toFixed(1):null,
+    readiness:evaluated.length<30?'collecting':evaluated.length<100?'early-signal':'decision-ready'};
+}
+
 async function performance() {
   const [totalSnapshots, settledSnapshots, pendingSnapshots, predictions] = await Promise.all([
     Prediction.countDocuments({}),
@@ -196,6 +216,7 @@ async function performance() {
     : null;
   return {
     version:VERSION,
+    strongestPick: await strongestPickPerformance(),
     summary:{
       totalSnapshots,
       settledSnapshots,
@@ -210,4 +231,4 @@ async function performance() {
     rows
   };
 }
-module.exports = { capture, settlePending, performance, sportmonksBacktest, walkForwardAudit, pairedAudit, VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, VERSION };
