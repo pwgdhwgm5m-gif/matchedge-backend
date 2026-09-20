@@ -81,7 +81,7 @@ function calculateExpectedGoals(teamAttack, opponentDefense, leagueAvgGoals, hom
  * @param {number} awayLambda
  * @param {number} maxGoals - olasilik matrisinde kac gole kadar hesaplansin (varsayilan 6)
  */
-function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 6) {
+function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 10) {
   const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals);
   let homeWin = 0, draw = 0, awayWin = 0;
 
@@ -103,7 +103,7 @@ function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 6) {
 }
 
 /** 2.5 ust/alt, KG var/yok gibi market bazli olasiliklar */
-function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 6) {
+function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 10) {
   const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals);
   let over25 = 0, btts = 0;
 
