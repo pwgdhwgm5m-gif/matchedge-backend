@@ -112,6 +112,23 @@ async function getInjuries(fixtureId) {
   return requestWithKeyFallback('/injuries', () => ({ fixture: fixtureId }), 5000, 'API-Football Sakatlik');
 }
 
+function normalizeName(s) {
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+}
+function namesMatch(a,b) {
+  const x=normalizeName(a), y=normalizeName(b);
+  return !!x && !!y && (x===y || x.includes(y) || y.includes(x));
+}
+async function getHalftimeScoreForMatch(homeTeam, awayTeam) {
+  const r=await getLiveFixtures();
+  if(!r || !r.ok) return {available:false};
+  const list=(r.data && Array.isArray(r.data.response)) ? r.data.response : [];
+  const m=list.find(x=>namesMatch(x?.teams?.home?.name,homeTeam)&&namesMatch(x?.teams?.away?.name,awayTeam));
+  const h=m?.score?.halftime?.home, a=m?.score?.halftime?.away;
+  if(h===null||h===undefined||a===null||a===undefined) return {available:false};
+  return {available:true,home:Number(h),away:Number(a),source:'api-football'};
+}
+
 module.exports = {
   getFixturesByDate,
   getFixtureById,
@@ -122,4 +139,5 @@ module.exports = {
   getLiveFixtureStats,
   getInjuries,
   getStandings,
+  getHalftimeScoreForMatch,
 };
