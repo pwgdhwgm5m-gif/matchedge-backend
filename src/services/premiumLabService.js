@@ -63,5 +63,30 @@ async function buildCoupon({legs=3,risk='medium',league=''}={}){
  const confidence=output.length===legs?(avgProb>=70&&avgQuality>=70?'high':avgProb>=62&&avgQuality>=58?'medium':'guarded'):'incomplete';
  return{risk,requestedLegs:legs,count:output.length,complete:output.length===legs,estimatedCombinedHitPercent:+(rawJoint*100).toFixed(1),riskAdjustedCombinedHitPercent:+(adjustedJoint*100).toFixed(1),couponConfidence:confidence,correlationPenalty:+totalPenalty.toFixed(2),picks:output,selectionPolicy:{defaultLegs:3,weakFillerAllowed:false,oddsFilterApplied:false,correlationAware:true,simulationCrossCheck:'50000 deterministic Monte Carlo runs per eligible fixture',reason:'No verified live bookmaker odds feed is connected to Premium Lab yet.'},note:output.length===legs?'Model-only coupon estimate with diversification risk adjustment; market odds/EV are not used yet.':'Not enough individually qualifying picks. No weak leg was added just to complete the coupon.'};
 }
+
+function pickActualHit(key,a={}){if(key==='home'||key==='draw'||key==='away')return a[key]===1;if(key==='over25')return a.over25===1;if(key==='under25')return a.over25===0;if(key==='bttsYes')return a.btts===1;if(key==='bttsNo')return a.btts===0;return null}
+function distance(target,h){
+ const tp=target.probabilities||{},hp=h.probabilities||{};
+ const vals=[
+  [Number(target.homeLambda),Number(h.homeLambda),1.5],
+  [Number(target.awayLambda),Number(h.awayLambda),1.5],
+  [Number(target.dataQualityScore),Number(h.dataQualityScore),35],
+  [Number(tp.home),Number(hp.home),.30],[Number(tp.draw),Number(hp.draw),.25],[Number(tp.away),Number(hp.away),.30],
+  [Number(tp.over25),Number(hp.over25),.30],[Number(tp.btts),Number(hp.btts),.30]
+ ];
+ let sum=0,n=0;for(const [a,b,scale] of vals){if(Number.isFinite(a)&&Number.isFinite(b)){sum+=Math.min(2,Math.abs(a-b)/scale);n++}}
+ return n?sum/n:99;
+}
+async function similarMatches(fixtureId,{limit=20}={}){
+ const target=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();
+ if(!target){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}
+ const history=await Prediction.find({status:'settled',kickoff:{$lt:target.kickoff}}).select('fixtureId kickoff league homeTeam awayTeam homeLambda awayLambda dataQualityScore probabilities strongestPick actual').sort({kickoff:-1}).limit(1200).lean();
+ const ranked=history.map(h=>({h,d:distance(target,h)})).filter(x=>x.d<.9).sort((a,b)=>a.d-b.d).slice(0,clamp(Number(limit)||20,5,50));
+ const key=target.strongestPick?.key;
+ const comparable=ranked.map(x=>{const hit=pickActualHit(key,x.h.actual);return{fixtureId:x.h.fixtureId,kickoff:x.h.kickoff,league:x.h.league,match:x.h.homeTeam+' - '+x.h.awayTeam,similarity:+(100*(1-Math.min(1,x.d))).toFixed(1),score:x.h.actual?.homeScore+'-'+x.h.actual?.awayScore,comparablePickHit:hit}});
+ const graded=comparable.filter(x=>x.comparablePickHit!==null),wins=graded.filter(x=>x.comparablePickHit).length;
+ return{fixtureId:target.fixtureId,match:target.homeTeam+' - '+target.awayTeam,targetPick:target.strongestPick||null,count:comparable.length,graded:graded.length,comparableHitRatePercent:graded.length?+(100*wins/graded.length).toFixed(1):null,matches:comparable,method:'pre-kickoff feature distance; historical rows are strictly earlier than target kickoff'};
+}
+
 async function simulateFixture(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();if(!row){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0)){const e=new Error('expected_goals_unavailable');e.status=422;throw e}return{fixtureId:row.fixtureId,match:row.homeTeam+' - '+row.awayTeam,kickoff:row.kickoff,league:row.league,simulation:simulationFromLambdas(row.homeLambda,row.awayLambda),modelSnapshot:row.probabilities}}
-module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k};
+module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches};
