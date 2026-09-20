@@ -81,8 +81,8 @@ function calculateExpectedGoals(teamAttack, opponentDefense, leagueAvgGoals, hom
  * @param {number} awayLambda
  * @param {number} maxGoals - olasilik matrisinde kac gole kadar hesaplansin (varsayilan 6)
  */
-function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 10) {
-  const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals);
+function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 10, rho = DEFAULT_RHO) {
+  const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals, rho);
   let homeWin = 0, draw = 0, awayWin = 0;
 
   for (let h = 0; h <= maxGoals; h++) {
@@ -103,8 +103,8 @@ function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 10) {
 }
 
 /** 2.5 ust/alt, KG var/yok gibi market bazli olasiliklar */
-function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 10) {
-  const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals);
+function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 10, rho = DEFAULT_RHO) {
+  const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals, rho);
   let over25 = 0, btts = 0;
 
   for (let h = 0; h <= maxGoals; h++) {
@@ -236,6 +236,18 @@ function estimateCornerMetrics(homeLambda, awayLambda) {
   };
 }
 
+
+function estimateLeagueParameters(fixtures, options={}) {
+  const now=Number(options.now||Date.now()), halfLifeDays=Math.max(45,Number(options.halfLifeDays||240));
+  const rows=(fixtures||[]).filter(f=>f?.goals?.home!=null&&f?.goals?.away!=null&&Number.isFinite(Number(f.goals.home))&&Number.isFinite(Number(f.goals.away)));
+  let wh=0,wa=0,w=0,low={z00:0,z01:0,z10:0,z11:0,total:0};
+  for(const f of rows){const t=new Date(f.fixture?.date||f.date||now).getTime(),age=Math.max(0,(now-t)/86400000),wt=Math.pow(.5,age/halfLifeDays),h=Number(f.goals.home),a=Number(f.goals.away);wh+=wt*h;wa+=wt*a;w+=wt;if(h<=1&&a<=1){low['z'+h+a]+=wt;low.total+=wt;}}
+  const homeAvg=w?wh/w:1.45,awayAvg=w?wa/w:1.15,homeAdvantage=clamp(homeAvg/Math.max(.65,awayAvg),.92,1.35);
+  const lowDrawShare=low.total?(low.z00+low.z11)/low.total:.5;
+  const rho=clamp(-.13-(lowDrawShare-.5)*.16,-.22,.04);
+  return {rho:+rho.toFixed(4),homeAdvantage:+homeAdvantage.toFixed(4),homeAvg:+homeAvg.toFixed(3),awayAvg:+awayAvg.toFixed(3),sample:rows.length,halfLifeDays};
+}
+
 module.exports = {
   calculateExpectedGoals,
   calculateMatchProbabilities,
@@ -248,4 +260,5 @@ module.exports = {
   buildScoreMatrix,
   dixonColesTau,
   DEFAULT_RHO,
+  estimateLeagueParameters,
 };
