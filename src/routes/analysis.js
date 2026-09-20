@@ -17,6 +17,27 @@ const sportmonks = require('../services/sportmonksService');
  *   - homeTeamName, awayTeamName, leagueName, kickoff: EKRANDA GOSTERMEK
  *     icin - hesaplamaya girmez, sadece yaniti tamamlar
  */
+router.get('/sportmonks/match-diagnostic', async (req, res) => {
+  try {
+    const { homeTeamName, awayTeamName } = req.query;
+    if (!homeTeamName || !awayTeamName) return res.status(400).json({ok:false,error:'team_names_required'});
+    const live = await Promise.race([
+      sportmonks.getLivescores(),
+      new Promise(resolve => setTimeout(() => resolve({ok:false,error:'timeout'}), 4000))
+    ]);
+    if (!live.ok) return res.status(502).json({ok:false,error:live.error||'unavailable'});
+    const m = sportmonks.findMatch(live.fixtures, homeTeamName, awayTeamName);
+    if (!m) return res.json({ok:true,matched:false});
+    const [hh,ah] = await Promise.all([
+      m.homeTeamId ? sportmonks.getTeamFixtureHistory(m.homeTeamId) : Promise.resolve({ok:false}),
+      m.awayTeamId ? sportmonks.getTeamFixtureHistory(m.awayTeamId) : Promise.resolve({ok:false})
+    ]);
+    const home = hh.ok ? sportmonks.aggregateTeamHistory(hh.fixtures,m.homeTeamId) : null;
+    const away = ah.ok ? sportmonks.aggregateTeamHistory(ah.fixtures,m.awayTeamId) : null;
+    res.json({ok:true,matched:true,fixtureId:m.sportmonksId,history:{home,away}});
+  } catch(e) { res.status(500).json({ok:false,error:e.message}); }
+});
+
 router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
   try {
     const intel = await sportmonks.getFixtureIntelligence(req.params.fixtureId);
