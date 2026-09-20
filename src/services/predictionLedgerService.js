@@ -23,6 +23,7 @@ async function capture(a, fixture) {
     { $setOnInsert: {
       fixtureId: String(fixture.fixtureId), modelVersion: VERSION, kickoff,
       league: fixture.league || '', homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
+      homeTeamId: fixture.homeTeamId || fixture.homeId || null, awayTeamId: fixture.awayTeamId || fixture.awayId || null,
       capturedAt: new Date(), homeLambda: a.homeLambda, awayLambda: a.awayLambda,
       dataQualityScore: a.dataQualityScore, probabilities: values,
       sportmonksEvidence: a.sportmonksMarketEvidence || null,
@@ -69,7 +70,7 @@ async function settlePending() {
         try{
           const powerRating=require('./powerRatingService');
           await powerRating.persistFromMatch({league:p.league||'',season:'',fixtureId:p.fixtureId,kickoff:p.kickoff,
-            home:{id:match.homeId||p.homeTeam,name:p.homeTeam},away:{id:match.awayId||p.awayTeam,name:p.awayTeam},
+            home:{id:match.homeId||p.homeTeamId,name:p.homeTeam},away:{id:match.awayId||p.awayTeamId,name:p.awayTeam},
             homeGoals:actual.homeScore,awayGoals:actual.awayScore});
         }catch(e){console.warn('[power-rating/settle]',p.fixtureId,e.message);}
       }
