@@ -1,7 +1,7 @@
 const Prediction = require('../models/PredictionSnapshot');
 const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
-const VERSION = 'accuracy-v3-sportmonks-market-evidence-2026-09';
+const VERSION = 'analysis-v2-dixon-coles-ensemble-2026-09';
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
   const m = a.modelOnlyProbabilities || {};
@@ -118,13 +118,15 @@ async function performance() {
       g.correct += (q >= 0.5 ? 1 : 0) === actual ? 1 : 0;
     }
   }
-  return { snapshots: predictions.length, rows: [...groups.values()].map(g => ({
-    league: g.league, market: g.market, count: g.count,
-    accuracy: +(100*g.correct/g.count).toFixed(1),
-    brier: +(g.brierSum/g.count).toFixed(4),
-    logLoss: +(g.logLossSum/g.count).toFixed(4),
-    predictedPercent: +(100*g.predictedSum/g.count).toFixed(1),
-    actualPercent: +(100*g.actualSum/g.count).toFixed(1),
-  })) };
+  const rows=[...groups.values()].map(g => ({
+    league:g.league,market:g.market,count:g.count,
+    accuracy:+(100*g.correct/g.count).toFixed(1),
+    brier:+(g.brierSum/g.count).toFixed(4),
+    logLoss:+(g.logLossSum/g.count).toFixed(4),
+    predictedPercent:+(100*g.predictedSum/g.count).toFixed(1),
+    actualPercent:+(100*g.actualSum/g.count).toFixed(1),
+    calibrationGapPercent:+Math.abs(100*(g.predictedSum-g.actualSum)/g.count).toFixed(1)
+  }));
+  return { version:VERSION, snapshots:predictions.length, scoring:['brier','logLoss','calibrationGap'], rows };
 }
 module.exports = { capture, settlePending, performance, sportmonksBacktest, VERSION };
