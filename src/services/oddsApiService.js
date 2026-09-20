@@ -245,6 +245,25 @@ function blendWithMarket(modelProbs, marketProbs, modelWeight = 0.5) {
   };
 }
 
+
+function shinImpliedProbabilities(decimalOdds){
+ if(!decimalOdds)return null;
+ const q=[1/Number(decimalOdds.home),1/Number(decimalOdds.draw),1/Number(decimalOdds.away)];
+ if(q.some(x=>!Number.isFinite(x)||x<=0))return null;
+ const sum=q.reduce((a,b)=>a+b,0); if(sum<=1)return normalizeImpliedProbabilities(decimalOdds);
+ let lo=0,hi=.25;
+ const probs=z=>q.map(x=>(Math.sqrt(z*z+4*(1-z)*(x*x/sum))-z)/(2*(1-z)));
+ for(let i=0;i<60;i++){const z=(lo+hi)/2,s=probs(z).reduce((a,b)=>a+b,0);if(s>1)lo=z;else hi=z;}
+ const z=(lo+hi)/2,p=probs(z),s=p.reduce((a,b)=>a+b,0)||1;
+ return {home:+(100*p[0]/s).toFixed(1),draw:+(100*p[1]/s).toFixed(1),away:+(100*p[2]/s).toFixed(1),overroundPercent:+((sum-1)*100).toFixed(1),shinZ:+z.toFixed(4),method:'shin'};
+}
+function marketDivergence(model,market){
+ if(!model||!market)return null;
+ const d={home:+(Number(model.homeWinProbability)-Number(market.home)).toFixed(1),draw:+(Number(model.drawProbability)-Number(market.draw)).toFixed(1),away:+(Number(model.awayWinProbability)-Number(market.away)).toFixed(1)};
+ const entries=Object.entries(d).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));
+ return {...d,largestOutcome:entries[0][0],largestGap:entries[0][1],material:Math.abs(entries[0][1])>=7};
+}
+
 module.exports = {
   getOddsForLeague,
   getEventsForLeague,
@@ -256,5 +275,7 @@ module.exports = {
   findValueBets,
   extractMatchOdds,
   normalizeImpliedProbabilities,
+  shinImpliedProbabilities,
+  marketDivergence,
   blendWithMarket,
 };
