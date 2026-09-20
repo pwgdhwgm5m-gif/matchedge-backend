@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 const loginEventSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  loginAt: { type: Date, default: Date.now, index: true },
+  loginAt: { type: Date, default: Date.now },
   city: { type: String, default: '' },
   district: { type: String, default: '' },
   region: { type: String, default: '' },
