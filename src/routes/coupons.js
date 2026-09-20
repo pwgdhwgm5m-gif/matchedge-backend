@@ -68,7 +68,9 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam){
 }
 
 async function settlePending(userId) {
-  const coupons=await Coupon.find({userId,status:'pending'}).sort({createdAt:-1}).limit(30);
+  // Resolve oldest pending slips first. A newest-first limit can permanently
+  // starve older coupons when a user has many pending slips.
+  const coupons=await Coupon.find({userId,status:'pending'}).sort({createdAt:1}).limit(100);
   for(const coupon of coupons){
     // Migrate/settle legacy one-match coupons created before multi-leg slips.
     if(!coupon.legs?.length){
