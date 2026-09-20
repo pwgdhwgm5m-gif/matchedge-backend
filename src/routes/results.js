@@ -6,6 +6,7 @@ const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const cupFixtures = require('../services/cupFixtureService');
 const oddsApi = require('../services/oddsApiService');
+const sportmonks = require('../services/sportmonksService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -24,7 +25,7 @@ router.get('/', async (req, res) => {
   // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
   // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
   // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
-  const [result, liveResult, verifiedResult, supplemental] = await Promise.all([
+  const [result, liveResult, verifiedResult, supplemental, sportmonksResult] = await Promise.all([
     cache.getOrFetch(
       `results:${date}`,
       config.cache.ttlLive,
@@ -34,6 +35,7 @@ router.get('/', async (req, res) => {
     cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
     cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
     cache.getOrFetch(`odds-events:${date}`, config.cache.ttlStatic, () => oddsApi.getFixtureEventsByDate(date)),
+    cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
   ]);
 
   const rawEvents = result && result.ok ? (result.data?.events || []) : [];
@@ -65,6 +67,13 @@ router.get('/', async (req, res) => {
   // Unmatched leagues stay untouched and continue through TheSportsDB.
   if (verifiedResult.ok) {
     simplified = footballDataOrg.mergeVerifiedScores(simplified, verifiedResult.matches);
+  }
+
+  // For every league included in our SportMonks subscription, prefer its
+  // verified current/full-time and first-half scores. Unsubscribed leagues
+  // remain on the existing providers; no hard-coded league allow-list is needed.
+  if (sportmonksResult?.ok) {
+    simplified = sportmonks.enrichMatches(simplified, sportmonksResult.fixtures);
   }
 
   // Sonuclar ekraninda "Ilk Yari - Mac Sonu" skorunu gosterebilmek icin,
