@@ -19,6 +19,8 @@ const chatRoute = require('./routes/chat');
 const communityRoute = require('./routes/community');
 const matchRoomRoute = require('./routes/matchRoom');
 const messagesRoute = require('./routes/messages');
+const pushRoute = require('./routes/push');
+const { startPushGoalMonitor } = require('./services/pushGoalService');
 const { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron } = require('./cron/precomputeJob');
 
 const app = express();
@@ -52,6 +54,7 @@ app.use('/api/chat', chatRoute);
 app.use('/api/community', communityRoute);
 app.use('/api/match-room', matchRoomRoute);
 app.use('/api/messages', messagesRoute);
+app.use('/api/push', pushRoute);
 app.use('/api/matches', matchesRoute);
 app.use('/api/analysis', analysisRoute);
 app.use('/api/live', liveRoute);
@@ -91,6 +94,7 @@ app.listen(config.port, async () => {
   startPrecomputeCron();
   startOddsSnapshotCron();
   startKeepAlive();
+  startPushGoalMonitor();
   // CoinEdge coupons are settled in the background even if the user never opens Kuponum.
   const settleCoupons = async () => {
     try {
