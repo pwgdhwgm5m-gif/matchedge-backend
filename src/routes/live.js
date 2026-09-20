@@ -19,8 +19,13 @@ const sportmonks = require('../services/sportmonksService');
  * canli gorunebiliyordu). V2 basarisiz olursa eski yontem yedek olarak devrede.
  */
 router.get('/', async (req, res) => {
-  const liveResult = await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () =>
-    sportsDb.getLiveScores()
+  const quickBound = (promise, fallback, ms = 2500) => Promise.race([
+    promise,
+    new Promise(resolve => setTimeout(() => resolve(fallback), ms))
+  ]);
+  const liveResult = await quickBound(
+    cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
+    { ok:false, error:'live_lookup_timeout' }
   );
 
   if (liveResult.ok) {
@@ -134,8 +139,9 @@ router.get('/:fixtureId', async (req, res) => {
 
   if (!match) {
     const today = new Date().toISOString().split('T')[0];
-    const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
-      sportsDb.getMatchesByDate(today)
+    const result = await quickBound(
+      cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () => sportsDb.getMatchesByDate(today)),
+      { ok:false, error:'date_lookup_timeout' }
     );
 
     if (result.ok) {
@@ -185,7 +191,7 @@ router.get('/:fixtureId', async (req, res) => {
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
     shotsOnTarget: smStats.shotsOnTargetHome ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? null) : null),
-    shotsOffTarget: smStats.shotsOffTargetHome ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : 0),
+    shotsOffTarget: smStats.shotsOffTargetHome ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : null),
     corners: smStats.cornersHome ?? (stats.corners ? (stats.corners.home ?? null) : null),
     dangerousAttacks: smStats.dangerousAttacksHome ?? null,
     attacks: smStats.attacksHome ?? null,
@@ -195,7 +201,7 @@ router.get('/:fixtureId', async (req, res) => {
   };
   const awayRawStats = {
     shotsOnTarget: smStats.shotsOnTargetAway ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? null) : null),
-    shotsOffTarget: smStats.shotsOffTargetAway ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : 0),
+    shotsOffTarget: smStats.shotsOffTargetAway ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : null),
     corners: smStats.cornersAway ?? (stats.corners ? (stats.corners.away ?? null) : null),
     dangerousAttacks: smStats.dangerousAttacksAway ?? null,
     attacks: smStats.attacksAway ?? null,
