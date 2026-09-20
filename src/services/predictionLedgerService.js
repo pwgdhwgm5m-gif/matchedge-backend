@@ -33,6 +33,13 @@ async function capture(a, fixture) {
         away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),
         btts: percent(a.rawMarketProbabilities?.bttsPercent),
       } : values,
+      // Paired prospective baseline captured at the exact same time/fixture as V3.
+      // This avoids comparing different fixture populations across model versions.
+      comparisonProbabilities: a.rawModelProbabilities ? {
+        home: percent(a.rawModelProbabilities.homeWinProbability), draw: percent(a.rawModelProbabilities.drawProbability),
+        away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),
+        btts: percent(a.rawMarketProbabilities?.bttsPercent),
+      } : null,
     } }, { upsert: true });
   return Boolean(result.upsertedCount);
 }
@@ -133,6 +140,16 @@ async function walkForwardAudit(){
  return {version:VERSION,totalSnapshots:predictions.length,versions,biasFlags:bias.sort((a,b)=>Math.abs(b.gapPercent)-Math.abs(a.gapPercent))};
 }
 
+
+async function pairedAudit(){
+ const rows=await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities comparisonProbabilities actual kickoff').lean();
+ const current=metricRows(rows);
+ const baseline=metricRows(rows.map(p=>({...p,probabilities:p.comparisonProbabilities})));
+ const key=r=>r.league+'::'+r.market,base=new Map(baseline.map(r=>[key(r),r]));
+ const comparisons=current.map(r=>{const b=base.get(key(r));if(!b)return null;return {league:r.league,market:r.market,count:r.count,baselineBrier:b.brier,currentBrier:r.brier,brierDelta:+(r.brier-b.brier).toFixed(4),baselineLogLoss:b.logLoss,currentLogLoss:r.logLoss,logLossDelta:+(r.logLoss-b.logLoss).toFixed(4),baselineEce:b.ece,currentEce:r.ece,eceDelta:+(r.ece-b.ece).toFixed(4)};}).filter(Boolean);
+ return {version:VERSION,design:'paired-prospective-same-fixtures',snapshots:rows.length,comparisons};
+}
+
 async function performance() {
   const predictions = await Prediction.find({ status: 'settled' })
     .select('league probabilities actual kickoff').lean();
@@ -161,4 +178,4 @@ async function performance() {
   }));
   return { version:VERSION, snapshots:predictions.length, scoring:['brier','logLoss','calibrationGap'], rows };
 }
-module.exports = { capture, settlePending, performance, sportmonksBacktest, walkForwardAudit, VERSION };
+module.exports = { capture, settlePending, performance, sportmonksBacktest, walkForwardAudit, pairedAudit, VERSION };
