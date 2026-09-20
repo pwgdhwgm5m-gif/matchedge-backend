@@ -1,4 +1,5 @@
-const footballApi = require('./footballApiService');
+// Legacy API-Football supplement disabled: subscription is suspended.
+// The primary TheSportsDB/Sportmonks/football-data.org paths remain active.
 
 // TheSportsDB gunluk akista Ziraat Turkiye Kupasi duzenli bulunmuyor.
 // API-Football baglantisi varsa sadece bu eksik kupayi ikinci kaynaktan
@@ -41,11 +42,9 @@ function transformFixture(item) {
 }
 
 async function getSupplementalMatches(date) {
-  const result = await footballApi.getFixturesByDate(date);
-  if (!result || !result.ok) return [];
-  return ((result.data && result.data.response) || [])
-    .filter(item => item.league && SUPPLEMENTAL_LEAGUES.has(String(item.league.id)))
-    .map(transformFixture);
+  // Never call the suspended API-Football provider. Returning an empty
+  // supplement keeps results/fixtures fast and lets primary providers work.
+  return [];
 }
 
 function mergeUnique(primary, supplemental) {
