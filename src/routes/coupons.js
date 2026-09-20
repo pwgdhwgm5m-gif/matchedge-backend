@@ -145,6 +145,11 @@ async function settlePending(userId) {
   }
   return coupons.length;
 }
+async function cleanupFinishedCoupons(){
+  const result=await Coupon.deleteMany({status:{$in:['won','lost','void']}});
+  return Number(result.deletedCount||0);
+}
+
 async function settleAllPendingCoupons() {
   const userIds = await Coupon.distinct('userId', { $or:[{status:'pending'},{'legs.selection.result':'pending'}] });
   let usersChecked = 0;
@@ -165,8 +170,6 @@ router.get('/', async (req, res) => {
     // Settlement still runs automatically, but in the background with a
     // per-user in-flight guard so repeated polling cannot fan out API calls.
     settlePendingBackground(req.user.userId);
-    const retentionCutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    Coupon.deleteMany({ userId: req.user.userId, status: { $ne: 'pending' }, settledAt: { $ne: null, $lt: retentionCutoff } }).catch(()=>{});
     const coupons = await Coupon.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(100).lean();
     res.json({ coupons, settlementRunning: settlementInFlight.has(String(req.user.userId)) });
   } catch (error) {
@@ -277,4 +280,5 @@ router.delete('/:id', async (req, res) => {
 });
 
 router.settleAllPendingCoupons = settleAllPendingCoupons;
+router.cleanupFinishedCoupons = cleanupFinishedCoupons;
 module.exports = router;
