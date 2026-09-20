@@ -137,7 +137,12 @@ app.listen(config.port, async () => {
     try {
       const ledger=require('./services/predictionLedgerService');
       const settled=await ledger.settlePending();
-      if(settled) console.log('[prediction-ledger/auto-settle]',settled,'fixtures settled and power ratings updated');
+      if(settled) {
+        console.log('[prediction-ledger/auto-settle]',settled,'fixtures settled and power ratings updated');
+        const calibration=require('./services/modelCalibrationService');
+        const trained=await calibration.retrain();
+        console.log('[model-calibration/after-settlement]',JSON.stringify(trained));
+      }
     } catch(error){ console.warn('[prediction-ledger/auto-settle]',error.message); }
   };
   setTimeout(settlePredictions, 45000);
