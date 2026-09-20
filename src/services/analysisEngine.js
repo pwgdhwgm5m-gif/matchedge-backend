@@ -376,6 +376,28 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     { label: '2.5 Ust Gol', probability: marketProbabilities.over25GoalsPercent },
     { label: 'KG Var', probability: marketProbabilities.bttsPercent },
   ]);
+  // Market-specific SportMonks evidence. Keep the probability model intact,
+  // but rank each market using the evidence that is actually relevant to it.
+  // This prevents e.g. possession from boosting corners or raw shots from
+  // overpowering BTTS/goal chance quality.
+  const smMarketEvidence = (() => {
+    if (!sportmonksHistorical) return null;
+    const H=sportmonksHistorical.home?.averages||{}, A=sportmonksHistorical.away?.averages||{};
+    const ratio=(x,base)=>Number.isFinite(x)?Math.max(.65,Math.min(1.35,x/base)):null;
+    const weighted=parts=>{const ok=parts.filter(p=>p[0]!=null);const w=ok.reduce((s,p)=>s+p[1],0);return w?ok.reduce((s,p)=>s+p[0]*p[1],0)/w:null;};
+    const attack=x=>weighted([[ratio(x.shotsOnTarget,4.5),.38],[ratio(x.bigChances,2.2),.30],[ratio(x.shotsInsideBox,7),.22],[ratio(x.shots,13),.10]]);
+    const concede=x=>weighted([[ratio(x.shotsOnTargetAgainst,4.5),.38],[ratio(x.bigChancesAgainst,2.2),.30],[ratio(x.shotsInsideBoxAgainst,7),.22],[ratio(x.shotsAgainst,13),.10]]);
+    const pressure=x=>weighted([[ratio(x.corners,5),.45],[ratio(x.blockedShots,3.5),.20],[ratio(x.dangerousAttacks,45),.20],[ratio(x.shotsInsideBox,7),.15]]);
+    const hAtk=attack(H),aAtk=attack(A),hCon=concede(H),aCon=concede(A);
+    const homeThreat=weighted([[hAtk,.65],[aCon,.35]]);
+    const awayThreat=weighted([[aAtk,.65],[hCon,.35]]);
+    const goalQuality=weighted([[homeThreat,.5],[awayThreat,.5]]);
+    const bttsQuality=(homeThreat!=null&&awayThreat!=null)?Math.sqrt(homeThreat*awayThreat):null;
+    const cornerQuality=weighted([[pressure(H),.5],[pressure(A),.5]]);
+    const sample=Math.min(sportmonksHistorical.home?.sample||0,sportmonksHistorical.away?.sample||0);
+    return { homeThreat, awayThreat, goalQuality, bttsQuality, cornerQuality, sample, venueSplit:true };
+  })();
+
   const marketBoard = premiumIntelligence.buildMarketBoard({
     modelProbabilities: matchProbabilities,
     goalMarkets: marketProbabilities,
@@ -384,6 +406,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     dataHealth: premium.dataHealth,
     premium,
     halfMarkets,
+    sportmonksMarketEvidence: smMarketEvidence,
   });
 
   return {
@@ -428,6 +451,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOdds: matchOdds,
     marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
+    sportmonksMarketEvidence: smMarketEvidence,
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable'),
   };
 }
