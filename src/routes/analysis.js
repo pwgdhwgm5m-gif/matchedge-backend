@@ -4,6 +4,7 @@ const cache = require('../utils/cache');
 const { computeFullAnalysis } = require('../services/analysisEngine');
 const sportsDb = require('../services/sportsDbService');
 const ledger = require('../services/predictionLedgerService');
+const sportmonks = require('../services/sportmonksService');
 
 /**
  * GET /api/analysis/:fixtureId
@@ -49,7 +50,14 @@ router.get('/:fixtureId', async (req, res) => {
       fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey,
     });
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 15000));
-    const result = await Promise.race([analysisPromise, timeoutPromise]);
+    let result = await Promise.race([analysisPromise, timeoutPromise]);
+    // Add verified Sportmonks fixture intelligence when we can map the match.
+    const smLive = await cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores());
+    const sm = smLive.ok ? sportmonks.findMatch(smLive.fixtures, homeTeamName, awayTeamName) : null;
+    if (sm?.sportmonksId) {
+      const intel = await cache.getOrFetch(`sportmonks:intel:${sm.sportmonksId}`, 300, () => sportmonks.getFixtureIntelligence(sm.sportmonksId));
+      if (intel.ok) result = { ...result, sportmonks: { fixtureId: sm.sportmonksId, homeStarters: intel.homeStarters, awayStarters: intel.awayStarters, homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics }, enhancedDataSource: 'sportmonks' };
+    }
     if (kickoff && homeTeamName && awayTeamName) {
       ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName })
         .catch(err => console.error('[prediction-capture]', err));
