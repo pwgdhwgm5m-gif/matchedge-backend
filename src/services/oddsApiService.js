@@ -212,6 +212,7 @@ function normalizeImpliedProbabilities(decimalOdds) {
     draw: +((impliedDraw / overround) * 100).toFixed(1),
     away: +((impliedAway / overround) * 100).toFixed(1),
     overroundPercent: +((overround - 1) * 100).toFixed(1),
+    method: 'normalized-overround',
   };
 }
 
