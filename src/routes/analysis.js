@@ -159,6 +159,14 @@ router.get('/:fixtureId', async (req, res) => {
         }
       }
     }
+    if (result?.modelDiagnostics) {
+      const p=result.modelDiagnostics.probabilities?.calibrated||{};
+      const extreme=Math.max(Number(p.homeWinProbability||0),Number(p.awayWinProbability||0))>=80;
+      if(extreme) console.log('[model-diagnostic]', JSON.stringify({
+        fixtureId:String(fixtureId), homeTeam:homeTeamName, awayTeam:awayTeamName,
+        diagnostics:result.modelDiagnostics
+      }));
+    }
     if (kickoff && homeTeamName && awayTeamName) {
       ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName })
         .catch(err => console.error('[prediction-capture]', err));
