@@ -87,8 +87,6 @@ function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg, co
   const ar = Math.max(0, Number(context.redCardsAway || 0));
   if (hr) homeScore *= Math.max(0.55, 1 - 0.18 * hr);
   if (ar) awayScore *= Math.max(0.55, 1 - 0.18 * ar);
-  const total = homeScore + awayScore;
-
   const minute = Number(context.minute);
   const hs = Number(context.homeScore), as = Number(context.awayScore);
   if (Number.isFinite(minute) && minute > 0) {
