@@ -251,10 +251,16 @@ function shinImpliedProbabilities(decimalOdds){
  const q=[1/Number(decimalOdds.home),1/Number(decimalOdds.draw),1/Number(decimalOdds.away)];
  if(q.some(x=>!Number.isFinite(x)||x<=0))return null;
  const sum=q.reduce((a,b)=>a+b,0); if(sum<=1)return normalizeImpliedProbabilities(decimalOdds);
- let lo=0,hi=.25;
+ let lo=0,hi=.99;
  const probs=z=>q.map(x=>(Math.sqrt(z*z+4*(1-z)*(x*x/sum))-z)/(2*(1-z)));
- for(let i=0;i<60;i++){const z=(lo+hi)/2,s=probs(z).reduce((a,b)=>a+b,0);if(s>1)lo=z;else hi=z;}
- const z=(lo+hi)/2,p=probs(z),s=p.reduce((a,b)=>a+b,0)||1;
+ const total=z=>probs(z).reduce((a,b)=>a+b,0);
+ const fLo=total(lo)-1,fHi=total(hi)-1;
+ // A valid Shin solution must bracket 1. If unusual/malformed odds do not,
+ // fail safely to proportional de-vig instead of returning a forced root.
+ if(!Number.isFinite(fLo)||!Number.isFinite(fHi)||fLo*fHi>0)return normalizeImpliedProbabilities(decimalOdds);
+ for(let i=0;i<80;i++){const z=(lo+hi)/2,s=total(z);if(!Number.isFinite(s))return normalizeImpliedProbabilities(decimalOdds);if(s>1)lo=z;else hi=z;}
+ const z=(lo+hi)/2,p=probs(z),s=p.reduce((a,b)=>a+b,0);
+ if(!Number.isFinite(s)||Math.abs(s-1)>.001)return normalizeImpliedProbabilities(decimalOdds);
  return {home:+(100*p[0]/s).toFixed(1),draw:+(100*p[1]/s).toFixed(1),away:+(100*p[2]/s).toFixed(1),overroundPercent:+((sum-1)*100).toFixed(1),shinZ:+z.toFixed(4),method:'shin'};
 }
 function marketDivergence(model,market){
