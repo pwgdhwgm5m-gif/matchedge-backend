@@ -18,6 +18,7 @@ const predictionSchema = new mongoose.Schema({
   sportmonksEvidence: { type: mongoose.Schema.Types.Mixed, default: null },
   marketBoardSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   strongestPick: { type: mongoose.Schema.Types.Mixed, default: null },
+  v4Validation: { type: [mongoose.Schema.Types.Mixed], default: [] },
   status: { type: String, enum: ['pending','settled'], default: 'pending', index: true },
   actual: { type: mongoose.Schema.Types.Mixed, default: null },
   settledAt: Date,
