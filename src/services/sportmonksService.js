@@ -55,7 +55,7 @@ function statisticValue(f, labels, participant) {
   const rows = Array.isArray(f.statistics) ? f.statistics : [];
   const wanted = labels.map(x => x.toLowerCase());
   const row = rows.find(s => {
-    const name = String(s.type?.name || s.type?.code || s.name || '').toLowerCase();
+    const name = String(s.type?.developer_name || s.type?.name || s.type?.code || s.name || '').toLowerCase().replace(/_/g,' ');
     const loc = String(s.location || s.meta?.location || '').toLowerCase();
     return wanted.some(w => name === w || name.includes(w)) && (!loc || loc === participant);
   });
@@ -87,6 +87,28 @@ function transformFixture(f) {
       cornersAway: statisticValue(f,['corners','corner kicks'],'away'),
       possessionHome: statisticValue(f,['ball possession','possession'],'home'),
       possessionAway: statisticValue(f,['ball possession','possession'],'away'),
+      shotsOffTargetHome: statisticValue(f,['shots off target','shots-off-target'],'home'),
+      shotsOffTargetAway: statisticValue(f,['shots off target','shots-off-target'],'away'),
+      attacksHome: statisticValue(f,['attacks'],'home'),
+      attacksAway: statisticValue(f,['attacks'],'away'),
+      dangerousAttacksHome: statisticValue(f,['dangerous attacks','dangerous-attacks'],'home'),
+      dangerousAttacksAway: statisticValue(f,['dangerous attacks','dangerous-attacks'],'away'),
+      blockedShotsHome: statisticValue(f,['shots blocked','blocked shots'],'home'),
+      blockedShotsAway: statisticValue(f,['shots blocked','blocked shots'],'away'),
+      shotsInsideBoxHome: statisticValue(f,['shots insidebox','shots inside box'],'home'),
+      shotsInsideBoxAway: statisticValue(f,['shots insidebox','shots inside box'],'away'),
+      shotsOutsideBoxHome: statisticValue(f,['shots outsidebox','shots outside box'],'home'),
+      shotsOutsideBoxAway: statisticValue(f,['shots outsidebox','shots outside box'],'away'),
+      bigChancesHome: statisticValue(f,['big chances created','big chances'],'home'),
+      bigChancesAway: statisticValue(f,['big chances created','big chances'],'away'),
+      bigChancesMissedHome: statisticValue(f,['big chances missed'],'home'),
+      bigChancesMissedAway: statisticValue(f,['big chances missed'],'away'),
+      savesHome: statisticValue(f,['saves'],'home'),
+      savesAway: statisticValue(f,['saves'],'away'),
+      foulsHome: statisticValue(f,['fouls'],'home'),
+      foulsAway: statisticValue(f,['fouls'],'away'),
+      offsidesHome: statisticValue(f,['offsides'],'home'),
+      offsidesAway: statisticValue(f,['offsides'],'away'),
     },
     raw: f,
   };
