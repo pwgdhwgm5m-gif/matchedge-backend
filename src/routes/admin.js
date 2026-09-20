@@ -60,8 +60,8 @@ router.get('/premium-lab', async (req, res) => {
       public: false,
       features: {
         aiCouponBuilder: { status: 'staged', source: 'strongest-pick + market-board + risk/diversification' },
-        matchSimulation: { status: 'staged', source: 'poisson/dixon-coles model' },
-        valueFinder: { status: 'core-ready', source: 'model vs market implied probability' },
+        matchSimulation: { status: 'staged', source: '50K Poisson Monte Carlo cross-check' },
+        valueFinder: { status: 'provider-dependent', source: 'The Odds API live h2h + de-vig + model EV; returns no value claim when prices are unavailable' },
         similarMatches: { status: 'staged', source: 'historical feature matching' },
         patternFinder: { status: 'staged', source: 'comparable-match outcomes' },
         verifiedPerformance: { status: 'live-ledger', strongestPick: performance.strongestPick || null }
@@ -75,6 +75,7 @@ router.get('/premium-lab', async (req, res) => {
 
 router.post('/premium-lab/coupon-builder', async (req,res)=>{try{res.json(await premiumLab.buildCoupon(req.body||{}))}catch(error){console.error('[premium-lab/coupon]',error);res.status(500).json({error:'Premium kupon oluşturulamadı.'})}});
 router.get('/premium-lab/simulate/:fixtureId', async (req,res)=>{try{res.json(await premiumLab.simulateFixture(req.params.fixtureId))}catch(error){res.status(error.status||500).json({error:error.message||'Simülasyon oluşturulamadı.'})}});
+router.get('/premium-lab/value-finder', async (req,res)=>{try{res.json(await premiumLab.valueFinder(req.query||{}))}catch(error){res.status(500).json({error:error.message||'Canlı oran analizi oluşturulamadı.'})}});
 router.get('/premium-lab/patterns', async (req,res)=>{try{res.json(await premiumLab.patternFinder(req.query||{}))}catch(error){res.status(500).json({error:error.message||'Pattern analizi oluşturulamadı.'})}});
 router.get('/premium-lab/similar/:fixtureId', async (req,res)=>{try{res.json(await premiumLab.similarMatches(req.params.fixtureId,{limit:req.query.limit}))}catch(error){res.status(error.status||500).json({error:error.message||'Benzer maçlar oluşturulamadı.'})}});
 router.get('/premium-lab/fixtures', async (req,res)=>{try{const rows=await premiumLab.available(80);res.json({matches:rows.map(x=>({fixtureId:x.fixtureId,kickoff:x.kickoff,league:x.league,homeTeam:x.homeTeam,awayTeam:x.awayTeam,strongestPick:x.strongestPick}))})}catch(error){res.status(500).json({error:'Premium maç listesi alınamadı.'})}});
