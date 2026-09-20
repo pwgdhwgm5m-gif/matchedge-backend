@@ -240,4 +240,18 @@ function aggregateTeamHistory(fixtures, teamId) {
   return { ...overall, home, away, weighting:'recency-0.90', window:14 };
 }
 
-module.exports = { request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+
+async function getLeagueFixturesBetween(leagueId,start,end){
+ if(!leagueId)return {ok:false,error:'league_id_missing',fixtures:[]};
+ const result=await request('/fixtures/between/'+start+'/'+end,{include:'participants;scores;statistics.type',filters:'fixtureLeagues:'+leagueId});
+ if(!result.ok)return result;
+ return {ok:true,fixtures:(result.data?.data||[]).map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId))};
+}
+async function getLeagueTeamsFromRecentFixtures(leagueId,days=365){
+ const end=new Date(),start=new Date(end.getTime()-Math.max(30,days)*86400000),iso=d=>d.toISOString().slice(0,10);
+ const r=await getLeagueFixturesBetween(leagueId,iso(start),iso(end));if(!r.ok)return r;
+ const teams=new Map();for(const x of r.fixtures||[]){if(x.homeTeamId)teams.set(String(x.homeTeamId),{id:x.homeTeamId,name:x.homeTeam});if(x.awayTeamId)teams.set(String(x.awayTeamId),{id:x.awayTeamId,name:x.awayTeam});}
+ return {ok:true,teams:[...teams.values()],fixtures:r.fixtures};
+}
+
+module.exports = { getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
