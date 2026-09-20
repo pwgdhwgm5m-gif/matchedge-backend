@@ -23,11 +23,26 @@ router.get('/users', async (req, res) => {
       .limit(200)
       .lean();
 
+    const latestLoginByUser = new Map();
+    for (const event of recentLogins) {
+      const id = event.userId?._id ? String(event.userId._id) : String(event.userId || '');
+      if (id && !latestLoginByUser.has(id)) latestLoginByUser.set(id, event);
+    }
+    const usersWithLocation = users.map(user => {
+      const event = latestLoginByUser.get(String(user._id));
+      return {
+        ...user,
+        lastApproxLocation: event ? {
+          country: event.country || '', city: event.city || '', district: event.district || '',
+          timezone: event.timezone || '', loginAt: event.loginAt || null
+        } : null
+      };
+    });
     res.json({
       total: users.length,
       verified: users.filter(user => user.emailVerified).length,
       admins: users.filter(user => user.role === 'admin').length,
-      users,
+      users: usersWithLocation,
       recentLogins,
     });
   } catch (error) {
