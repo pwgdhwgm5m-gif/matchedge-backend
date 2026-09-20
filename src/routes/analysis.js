@@ -81,11 +81,15 @@ router.get('/:fixtureId', async (req, res) => {
           enhancedDataSource: 'sportmonks'
         };
         if (result.marketBoard) {
+          // Keep the strongest-selection pool focused on the four core betting markets.
+          // Sportmonks fixture stats improve data quality here; they do not rewrite
+          // pre-match probabilities with in-play/single-fixture numbers.
           const health = Math.min(100, Number(result.premium?.dataHealth?.score || 0) + smQualityBonus);
           if (result.premium?.dataHealth) result.premium.dataHealth.score = health;
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
-          result.marketBoard.topPredictions = result.marketBoard.allMarkets.slice(0,3);
-          result.marketBoard.best = health >= 45 ? (result.marketBoard.allMarkets[0] || null) : null;
+          const coreMarkets = (result.marketBoard.allMarkets || []).filter(x => ['1X2','GOL','KG','KORNER'].includes(x.market));
+          result.marketBoard.topPredictions = coreMarkets.slice(0,3);
+          result.marketBoard.best = health >= 55 && result.premium?.status !== 'NO_BET' ? (coreMarkets[0] || null) : null;
         }
       }
     }
