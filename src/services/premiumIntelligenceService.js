@@ -18,9 +18,9 @@ function clamp(value, min, max) {
 
 function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel }) {
   let health = Number(dataHealth?.score || 0);
-  if (sportmonksIntel?.verified) health = Math.min(100, health + 8);
-  const lineupComplete = (sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11;
-  if (lineupComplete) health = Math.min(100, health + 5);
+  const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
+  const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
+  health = Math.min(100, health + (verifiedStats >= 2 ? 3 : 0) + (verifiedStats >= 6 ? 3 : 0) + (verifiedStats >= 10 ? 2 : 0) + (lineupComplete ? 5 : 0));
   const candidates = [
     { key: 'home', market: '1X2', label: 'Ev Sahibi', probability: Number(modelProbabilities?.homeWinProbability || 0) },
     { key: 'draw', market: '1X2', label: 'Beraberlik', probability: Number(modelProbabilities?.drawProbability || 0) },
@@ -147,12 +147,10 @@ function buildPremiumIntelligence({
   if (!hasStandings) blockers.push('NO_STANDINGS');
   if (dataHealth.score < 55) blockers.push('LOW_DATA_HEALTH');
 
-  // Always surface the model's strongest actionable lean when a prediction is
-  // available. VALUE remains reserved for a price-backed edge; NO_BET is used
-  // only when the model itself cannot produce a valid selection.
+  // Do not force a betting pick from weak or undersampled data.
   let status = 'NO_BET';
-  if (hasModel) status = 'PICK';
-  if (hasOdds && minSample >= 3 && dataHealth.score >= 55 && bestEdge?.edgePoints >= 3) status = 'VALUE';
+  if (hasModel && minSample >= 5 && dataHealth.score >= 55) status = 'PICK';
+  if (hasOdds && minSample >= 5 && dataHealth.score >= 55 && bestEdge?.edgePoints >= 3) status = 'VALUE';
 
   const drivers = [];
   if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_XG_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
