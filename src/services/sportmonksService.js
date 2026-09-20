@@ -85,4 +85,27 @@ async function getLivescores() {
   return { ok: true, fixtures: (result.data?.data || []).map(transformFixture) };
 }
 
-module.exports = { request, getInplay, getLivescores, transformFixture };
+
+function normalizeName(s='') {
+  return String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'').replace(/[^a-z0-9]/g,'');
+}
+
+function findMatch(fixtures, home, away) {
+  const h=normalizeName(home), a=normalizeName(away);
+  return (fixtures || []).find(f => {
+    const fh=normalizeName(f.homeTeam), fa=normalizeName(f.awayTeam);
+    return (fh===h || fh.includes(h) || h.includes(fh)) &&
+           (fa===a || fa.includes(a) || a.includes(fa));
+  }) || null;
+}
+
+async function getVerifiedLiveData(home, away) {
+  const r = await getInplay();
+  if (!r.ok) return { available:false, error:r.error, status:r.status || null };
+  const match=findMatch(r.fixtures,home,away);
+  if (!match) return { available:false };
+  return { available:true, match };
+}
+
+module.exports = { request, getInplay, getLivescores, transformFixture, findMatch, getVerifiedLiveData };
