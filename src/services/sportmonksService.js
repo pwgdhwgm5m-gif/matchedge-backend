@@ -36,12 +36,19 @@ function scoreValue(scores, participant) {
 
 function halftimeValue(scores, participant) {
   const rows = Array.isArray(scores) ? scores : [];
+  // SportMonks score descriptions are not guaranteed to use the legacy
+  // "1ST_HALF" spelling. Accept the documented/common first-half variants
+  // while still requiring the requested participant side.
   const row = rows.find(s => {
-    const d = String(s.description || '').toUpperCase();
-    const p = String(s.score?.participant || s.participant || '').toLowerCase();
-    return ['1ST_HALF','1ST HALF','HALFTIME','HT'].includes(d) && p === participant;
+    const d = String(s.description || s.type?.developer_name || s.type?.name || '')
+      .toUpperCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
+    const p = String(s.score?.participant || s.participant || s.location || '').toLowerCase();
+    const firstHalf = d === '1ST HALF' || d === '1ST HALF SCORE' ||
+      d === 'FIRST HALF' || d === 'HALFTIME' || d === 'HALF TIME' || d === 'HT' ||
+      d.includes('1ST HALF') || d.includes('FIRST HALF');
+    return firstHalf && p === participant;
   });
-  return row?.score?.goals ?? row?.goals ?? null;
+  return row?.score?.goals ?? row?.goals ?? row?.value ?? null;
 }
 
 function participantName(fixture, location) {
