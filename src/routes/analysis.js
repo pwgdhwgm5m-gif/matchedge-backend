@@ -160,10 +160,12 @@ router.get('/:fixtureId', async (req, res) => {
       }
     }
     if (result?.modelDiagnostics) {
-      const p=result.modelDiagnostics.probabilities?.calibrated||{};
-      const extreme=Math.max(Number(p.homeWinProbability||0),Number(p.awayWinProbability||0))>=80;
-      if(extreme) console.log('[model-diagnostic]', JSON.stringify({
+      const p=result.modelDiagnostics.probabilities?.marketBlended||result.modelDiagnostics.probabilities?.confidenceAdjusted||{};
+      const extreme=Math.max(Number(p.homeWinProbability||0),Number(p.awayWinProbability||0))>=75;
+      const weakAgreement=Number(result.modelDiagnostics.modelAgreement?.score||100)<70;
+      if(extreme||weakAgreement) console.log('[model-diagnostic]', JSON.stringify({
         fixtureId:String(fixtureId), homeTeam:homeTeamName, awayTeam:awayTeamName,
+        reason:extreme?'extreme-final-probability':'model-disagreement',
         diagnostics:result.modelDiagnostics
       }));
     }
