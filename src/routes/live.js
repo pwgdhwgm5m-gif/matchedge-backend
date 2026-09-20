@@ -31,6 +31,12 @@ router.get('/', async (req, res) => {
     // event timeline. If the provider cannot verify it, keep null rather than
     // inventing 0-0.
     simplified = await sportsDb.attachHalftimeScores(simplified);
+    await Promise.all(simplified.map(async m => {
+      if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
+        const ht = await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
+        if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource='bsd'; }
+      }
+    }));
     return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
   }
 
@@ -49,6 +55,12 @@ router.get('/', async (req, res) => {
     .map(sportsDb.transformEvent)
     .filter(m => m.isLive && sportsDb.isWhitelistedLeague(m.leagueId));
   simplified = await sportsDb.attachHalftimeScores(simplified);
+  await Promise.all(simplified.map(async m => {
+    if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
+      const ht = await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
+      if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource='bsd'; }
+    }
+  }));
 
   res.json({ matches: simplified, fromCache: result.fromCache, source: 'eventsday-fallback' });
 });
