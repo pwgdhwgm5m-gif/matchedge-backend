@@ -153,8 +153,12 @@ async function pairedAudit(){
 }
 
 async function performance() {
-  const predictions = await Prediction.find({ status: 'settled' })
-    .select('league probabilities actual kickoff').lean();
+  const [totalSnapshots, settledSnapshots, pendingSnapshots, predictions] = await Promise.all([
+    Prediction.countDocuments({}),
+    Prediction.countDocuments({ status: 'settled' }),
+    Prediction.countDocuments({ status: 'pending' }),
+    Prediction.find({ status: 'settled' }).select('league probabilities actual kickoff').lean()
+  ]);
   const groups = new Map();
   for (const p of predictions) for (const [market, probability] of Object.entries(p.probabilities || {})) {
     const actual = p.actual?.[market];
@@ -178,6 +182,32 @@ async function performance() {
     actualPercent:+(100*g.actualSum/g.count).toFixed(1),
     calibrationGapPercent:+Math.abs(100*(g.predictedSum-g.actualSum)/g.count).toFixed(1)
   }));
-  return { version:VERSION, snapshots:predictions.length, scoring:['brier','logLoss','calibrationGap'], rows };
+  const allRow = market => rows.find(r => r.league === 'all' && r.market === market) || null;
+  const marketAccuracy = {
+    home: allRow('home')?.accuracy ?? null,
+    draw: allRow('draw')?.accuracy ?? null,
+    away: allRow('away')?.accuracy ?? null,
+    over25: allRow('over25')?.accuracy ?? null,
+    btts: allRow('btts')?.accuracy ?? null
+  };
+  const totalDecisions = rows.filter(r => r.league === 'all').reduce((n,r)=>n+r.count,0);
+  const weightedAccuracy = totalDecisions
+    ? +(rows.filter(r=>r.league==='all').reduce((n,r)=>n+r.accuracy*r.count,0)/totalDecisions).toFixed(1)
+    : null;
+  return {
+    version:VERSION,
+    summary:{
+      totalSnapshots,
+      settledSnapshots,
+      pendingSnapshots,
+      settlementRatePercent: totalSnapshots ? +(100*settledSnapshots/totalSnapshots).toFixed(1) : 0,
+      evaluatedMarketDecisions: totalDecisions,
+      weightedAccuracyPercent: weightedAccuracy,
+      marketAccuracyPercent: marketAccuracy
+    },
+    snapshots:predictions.length,
+    scoring:['accuracy','brier','logLoss','calibrationGap'],
+    rows
+  };
 }
 module.exports = { capture, settlePending, performance, sportmonksBacktest, walkForwardAudit, pairedAudit, VERSION };
