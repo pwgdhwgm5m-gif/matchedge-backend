@@ -51,13 +51,20 @@ function participantName(fixture, location) {
   return p?.name || null;
 }
 
+function participantId(f, location) {
+  return (f.participants || []).find(p => String(p.meta?.location || p.location || '').toLowerCase() === location)?.id ?? null;
+}
+
 function statisticValue(f, labels, participant) {
   const rows = Array.isArray(f.statistics) ? f.statistics : [];
   const wanted = labels.map(x => x.toLowerCase());
   const row = rows.find(s => {
     const name = String(s.type?.developer_name || s.type?.name || s.type?.code || s.name || '').toLowerCase().replace(/_/g,' ');
     const loc = String(s.location || s.meta?.location || '').toLowerCase();
-    return wanted.some(w => name === w || name.includes(w)) && (!loc || loc === participant);
+    const pid = s.participant_id ?? s.participant?.id ?? null;
+    const expectedId = participantId(f, participant);
+    const sideMatches = pid != null && expectedId != null ? String(pid) === String(expectedId) : (!loc || loc === participant);
+    return wanted.some(w => name === w || name.includes(w)) && sideMatches;
   });
   const v = row?.data?.value ?? row?.value ?? null;
   const n = Number(String(v ?? '').replace('%',''));
