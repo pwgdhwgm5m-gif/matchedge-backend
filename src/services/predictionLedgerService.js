@@ -147,7 +147,9 @@ async function pairedAudit(){
  const baseline=metricRows(rows.map(p=>({...p,probabilities:p.comparisonProbabilities})));
  const key=r=>r.league+'::'+r.market,base=new Map(baseline.map(r=>[key(r),r]));
  const comparisons=current.map(r=>{const b=base.get(key(r));if(!b)return null;return {league:r.league,market:r.market,count:r.count,baselineBrier:b.brier,currentBrier:r.brier,brierDelta:+(r.brier-b.brier).toFixed(4),baselineLogLoss:b.logLoss,currentLogLoss:r.logLoss,logLossDelta:+(r.logLoss-b.logLoss).toFixed(4),baselineEce:b.ece,currentEce:r.ece,eceDelta:+(r.ece-b.ece).toFixed(4)};}).filter(Boolean);
- return {version:VERSION,design:'paired-prospective-same-fixtures',snapshots:rows.length,comparisons};
+ const readiness = rows.length < 30 ? 'collecting' : rows.length < 100 ? 'early-signal' : 'decision-ready';
+ const guardedComparisons=comparisons.map(x=>({...x,decisionEligible:x.count>=100,earlySignal:x.count>=30}));
+ return {version:VERSION,design:'paired-prospective-same-fixtures',baseline:'raw-pre-calibration-pipeline',snapshots:rows.length,readiness,minimums:{earlySignal:30,decisionEligible:100},comparisons:guardedComparisons};
 }
 
 async function performance() {
