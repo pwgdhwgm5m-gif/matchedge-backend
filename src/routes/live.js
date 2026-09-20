@@ -181,15 +181,23 @@ router.get('/:fixtureId', async (req, res) => {
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
     shotsOnTarget: smStats.shotsOnTargetHome ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0),
-    shotsOffTarget: (smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : 0,
+    shotsOffTarget: smStats.shotsOffTargetHome ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : 0),
     corners: smStats.cornersHome ?? (stats.corners ? (stats.corners.home ?? 0) : 0),
-    dangerousAttacks: 0,
+    dangerousAttacks: smStats.dangerousAttacksHome ?? 0,
+    attacks: smStats.attacksHome ?? null,
+    blockedShots: smStats.blockedShotsHome ?? null,
+    shotsInsideBox: smStats.shotsInsideBoxHome ?? null,
+    bigChances: smStats.bigChancesHome ?? null,
   };
   const awayRawStats = {
     shotsOnTarget: smStats.shotsOnTargetAway ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0),
-    shotsOffTarget: (smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : 0,
+    shotsOffTarget: smStats.shotsOffTargetAway ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : 0),
     corners: smStats.cornersAway ?? (stats.corners ? (stats.corners.away ?? 0) : 0),
-    dangerousAttacks: 0,
+    dangerousAttacks: smStats.dangerousAttacksAway ?? 0,
+    attacks: smStats.attacksAway ?? null,
+    blockedShots: smStats.blockedShotsAway ?? null,
+    shotsInsideBox: smStats.shotsInsideBoxAway ?? null,
+    bigChances: smStats.bigChancesAway ?? null,
   };
 
   // Gercek xG oncelik sirasi: 1) TheSportsDB (Pro/Premium bazi buyuk
@@ -249,8 +257,16 @@ router.get('/:fixtureId', async (req, res) => {
       cornersHome: homeRawStats.corners,
       cornersAway: awayRawStats.corners,
       // TheSportsDB "tehlikeli atak" istatistigi vermiyor, gercek karsiligi yok.
-      dangerousAttacksHome: 0,
-      dangerousAttacksAway: 0,
+      dangerousAttacksHome: smStats.dangerousAttacksHome ?? null,
+      dangerousAttacksAway: smStats.dangerousAttacksAway ?? null,
+      attacksHome: smStats.attacksHome ?? null,
+      attacksAway: smStats.attacksAway ?? null,
+      blockedShotsHome: smStats.blockedShotsHome ?? null,
+      blockedShotsAway: smStats.blockedShotsAway ?? null,
+      shotsInsideBoxHome: smStats.shotsInsideBoxHome ?? null,
+      shotsInsideBoxAway: smStats.shotsInsideBoxAway ?? null,
+      bigChancesHome: smStats.bigChancesHome ?? null,
+      bigChancesAway: smStats.bigChancesAway ?? null,
       foulsHome: stats.fouls ? stats.fouls.home : null,
       foulsAway: stats.fouls ? stats.fouls.away : null,
       offsidesHome: stats.offsides ? stats.offsides.home : null,
