@@ -131,5 +131,23 @@ async function valueFinder({limit=30}={}){
  return{provider:'The Odds API',providerAvailable:results.length>0||errors.length===0,pricedMatches:results.length,matches:results,errors:errors.length?errors:undefined,note:results.length?'Live bookmaker prices were fetched; EV is model probability versus current decimal price.':'No verified current bookmaker prices were returned; no value claim is produced.'};
 }
 
+
+async function validationSnapshot(){
+ const profiles=['low','medium','high'],legCounts=[2,3,4,5],runs=[];
+ for(const risk of profiles)for(const legs of legCounts){const c=await buildCoupon({risk,legs});runs.push({risk,legs,engine:c.engine,generatedAt:new Date(),complete:c.complete,confidence:c.couponConfidence,combined:c.riskAdjustedCombinedHitPercent,picks:c.picks.map(p=>({fixtureId:p.fixtureId,kickoff:p.kickoff,league:p.league,match:p.match,key:p.key,label:p.label,probability:p.probability,quality:p.dataQualityScore,simulation:p.simulationProbability,gap:p.modelSimulationGap,similar:p.similarMatches,pattern:p.pattern,market:p.market,strength:p.strength}))})}
+ return runs;
+}
+async function validationReport(){
+ const rows=await Prediction.find({status:'settled','v4Validation':{$ne:null}}).select('fixtureId actual v4Validation').sort({settledAt:-1}).limit(1500).lean();
+ const stats={};
+ for(const row of rows)for(const v of (row.v4Validation||[])){const k=v.risk+'-'+v.legs,g=stats[k]||(stats[k]={risk:v.risk,legs:v.legs,selections:0,wins:0});const hit=pickActualHit(v.key,row.actual);if(hit===null)continue;g.selections++;if(hit)g.wins++}
+ return{groups:Object.values(stats).map(g=>({...g,hitRatePercent:g.selections?+(100*g.wins/g.selections).toFixed(1):null,readiness:g.selections<30?'collecting':g.selections<100?'early-signal':'decision-ready'}))};
+}
+async function captureValidation(){
+ const runs=await validationSnapshot();let tagged=0;
+ for(const r of runs)for(const p of r.picks){const marker={engine:r.engine,risk:r.risk,legs:r.legs,capturedAt:r.generatedAt,key:p.key,label:p.label,probability:p.probability,quality:p.quality,simulation:p.simulation,gap:p.gap,similar:p.similar,pattern:p.pattern,market:p.market,strength:p.strength};const x=await Prediction.updateOne({fixtureId:String(p.fixtureId),status:'pending','v4Validation':{$not:{$elemMatch:{risk:r.risk,legs:r.legs,key:p.key}}}},{$push:{v4Validation:marker}});tagged+=Number(x.modifiedCount||0)}
+ return{runs:runs.length,tagged};
+}
+
 async function simulateFixture(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();if(!row){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0)){const e=new Error('expected_goals_unavailable');e.status=422;throw e}return{fixtureId:row.fixtureId,match:row.homeTeam+' - '+row.awayTeam,kickoff:row.kickoff,league:row.league,simulation:simulationFromLambdas(row.homeLambda,row.awayLambda),modelSnapshot:row.probabilities}}
-module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder,valueFinder};
+module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder,valueFinder,validationSnapshot,validationReport,captureValidation};
