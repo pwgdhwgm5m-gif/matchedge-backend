@@ -184,20 +184,20 @@ router.get('/:fixtureId', async (req, res) => {
   // henuz yoksa (mac yeni basladiysa) tum degerler 0 olur ve asagidaki
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
-    shotsOnTarget: smStats.shotsOnTargetHome ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0),
+    shotsOnTarget: smStats.shotsOnTargetHome ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? null) : null),
     shotsOffTarget: smStats.shotsOffTargetHome ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : 0),
-    corners: smStats.cornersHome ?? (stats.corners ? (stats.corners.home ?? 0) : 0),
-    dangerousAttacks: smStats.dangerousAttacksHome ?? 0,
+    corners: smStats.cornersHome ?? (stats.corners ? (stats.corners.home ?? null) : null),
+    dangerousAttacks: smStats.dangerousAttacksHome ?? null,
     attacks: smStats.attacksHome ?? null,
     blockedShots: smStats.blockedShotsHome ?? null,
     shotsInsideBox: smStats.shotsInsideBoxHome ?? null,
     bigChances: smStats.bigChancesHome ?? null,
   };
   const awayRawStats = {
-    shotsOnTarget: smStats.shotsOnTargetAway ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0),
+    shotsOnTarget: smStats.shotsOnTargetAway ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? null) : null),
     shotsOffTarget: smStats.shotsOffTargetAway ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : 0),
-    corners: smStats.cornersAway ?? (stats.corners ? (stats.corners.away ?? 0) : 0),
-    dangerousAttacks: smStats.dangerousAttacksAway ?? 0,
+    corners: smStats.cornersAway ?? (stats.corners ? (stats.corners.away ?? null) : null),
+    dangerousAttacks: smStats.dangerousAttacksAway ?? null,
     attacks: smStats.attacksAway ?? null,
     blockedShots: smStats.blockedShotsAway ?? null,
     shotsInsideBox: smStats.shotsInsideBoxAway ?? null,
@@ -238,7 +238,17 @@ router.get('/:fixtureId', async (req, res) => {
   // Gol yakinligi: hangi takim gole daha yakin (isabetli sut + korner + canli xG,
   // xG en agirlikli faktor) - kullanicinin canli ekranda gordugu "kim daha yakin" barı.
   const momentum = liveXg.calculateMomentum(homeRawStats, awayRawStats);
-  const goalProximity = liveXg.calculateGoalProximity(homeRawStats, awayRawStats, homeLiveXg, awayLiveXg);
+  const possessionObserved = (smStats.possessionHome != null && smStats.possessionAway != null)
+    ? { home: smStats.possessionHome, away: smStats.possessionAway }
+    : (stats.possession && stats.possession.home != null && stats.possession.away != null ? { home: stats.possession.home, away: stats.possession.away } : null);
+  const redHome = smStats.redCardsHome ?? (stats.redCards ? stats.redCards.home : null);
+  const redAway = smStats.redCardsAway ?? (stats.redCards ? stats.redCards.away : null);
+  const goalProximity = liveXg.calculateGoalProximity(homeRawStats, awayRawStats, homeLiveXg, awayLiveXg, {
+    possessionHome: possessionObserved?.home,
+    possessionAway: possessionObserved?.away,
+    redCardsHome: redHome,
+    redCardsAway: redAway
+  });
 
   res.json({
     fixtureId,
@@ -253,7 +263,7 @@ router.get('/:fixtureId', async (req, res) => {
     xgSource,
     momentum,
     goalProximity,
-    possession: (smStats.possessionHome != null && smStats.possessionAway != null) ? { home: smStats.possessionHome, away: smStats.possessionAway } : (stats.possession && stats.possession.home != null && stats.possession.away != null ? { home: stats.possession.home, away: stats.possession.away } : null),
+    possession: possessionObserved,
     liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
     stats: {
       shotsOnTargetHome: homeRawStats.shotsOnTarget,
@@ -277,8 +287,8 @@ router.get('/:fixtureId', async (req, res) => {
       offsidesAway: stats.offsides ? stats.offsides.away : null,
       yellowCardsHome: stats.yellowCards ? stats.yellowCards.home : null,
       yellowCardsAway: stats.yellowCards ? stats.yellowCards.away : null,
-      redCardsHome: stats.redCards ? stats.redCards.home : null,
-      redCardsAway: stats.redCards ? stats.redCards.away : null,
+      redCardsHome: redHome,
+      redCardsAway: redAway,
     },
     statsAvailable: Boolean(smMatch || statsResult.available),
     timeline: timelineResult.available ? timelineResult.events : [],
