@@ -317,8 +317,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
   } catch (_) {}
 
-  const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
-  const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
+  // League/time-aware Dixon-Coles layer. Recent completed matches carry more weight;
+  // sparse samples stay close to conservative defaults.
+  const leagueDc=poisson.estimateLeagueParameters(eloPool,{halfLifeDays:240});
+  const dcReliability=Math.min(1,leagueDc.sample/40);
+  const fittedRho=poisson.DEFAULT_RHO*(1-dcReliability)+leagueDc.rho*dcReliability;
+  const dynamicHome=Math.pow(leagueDc.homeAdvantage/LEAGUE_ADVANTAGE_RATIO,Math.min(.35,dcReliability*.35));
+  homeLambda=+(homeLambda*Math.max(.94,Math.min(1.06,dynamicHome))).toFixed(2);
+  const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda,10,fittedRho);
+  const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda,10,fittedRho);
   const calibrated = await modelCalibration.apply({league: leagueName || String(league || ''), match: rawMatchProbabilities, goals: rawMarketProbabilities});
   // Confidence-aware shrinkage: extreme probabilities must be earned by
   // sufficient, mutually supporting evidence. With sparse/partial data, pull
@@ -541,6 +548,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       sportmonks: smMarketEvidence,
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v2',
+      dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
       powerRating:{ homeElo, awayElo, homeGames:homeEloGames, awayGames:awayEloGames, persistent:Boolean(persistedHomePower||persistedAwayPower), adjustment:eloAdjustment },
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
