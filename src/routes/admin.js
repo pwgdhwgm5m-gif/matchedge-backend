@@ -41,6 +41,11 @@ router.get('/model-performance', async (req, res) => {
   catch (error) { console.error('[model-performance]', error); res.status(500).json({ error: 'Model karnesi alınamadı.' }); }
 });
 
+router.get('/sportmonks-backtest', async (req, res) => {
+  try { res.json(await ledger.sportmonksBacktest()); }
+  catch (error) { console.error('[sportmonks-backtest]', error); res.status(500).json({ error: 'SportMonks backtest alınamadı.' }); }
+});
+
 router.get('/model-calibration', async (req, res) => {
   try {
     const rows = await ModelCalibration.find({}).sort({active:-1,trainedAt:-1}).limit(60).lean();
