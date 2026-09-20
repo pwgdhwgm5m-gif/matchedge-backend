@@ -104,7 +104,20 @@ async function settlePending(userId) {
       if(smMatch && [5,8,9].includes(Number(smMatch.stateId))){
         match={...(match||{}),fixtureId:leg.fixtureId,statusShort:'FT',homeScore:smMatch.homeScore,awayScore:smMatch.awayScore,halftimeHome:smMatch.halftimeHome,halftimeAway:smMatch.halftimeAway};
       }
-      if(!match||match.statusShort!=='FT'||match.homeScore==null||match.awayScore==null)continue;
+      // Cross-provider IDs often differ. If the date feed found the same teams,
+      // settle by team identity instead of requiring the stored fixture ID.
+      if(!match){
+        const byTeams=(matches||[]).find(m=>sportmonks.findMatch([{
+          homeTeam:m.homeTeam,awayTeam:m.awayTeam
+        }],leg.homeTeam,leg.awayTeam));
+        if(byTeams) match=byTeams;
+      }
+      const finalStatus=String(match?.statusShort||match?.status||'').toUpperCase();
+      const isFinal=match?.isFinished===true || ['FT','AET','PEN','AWARDED'].includes(finalStatus);
+      if(!match||!isFinal||match.homeScore==null||match.awayScore==null){
+        console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam,rawStatus:match?.statusShort||match?.status||null,smOk:!!sm.ok,smFound:!!smMatch}));
+        continue;
+      }
       let corners=null;
       if(leg.selection.key.startsWith('corners')){
         const stats=await sportsDb.getEventStatsFormatted(leg.fixtureId);
