@@ -143,9 +143,9 @@ router.get('/:fixtureId', async (req, res) => {
             if (lineupStatus === 'PARTIAL' && !result.premium.blockers?.includes('LINEUPS_PARTIAL')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_PARTIAL'];
             if (lineupStatus === 'UNAVAILABLE' && !result.premium.blockers?.includes('LINEUPS_UNAVAILABLE')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_UNAVAILABLE'];
             result.premium.lineupEvidence = lineupEvidence;
-            // A lineup can raise confidence only when BOTH confirmed XIs are present.
-            // Partial/unavailable lineups never change probabilities or create a pick.
-            if (!lineupComplete && result.premium.status !== 'NO_BET') {
+            // Missing/partial lineups remain visible as warnings only.
+            // They never suppress the model selection; the user makes the final decision.
+            if (!lineupComplete) {
               result.premium.blockers = [...new Set([...(result.premium.blockers || []), lineupStatus === 'PARTIAL' ? 'LINEUPS_PARTIAL' : 'LINEUPS_UNAVAILABLE'])];
             }
           }
@@ -153,7 +153,9 @@ router.get('/:fixtureId', async (req, res) => {
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
           const coreMarkets = (result.marketBoard.allMarkets || []).filter(x => ['1X2','GOL','KG','KORNER'].includes(x.market));
           result.marketBoard.topPredictions = coreMarkets.slice(0,3);
-          result.marketBoard.best = health >= 55 && fullSample && result.premium?.status !== 'NO_BET' ? (coreMarkets[0] || null) : null;
+          // Always expose the strongest available model market. Health/sample remain
+          // warnings and confidence context instead of a NO BET gate.
+          result.marketBoard.best = coreMarkets[0] || null;
         }
       }
     }
