@@ -122,6 +122,23 @@ async function getInplay() {
   return { ok: true, fixtures: (result.data?.data || []).map(transformFixture) };
 }
 
+async function getFixtureIntelligence(fixtureId) {
+  if (!fixtureId) return { ok:false, error:'fixture_id_missing' };
+  const result = await request('/fixtures/' + fixtureId, {
+    include: 'participants;lineups.player;events;statistics.type;sidelined.sideline.player',
+  });
+  if (!result.ok) return result;
+  const f = result.data?.data || {};
+  const participants = f.participants || [];
+  const side = id => String(participants.find(p => String(p.id) === String(id))?.meta?.location || '').toLowerCase();
+  const lineups = Array.isArray(f.lineups) ? f.lineups : [];
+  const starters = loc => lineups.filter(x => side(x.team_id || x.participant_id) === loc && (x.type_id === 11 || x.formation_position || x.starter === true))
+    .map(x => ({ id:x.player_id || x.player?.id, name:x.player?.display_name || x.player?.name || null, position:x.position_id || null }));
+  const events = Array.isArray(f.events) ? f.events : [];
+  const reds = loc => events.filter(e => side(e.participant_id || e.team_id) === loc && /red/i.test(String(e.type?.name || e.type?.developer_name || e.type || ''))).length;
+  return { ok:true, fixtureId:f.id, homeStarters:starters('home'), awayStarters:starters('away'), homeRedCards:reds('home'), awayRedCards:reds('away'), rawStatistics: transformFixture(f).stats };
+}
+
 async function getLivescores() {
   const result = await request('/livescores', {
     include: 'participants;scores;statistics.type;periods;events',
@@ -153,4 +170,4 @@ async function getVerifiedLiveData(home, away) {
   return { available:true, match };
 }
 
-module.exports = { request, getInplay, getLivescores, transformFixture, findMatch, getVerifiedLiveData };
+module.exports = { request, getInplay, getLivescores, getFixtureIntelligence, transformFixture, findMatch, getVerifiedLiveData };
