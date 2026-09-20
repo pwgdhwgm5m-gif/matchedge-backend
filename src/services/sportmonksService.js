@@ -307,4 +307,19 @@ async function getLeagueTeamsFromRecentFixtures(leagueId,days=365){
  return {ok:true,teams:[...teams.values()],fixtures:r.fixtures};
 }
 
-module.exports = { getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+function toResultMatches(fixtures) {
+  return (fixtures || []).map(f => ({
+    fixtureId: String(f.sportmonksId), id: String(f.sportmonksId), sportmonksId: f.sportmonksId,
+    leagueId: f.leagueId, league: f.leagueName || null,
+    homeTeam: f.homeTeam, awayTeam: f.awayTeam,
+    homeTeamId: f.homeTeamId, awayTeamId: f.awayTeamId,
+    homeScore: f.homeScore, awayScore: f.awayScore,
+    halftimeHome: f.halftimeHome, halftimeAway: f.halftimeAway,
+    kickoff: f.kickoff, statusShort: f.statusShort || null,
+    minute: f.minute ?? null, isLive: !!f.isLive,
+    scoreSource: 'sportmonks', halftimeSource: (f.halftimeHome != null && f.halftimeAway != null) ? 'sportmonks' : null,
+    dataSource: 'sportmonks'
+  }));
+}
+
+module.exports = { toResultMatches, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
