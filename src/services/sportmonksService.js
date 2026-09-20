@@ -79,6 +79,8 @@ function transformFixture(f) {
     seasonId: f.season_id,
     homeTeam: participantName(f, 'home'),
     awayTeam: participantName(f, 'away'),
+    homeTeamId: participantId(f, 'home'),
+    awayTeamId: participantId(f, 'away'),
     homeScore: scoreValue(scores, 'home'),
     awayScore: scoreValue(scores, 'away'),
     halftimeHome: halftimeValue(scores, 'home'),
