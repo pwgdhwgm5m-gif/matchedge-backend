@@ -204,13 +204,16 @@ function aggregateTeamHistory(fixtures, teamId) {
     const loc = String(homeId) === String(teamId) ? 'Home' : String(awayId) === String(teamId) ? 'Away' : null;
     if (!loc) continue;
     const pick = key => f.stats?.[key + loc] ?? null;
+    const oppLoc = loc === 'Home' ? 'Away' : 'Home';
+    const pickOpp = key => f.stats?.[key + oppLoc] ?? null;
     values.push({
       shotsOnTarget: pick('shotsOnTarget'), shots: pick('shots'), corners: pick('corners'),
+      cornersAgainst: pickOpp('corners'),
       shotsOffTarget: pick('shotsOffTarget'), attacks: pick('attacks'), dangerousAttacks: pick('dangerousAttacks'),
       blockedShots: pick('blockedShots'), shotsInsideBox: pick('shotsInsideBox'), bigChances: pick('bigChances')
     });
   }
-  const keys=['shotsOnTarget','shots','corners','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
+  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
   const averages={};
   for (const k of keys) {
     const nums=values.map(v=>v[k]).filter(Number.isFinite);
