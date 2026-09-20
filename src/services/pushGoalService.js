@@ -5,7 +5,29 @@ const Coupon = require('../models/Coupon');
 const sportsDb = require('./sportsDbService');
 
 const lastScores = new Map();
+// Prevent the same goal event from being pushed again after a process restart,
+// overlapping provider snapshots, or a temporary score rollback.
+const sentGoalKeys = new Map();
+const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
+
+function goalEventKey(fixtureId, home, away) {
+  return `${String(fixtureId)}:${Number(home)}-${Number(away)}`;
+}
+
+function wasGoalAlreadySent(key) {
+  const at = sentGoalKeys.get(key);
+  return Number.isFinite(at) && Date.now() - at < SENT_GOAL_TTL_MS;
+}
+
+function markGoalSent(key) {
+  const now = Date.now();
+  sentGoalKeys.set(key, now);
+  // Keep the in-memory dedupe cache bounded.
+  for (const [k, at] of sentGoalKeys) {
+    if (now - at >= SENT_GOAL_TTL_MS) sentGoalKeys.delete(k);
+  }
+}
 
 function configured() {
   return Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
@@ -61,8 +83,13 @@ async function checkGoals() {
       const old = lastScores.get(id);
       lastScores.set(id, { home, away, total });
       if (!old || total <= old.total) continue;
+      const eventKey = goalEventKey(id, home, away);
+      if (wasGoalAlreadySent(eventKey)) continue;
+      // Mark before sending so concurrent/overlapping checks cannot enqueue
+      // the same score notification twice.
+      markGoalSent(eventKey);
       await sendToUsers([...tracked.get(id)], {
-        type: 'goal', fixtureId: id, title: '⚽ GOAL!', homeTeam: m.homeTeam, awayTeam: m.awayTeam,
+        type: 'goal', eventId: eventKey, fixtureId: id, title: '⚽ GOAL!', homeTeam: m.homeTeam, awayTeam: m.awayTeam,
         homeScore: home, awayScore: away, url: '/canli-simulator.html?fixtureId=' + encodeURIComponent(id)
       });
     }
