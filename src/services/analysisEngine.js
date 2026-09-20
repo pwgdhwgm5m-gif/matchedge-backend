@@ -452,6 +452,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
+    modelDiagnostics: {
+      lambdas: { homeBase: homeLambdaBase, awayBase: awayLambdaBase, finalHome: homeLambda, finalAway: awayLambda },
+      form: { home: homeForm, away: awayForm },
+      standings: { homeRank: standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats))?.rank ?? null, awayRank: standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats))?.rank ?? null },
+      multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
+      sportmonks: smMarketEvidence,
+      calibrationApplied: calibrated.applied,
+      probabilities: { raw:rawMatchProbabilities, calibrated:matchProbabilities, marketBlended:blendedMatchProbabilities }
+    },
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable'),
   };
 }
