@@ -5,7 +5,7 @@ const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
 const liveXg = require('../services/liveXgService');
 const bsdService = require('../services/bsdService');
-const footballApiService = require('../services/footballApiService');
+const footballDataOrg = require('../services/footballDataOrgService');
 
 /**
  * GET /api/live
@@ -34,9 +34,18 @@ router.get('/', async (req, res) => {
     simplified = await sportsDb.attachHalftimeScores(simplified);
     await Promise.all(simplified.map(async m => {
       if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
-        let ht = await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
-        if (!ht.available) ht = await footballApiService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam);
-        if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource=ht.source; }
+        const date=(m.kickoff||new Date().toISOString()).slice(0,10);
+        const fd=await cache.getOrFetch('fdorg-ht:'+date, 60, () => footballDataOrg.getMatchesByDate(date));
+        if (fd.ok) {
+          const merged=footballDataOrg.mergeVerifiedScores([m],fd.matches);
+          if (merged[0].halftimeHome != null && merged[0].halftimeAway != null) {
+            m.halftimeHome=merged[0].halftimeHome; m.halftimeAway=merged[0].halftimeAway; m.halftimeSource='football-data.org';
+          }
+        }
+        if (m.halftimeHome == null || m.halftimeAway == null) {
+          const ht=await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
+          if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource=ht.source; }
+        }
       }
     }));
     return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
@@ -59,8 +68,18 @@ router.get('/', async (req, res) => {
   simplified = await sportsDb.attachHalftimeScores(simplified);
   await Promise.all(simplified.map(async m => {
     if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
-      const ht = await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
-      if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource='bsd'; }
+      const date=(m.kickoff||new Date().toISOString()).slice(0,10);
+      const fd=await cache.getOrFetch('fdorg-ht:'+date, 60, () => footballDataOrg.getMatchesByDate(date));
+      if (fd.ok) {
+        const merged=footballDataOrg.mergeVerifiedScores([m],fd.matches);
+        if (merged[0].halftimeHome != null && merged[0].halftimeAway != null) {
+          m.halftimeHome=merged[0].halftimeHome; m.halftimeAway=merged[0].halftimeAway; m.halftimeSource='football-data.org';
+        }
+      }
+      if (m.halftimeHome == null || m.halftimeAway == null) {
+        const ht=await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
+        if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource=ht.source; }
+      }
     }
   }));
 
