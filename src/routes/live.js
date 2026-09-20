@@ -5,6 +5,7 @@ const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
 const liveXg = require('../services/liveXgService');
 const bsdService = require('../services/bsdService');
+const footballApiService = require('../services/footballApiService');
 
 /**
  * GET /api/live
@@ -33,8 +34,9 @@ router.get('/', async (req, res) => {
     simplified = await sportsDb.attachHalftimeScores(simplified);
     await Promise.all(simplified.map(async m => {
       if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
-        const ht = await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
-        if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource='bsd'; }
+        let ht = await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
+        if (!ht.available) ht = await footballApiService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam);
+        if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource=ht.source; }
       }
     }));
     return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
