@@ -20,6 +20,11 @@ const bsdService = require('../services/bsdService');
  */
 router.get('/', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
+  const normTeam = value => String(value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i')
+    .replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'')
+    .replace(/spor$/g,'').replace(/[^a-z0-9]/g,'');
+  const sameMatch = (a,b) => normTeam(a.homeTeam)===normTeam(b.homeTeam) && normTeam(a.awayTeam)===normTeam(b.awayTeam);
 
   // SportsMonks-first: one subscribed daily feed is the canonical fixture,
   // score and half-time source. Legacy providers are used only when a
@@ -57,6 +62,18 @@ router.get('/', async (req, res) => {
     const verified = footballDataOrg.mergeVerifiedScores(fallback, verifiedResult.matches);
     let vi=0;
     simplified = simplified.map(m => smIds.has(String(m.sportmonksId || '')) ? m : verified[vi++]);
+  }
+
+  // The Turkish scoreboard must never become incomplete merely because
+  // SportMonks daily entitlement returned only part of league 600. The legacy
+  // fixture feed is already loaded above, so restore any missing Turkish
+  // fixtures by team identity while keeping SportMonks authoritative where it
+  // exists.
+  const turkishLegacy = legacyMatches.filter(m =>
+    String(m.leagueId || '') === '4339' || /turk|super lig|süper lig/i.test(String(m.league || m.leagueName || ''))
+  );
+  for (const m of turkishLegacy) {
+    if (!simplified.some(x => sameMatch(x,m))) simplified.push(m);
   }
 
   // HT fallback is deliberately restricted to non-SportMonks fixtures.
