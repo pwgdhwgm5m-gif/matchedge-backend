@@ -168,7 +168,10 @@ router.get('/:fixtureId', async (req, res) => {
     cache.getOrFetch(`tsdb-highlights:${fixtureId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(fixtureId)),
   ]);
 
-  const stats = statsResult.available ? statsResult.stats : {};\n  const smLiveDetail = await cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay());\n  const smMatch = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;\n  const smStats = smMatch?.stats || {};
+  const stats = statsResult.available ? statsResult.stats : {};
+  const smLiveDetail = await cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay());
+  const smMatch = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;
+  const smStats = smMatch?.stats || {};
 
   // Canli xG/momentum/gol yakinligi hesabi icin iki takimin ham istatistiklerini
   // ortak sekle getiriyoruz. TheSportsDB "tehlikeli atak" ve "isabetsiz sut"
