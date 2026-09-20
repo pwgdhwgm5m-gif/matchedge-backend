@@ -16,7 +16,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50 }) {
   let health = Number(dataHealth?.score || 0);
   const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
   const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
@@ -51,13 +51,22 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       else if(item.key==='bttsNo') evidence=ev.bttsQuality!=null?2-ev.bttsQuality:null;
       else if(item.market==='KORNER') evidence=item.key==='cornersOver95'?ev.cornerQuality:(ev.cornerQuality!=null?2-ev.cornerQuality:null);
       const evidenceBonus=evidence==null?0:clamp((evidence-1)*12,-4,4);
+      // Rank markets by their own evidence quality. A high headline probability
+      // should not outrank a better-supported market merely because it is more
+      // extreme. 1X2 may use 1X2 agreement; binary/corner markets do not inherit it.
+      const baseEvidence=clamp(Number(evidenceStrength)||0,.25,1);
+      const marketEvidence=evidence==null?baseEvidence:clamp(baseEvidence*(.75+.25*clamp(evidence,.65,1.35)),.25,1);
+      const agreementFactor=item.market==='1X2'?clamp(Number(modelAgreementScore)||0,0,100)/100:1;
+      const reliability=clamp(marketEvidence*(item.market==='1X2'?(.75+.25*agreementFactor):1),.25,1);
+      const confidenceEdge=Math.max(0,item.probability-50);
       return {
         ...item,
         probability: +item.probability.toFixed(1),
-        score: +(((item.probability - 50) * 0.72 + health * 0.28)+evidenceBonus).toFixed(1),
+        score: +(confidenceEdge*0.62*reliability + health*0.22 + evidenceBonus).toFixed(1),
         dataHealth: health,
         sportmonksEvidence: evidence==null?null:+evidence.toFixed(3),
         sportmonksEvidenceBonus:+evidenceBonus.toFixed(1),
+        evidenceReliability:+reliability.toFixed(3),
         isValue: premium?.status === 'VALUE' && premium?.selection === item.key,
         edgePoints: premium?.selection === item.key ? premium?.bestEdge?.edgePoints ?? null : null,
       };
