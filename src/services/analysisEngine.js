@@ -282,8 +282,34 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda);
   const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda);
   const calibrated = await modelCalibration.apply({league: leagueName || String(league || ''), match: rawMatchProbabilities, goals: rawMarketProbabilities});
-  const matchProbabilities = calibrated.match;
-  const marketProbabilities = calibrated.goals;
+  // Confidence-aware shrinkage: extreme probabilities must be earned by
+  // sufficient, mutually supporting evidence. With sparse/partial data, pull
+  // 1X2 probabilities toward the league-neutral 1/3 prior instead of allowing
+  // a tiny sample to create artificial 80-90% confidence.
+  const calibratedMatchProbabilities = calibrated.match;
+  const calibratedMarketProbabilities = calibrated.goals;
+  const smOverallSample = Math.min(sportmonksHistorical?.rawHome?.sample || 0, sportmonksHistorical?.rawAway?.sample || 0);
+  const smVenueSample = Math.min(sportmonksHistorical?.home?.sample || 0, sportmonksHistorical?.away?.sample || 0);
+  const playedSample = Math.min(Number(homePlayed || 0), Number(awayPlayed || 0));
+  const dataHealthScore = Number(premium?.dataHealth?.score || 0);
+  const sampleStrength = Math.min(1, Math.max(playedSample / 8, smOverallSample / 10));
+  const venueStrength = smVenueSample > 0 ? Math.min(1, smVenueSample / 6) : Math.min(1, playedSample / 8);
+  const healthStrength = Math.max(.25, Math.min(1, dataHealthScore / 80));
+  const evidenceStrength = Math.max(.35, Math.min(1, .45 * sampleStrength + .25 * venueStrength + .30 * healthStrength));
+  const shrink3 = probs => {
+    const h=Number(probs?.homeWinProbability), d=Number(probs?.drawProbability), a=Number(probs?.awayWinProbability);
+    if (![h,d,a].every(Number.isFinite)) return probs;
+    const vals=[h,d,a].map(p => 33.333 + evidenceStrength * (p - 33.333));
+    const sum=vals.reduce((s,x)=>s+x,0) || 100;
+    return { ...probs, homeWinProbability:+(vals[0]*100/sum).toFixed(1), drawProbability:+(vals[1]*100/sum).toFixed(1), awayWinProbability:+(vals[2]*100/sum).toFixed(1) };
+  };
+  const shrinkBinary = (obj,key) => {
+    const p=Number(obj?.[key]); if(!Number.isFinite(p)) return obj;
+    return { ...obj, [key]: +(50 + evidenceStrength*(p-50)).toFixed(1) };
+  };
+  const matchProbabilities = shrink3(calibratedMatchProbabilities);
+  let marketProbabilities = shrinkBinary(calibratedMarketProbabilities,'over25GoalsPercent');
+  marketProbabilities = shrinkBinary(marketProbabilities,'bttsPercent');
   const cornerProjection = accuracy.cornerProjection(homeAdvanced, awayAdvanced);
   const smHome = sportmonksHistorical?.home;
   const smAway = sportmonksHistorical?.away;
@@ -418,6 +444,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     rawModelProbabilities: rawMatchProbabilities,
     rawMarketProbabilities,
     calibrationApplied: calibrated.applied,
+      confidenceShrinkage: { evidenceStrength:+evidenceStrength.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample, dataHealthScore },
     marketImpliedProbabilities,
     marketProbabilities,
     cornerMetrics,
