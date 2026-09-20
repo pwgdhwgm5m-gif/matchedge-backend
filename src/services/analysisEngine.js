@@ -411,10 +411,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? await footballDataOdds.getMatchOdds(homeTeamName, awayTeamName)
     : null;
   const matchOdds = primaryMatchOdds || footballDataMatchOdds;
-  const marketImpliedProbabilities = oddsApi.normalizeImpliedProbabilities(matchOdds);
-  // V2 ensemble: model weight is earned by evidence quality. Sparse-data games
-  // lean more on de-vigged market consensus; mature-data games lean on SoccerEdge.
-  const v2ModelWeight = marketImpliedProbabilities ? Math.max(.45,Math.min(.78,.38 + .40*evidenceStrength)) : 1;
+  const proportionalMarket = oddsApi.normalizeImpliedProbabilities(matchOdds);
+  const shinMarket = oddsApi.shinImpliedProbabilities(matchOdds);
+  const marketImpliedProbabilities = shinMarket || proportionalMarket;
+  const divergence = oddsApi.marketDivergence(matchProbabilities,marketImpliedProbabilities);
+  // Large unexplained disagreement lowers model weight rather than being advertised as automatic value.
+  const divergencePenalty = divergence?.material ? Math.min(.12,Math.abs(divergence.largestGap)/100*.35) : 0;
+  const v2ModelWeight = marketImpliedProbabilities ? Math.max(.43,Math.min(.78,.38 + .40*evidenceStrength-divergencePenalty)) : 1;
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
 
   const homeFirstHalf = isSuperLig
@@ -553,7 +556,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
       analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
-      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:'normalized-overround' },
+      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:shinMarket?'shin':'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
       probabilityPipeline:['opponent-strength','robust-form','chance-quality-dedup','dixon-coles','calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
