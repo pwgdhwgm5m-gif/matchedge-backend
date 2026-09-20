@@ -64,7 +64,15 @@ async function settlePending() {
       const result = await Prediction.updateOne(
         { _id: p._id, status: 'pending' },
         { $set: { status: 'settled', actual, settledAt: new Date() } });
-      settled += result.modifiedCount;
+      if(result.modifiedCount){
+        settled += result.modifiedCount;
+        try{
+          const powerRating=require('./powerRatingService');
+          await powerRating.persistFromMatch({league:p.league||'',season:'',fixtureId:p.fixtureId,kickoff:p.kickoff,
+            home:{id:match.homeId||p.homeTeam,name:p.homeTeam},away:{id:match.awayId||p.awayTeam,name:p.awayTeam},
+            homeGoals:actual.homeScore,awayGoals:actual.awayScore});
+        }catch(e){console.warn('[power-rating/settle]',p.fixtureId,e.message);}
+      }
     }
   return settled;
 }
