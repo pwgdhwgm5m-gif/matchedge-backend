@@ -131,8 +131,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const eloPool=[...homeFixtures,...awayFixtures].filter((f,i,a)=>a.findIndex(x=>String(x.fixture?.id)===String(f.fixture?.id))===i);
   const elo=powerRating.buildElo(eloPool);
   const [persistedHomePower,persistedAwayPower]=await Promise.all([
-    powerRating.loadPersistent(leagueName||league,homeTeamIdForStats),
-    powerRating.loadPersistent(leagueName||league,awayTeamIdForStats)
+    powerRating.loadPersistentByIdentity(leagueName||league,homeTeamIdForStats,homeTeamName),
+    powerRating.loadPersistentByIdentity(leagueName||league,awayTeamIdForStats,awayTeamName)
   ]);
   const homeElo=persistedHomePower?.elo||elo.rating(homeTeamIdForStats), awayElo=persistedAwayPower?.elo||elo.rating(awayTeamIdForStats);
   const homeEloGames=persistedHomePower?.games||elo.games(homeTeamIdForStats), awayEloGames=persistedAwayPower?.games||elo.games(awayTeamIdForStats);
