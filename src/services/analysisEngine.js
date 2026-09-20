@@ -241,12 +241,21 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       const sa = ah.ok ? sportmonks.aggregateTeamHistory(ah.fixtures, smMatch.awayTeamId) : null;
       if ((sh?.sample || 0) >= 5 && (sa?.sample || 0) >= 5) {
         sportmonksHistorical = { home:sh, away:sa };
-        const chance = a => {
+        const chance = (a, against=false) => {
           const v=a?.averages||{}; let n=0,w=0;
-          [[v.shotsOnTarget,0.45,4.5],[v.shotsInsideBox,0.25,7],[v.bigChances,0.20,2.2],[v.shots,0.10,13]].forEach(([x,wt,base])=>{if(Number.isFinite(x)){n+=(x/base)*wt;w+=wt;}});
+          const suffix = against ? 'Against' : '';
+          [[v['shotsOnTarget'+suffix],0.45,4.5],[v['shotsInsideBox'+suffix],0.25,7],[v['bigChances'+suffix],0.20,2.2],[v['shots'+suffix],0.10,13]].forEach(([x,wt,base])=>{if(Number.isFinite(x)){n+=(x/base)*wt;w+=wt;}});
           return w ? n/w : null;
         };
-        const hc=chance(sh), ac=chance(sa);
+        const homeAttackQuality=chance(sh), awayAttackQuality=chance(sa);
+        const awayConcessionQuality=chance(sa,true), homeConcessionQuality=chance(sh,true);
+        const blendQuality = (attack, opponentConcession) => {
+          if (attack == null) return opponentConcession;
+          if (opponentConcession == null) return attack;
+          return attack * .65 + opponentConcession * .35;
+        };
+        const hc=blendQuality(homeAttackQuality,awayConcessionQuality);
+        const ac=blendQuality(awayAttackQuality,homeConcessionQuality);
         if (hc!=null) homeLambda=+(homeLambda*Math.max(.90,Math.min(1.10,0.8+0.2*hc))).toFixed(2);
         if (ac!=null) awayLambda=+(awayLambda*Math.max(.90,Math.min(1.10,0.8+0.2*ac))).toFixed(2);
       }
