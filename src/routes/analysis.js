@@ -128,11 +128,17 @@ router.get('/:fixtureId', async (req, res) => {
           // Sportmonks fixture stats improve data quality here; they do not rewrite
           // pre-match probabilities with in-play/single-fixture numbers.
           const health = Math.min(100, Number(result.premium?.dataHealth?.score || 0) + smQualityBonus);
-          if (result.premium?.dataHealth) result.premium.dataHealth.score = health;
+          const sample = result.premium?.dataHealth?.sample || {};
+          const fullSample = Number(sample.home || 0) >= 5 && Number(sample.away || 0) >= 5;
+          if (result.premium?.dataHealth) {
+            result.premium.dataHealth.score = health;
+            result.premium.dataHealth.level = health >= 80 ? 'high' : health >= 55 ? 'medium' : 'low';
+          }
+          result.dataQualityScore = health;
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
           const coreMarkets = (result.marketBoard.allMarkets || []).filter(x => ['1X2','GOL','KG','KORNER'].includes(x.market));
           result.marketBoard.topPredictions = coreMarkets.slice(0,3);
-          result.marketBoard.best = health >= 55 && result.premium?.status !== 'NO_BET' ? (coreMarkets[0] || null) : null;
+          result.marketBoard.best = health >= 55 && fullSample && result.premium?.status !== 'NO_BET' ? (coreMarkets[0] || null) : null;
         }
       }
     }
