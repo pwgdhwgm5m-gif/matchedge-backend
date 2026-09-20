@@ -130,8 +130,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // from already-fetched completed fixtures. This is fail-open and bounded.
   const eloPool=[...homeFixtures,...awayFixtures].filter((f,i,a)=>a.findIndex(x=>String(x.fixture?.id)===String(f.fixture?.id))===i);
   const elo=powerRating.buildElo(eloPool);
-  const homeElo=elo.rating(homeTeamIdForStats), awayElo=elo.rating(awayTeamIdForStats);
-  const eloAdjustment=powerRating.matchupMultiplier(homeElo,awayElo,elo.games(homeTeamIdForStats),elo.games(awayTeamIdForStats));
+  const [persistedHomePower,persistedAwayPower]=await Promise.all([
+    powerRating.loadPersistent(leagueName||league,homeTeamIdForStats),
+    powerRating.loadPersistent(leagueName||league,awayTeamIdForStats)
+  ]);
+  const homeElo=persistedHomePower?.elo||elo.rating(homeTeamIdForStats), awayElo=persistedAwayPower?.elo||elo.rating(awayTeamIdForStats);
+  const homeEloGames=persistedHomePower?.games||elo.games(homeTeamIdForStats), awayEloGames=persistedAwayPower?.games||elo.games(awayTeamIdForStats);
+  const eloAdjustment=powerRating.matchupMultiplier(homeElo,awayElo,homeEloGames,awayEloGames);
 
   const homeTeamFullSplit = stats.splitHomeAwayForm(homeFixtures, homeTeamIdForStats, 5);
   const awayTeamFullSplit = stats.splitHomeAwayForm(awayFixtures, awayTeamIdForStats, 5);
@@ -194,8 +199,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const awayAttackBase = awayForm.played > 0 ? awayForm.avgGoalsFor / LEAGUE_AVG_AWAY_GOALS : 1.0;
   const awayDefenseWeakBase = awayForm.played > 0 ? awayForm.avgGoalsAgainst / LEAGUE_AVG_HOME_GOALS : 1.0;
   const powerComponents = {
-    home: { attack:+homeAttackBase.toFixed(3), defense:+(1/Math.max(.45,homeDefenseWeakBase)).toFixed(3) },
-    away: { attack:+awayAttackBase.toFixed(3), defense:+(1/Math.max(.45,awayDefenseWeakBase)).toFixed(3) }
+    home: { attack:+((persistedHomePower?.attack||homeAttackBase)*.35+homeAttackBase*.65).toFixed(3), defense:+((persistedHomePower?.defense||(1/Math.max(.45,homeDefenseWeakBase)))*.35+(1/Math.max(.45,homeDefenseWeakBase))*.65).toFixed(3) },
+    away: { attack:+((persistedAwayPower?.attack||awayAttackBase)*.35+awayAttackBase*.65).toFixed(3), defense:+((persistedAwayPower?.defense||(1/Math.max(.45,awayDefenseWeakBase)))*.35+(1/Math.max(.45,awayDefenseWeakBase))*.65).toFixed(3) }
   };
 
   const homeAttack = homeAttackBase * homeInjuryImpact.attackMultiplier * homeFatigue * homeStreakMult * homeAdvantageMultiplier;
@@ -536,7 +541,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       sportmonks: smMarketEvidence,
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v2',
-      powerRating:{ homeElo, awayElo, homeGames:elo.games(homeTeamIdForStats), awayGames:elo.games(awayTeamIdForStats), adjustment:eloAdjustment },
+      powerRating:{ homeElo, awayElo, homeGames:homeEloGames, awayGames:awayEloGames, persistent:Boolean(persistedHomePower||persistedAwayPower), adjustment:eloAdjustment },
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
       analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
