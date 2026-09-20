@@ -73,10 +73,32 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     })
     .sort((a, b) => b.score - a.score || b.probability - a.probability);
 
+  // Top picks should be useful alternatives, not three correlated expressions
+  // of the same underlying signal. Keep one selection per market family first,
+  // then fill remaining slots only if necessary.
+  const diversified=[];
+  const usedMarkets=new Set();
+  for(const item of candidates){
+    if(diversified.length>=3)break;
+    if(usedMarkets.has(item.market))continue;
+    // Require both a meaningful probability edge and minimum evidence support.
+    // Weak-data extremes remain visible in allMarkets but cannot become a top pick.
+    if(item.probability < 54 || item.evidenceReliability < .40)continue;
+    diversified.push(item);usedMarkets.add(item.market);
+  }
+  if(diversified.length<3){
+    for(const item of candidates){
+      if(diversified.length>=3)break;
+      if(diversified.some(x=>x.key===item.key))continue;
+      if(item.probability < 56 || item.evidenceReliability < .50)continue;
+      diversified.push(item);
+    }
+  }
+
   return {
     allMarkets: candidates,
-    topPredictions: candidates.slice(0, 3),
-    best: (health >= 45 ? candidates[0] : null),
+    topPredictions: diversified,
+    best: (health >= 45 ? diversified[0] || null : null),
     valuePicks: candidates.filter(item => item.isValue),
   };
 }
