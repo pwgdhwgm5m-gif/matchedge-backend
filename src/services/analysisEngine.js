@@ -203,10 +203,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     away: { attack:+((persistedAwayPower?.attack||awayAttackBase)*.35+awayAttackBase*.65).toFixed(3), defense:+((persistedAwayPower?.defense||(1/Math.max(.45,awayDefenseWeakBase)))*.35+(1/Math.max(.45,awayDefenseWeakBase))*.65).toFixed(3) }
   };
 
-  const homeAttack = homeAttackBase * homeInjuryImpact.attackMultiplier * homeFatigue * homeStreakMult * homeAdvantageMultiplier;
-  const homeDefenseWeak = homeDefenseWeakBase * homeInjuryImpact.defenseWeaknessMultiplier;
-  const awayAttack = awayAttackBase * awayInjuryImpact.attackMultiplier * awayFatigue * awayStreakMult;
-  const awayDefenseWeak = awayDefenseWeakBase * awayInjuryImpact.defenseWeaknessMultiplier;
+  const homeAttack = powerComponents.home.attack * homeInjuryImpact.attackMultiplier * homeFatigue * homeStreakMult * homeAdvantageMultiplier;
+  const homeDefenseWeak = 1/Math.max(.45,powerComponents.home.defense) * homeInjuryImpact.defenseWeaknessMultiplier;
+  const awayAttack = powerComponents.away.attack * awayInjuryImpact.attackMultiplier * awayFatigue * awayStreakMult;
+  const awayDefenseWeak = 1/Math.max(.45,powerComponents.away.defense) * awayInjuryImpact.defenseWeaknessMultiplier;
 
   const analysisTsdbLeagueId = isSuperLig ? '4339' : (isMappedLeague ? effectiveTsdbLeagueId : null);
   const leagueBase = analysisTsdbLeagueId ? await accuracy.leagueBaselines(analysisTsdbLeagueId, currentSeason) : null;
