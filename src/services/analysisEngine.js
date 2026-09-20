@@ -336,11 +336,23 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const smOverallSample = Math.min(sportmonksHistorical?.rawHome?.sample || 0, sportmonksHistorical?.rawAway?.sample || 0);
   const smVenueSample = Math.min(sportmonksHistorical?.home?.sample || 0, sportmonksHistorical?.away?.sample || 0);
   const playedSample = Math.min(Number(homeForm?.played || 0), Number(awayForm?.played || 0));
-  const sourceCoverage = [homeForm?.played>0,awayForm?.played>0,standingsTable.length>0,smOverallSample>0,homeAdvanced?.sample>0,awayAdvanced?.sample>0].filter(Boolean).length/6;
+  // Evidence coverage is counted by independent signal families, not by
+  // provider endpoints. Home/away form and advanced stats can describe the
+  // same completed matches, so counting each endpoint separately inflated
+  // confidence when one underlying sample was duplicated across providers.
+  const evidenceFamilies = {
+    form: playedSample > 0,
+    table: standingsTable.length > 0,
+    chanceQuality: smOverallSample > 0 || (homeAdvanced?.sample > 0 && awayAdvanced?.sample > 0),
+    persistentPower: Boolean(persistedHomePower && persistedAwayPower)
+  };
+  const sourceCoverage = Object.values(evidenceFamilies).filter(Boolean).length / Object.keys(evidenceFamilies).length;
   const dataHealthScore = Math.round(sourceCoverage*100);
   const sampleStrength = Math.min(1, Math.max(playedSample / 8, smOverallSample / 10));
   const venueStrength = smVenueSample > 0 ? Math.min(1, smVenueSample / 6) : Math.min(1, playedSample / 8);
   const healthStrength = Math.max(.25, Math.min(1, dataHealthScore / 80));
+  // Missing samples stay missing: they lower confidence rather than being
+  // silently treated as zero-valued performance.
   const evidenceStrength = Math.max(.35, Math.min(1, .45 * sampleStrength + .25 * venueStrength + .30 * healthStrength));
   const norm3=v=>{const s=v.reduce((a,b)=>a+b,0)||1;return v.map(x=>100*x/s);};
   const dcVector=[Number(calibratedMatchProbabilities.homeWinProbability),Number(calibratedMatchProbabilities.drawProbability),Number(calibratedMatchProbabilities.awayWinProbability)];
@@ -558,7 +570,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       powerRating:{ homeElo, awayElo, homeGames:homeEloGames, awayGames:awayEloGames, persistent:Boolean(persistedHomePower||persistedAwayPower), homePersistent:Boolean(persistedHomePower), awayPersistent:Boolean(persistedAwayPower), homeStoredTeamId:persistedHomePower?.teamId||null, awayStoredTeamId:persistedAwayPower?.teamId||null, homeIdentityMatch:persistedHomePower ? (persistedHomePower._identityMatch || (String(persistedHomePower.teamId)===String(homeTeamIdForStats)?'id':'stored')) : null, awayIdentityMatch:persistedAwayPower ? (persistedAwayPower._identityMatch || (String(persistedAwayPower.teamId)===String(awayTeamIdForStats)?'id':'stored')) : null, adjustment:eloAdjustment },
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
-      analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
+      analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), evidenceFamilies, playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
       ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:shinMarket?'shin':'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
       probabilityPipeline:['opponent-strength','robust-form','chance-quality-dedup','dixon-coles','calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
