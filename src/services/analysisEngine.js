@@ -201,6 +201,23 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   let homeLambda = +(homeLambdaBase * motivationHome.multiplier).toFixed(2);
   let awayLambda = +(awayLambdaBase * motivationAway.multiplier).toFixed(2);
 
+  // Opponent-strength prior + robust early-season control.
+  const homeStanding = standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats));
+  const awayStanding = standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats));
+  const tableSize = standingsTable.length || 20;
+  const rankStrength = row => row?.rank ? Math.max(-1,Math.min(1,(tableSize+1-2*Number(row.rank))/Math.max(1,tableSize-1))) : 0;
+  const strengthGap=Math.max(-1,Math.min(1,rankStrength(homeStanding)-rankStrength(awayStanding)));
+  homeLambda=+(homeLambda*Math.max(.92,Math.min(1.08,1+.08*strengthGap))).toFixed(2);
+  awayLambda=+(awayLambda*Math.max(.92,Math.min(1.08,1-.08*strengthGap))).toFixed(2);
+  const robustRate=(rate,sample,anchor)=>{
+    if(!Number.isFinite(rate)||!sample) return anchor;
+    const clipped=Math.max(anchor*.45,Math.min(anchor*2.1,rate));
+    const w=Math.min(1,Number(sample)/8);
+    return anchor*(1-w)+clipped*w;
+  };
+  if(homeForm?.played>0){const rr=robustRate(homeForm.avgGoalsFor,homeForm.played,leagueHomeGoals),raw=Math.max(.35,Number(homeForm.avgGoalsFor)||leagueHomeGoals);homeLambda=+(homeLambda*Math.max(.88,Math.min(1.12,rr/raw))).toFixed(2);}
+  if(awayForm?.played>0){const rr=robustRate(awayForm.avgGoalsFor,awayForm.played,leagueAwayGoals),raw=Math.max(.35,Number(awayForm.avgGoalsFor)||leagueAwayGoals);awayLambda=+(awayLambda*Math.max(.88,Math.min(1.12,rr/raw))).toFixed(2);}
+
   // Premium TheSportsDB event stats: blend real historical xG into pre-match lambdas.
   // Falls back to the goal model whenever xG coverage/sample is insufficient.
   let advancedHomeFixtures = homeFixtures, advancedAwayFixtures = awayFixtures;
@@ -257,12 +274,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         const saModel=venueBlend(sa,sa.away);
         sportmonksHistorical = { home:shModel, away:saModel, rawHome:sh, rawAway:sa, venueSplit:true };
         const chance = (a, against=false) => {
-          const v=a?.averages||{}; let n=0,w=0;
-          const suffix = against ? 'Against' : '';
-          // Goal/chance-quality market weighting: SOT and big chances carry most
-          // weight, box entries support them, raw shots are deliberately weaker.
-          [[v['shotsOnTarget'+suffix],0.40,4.5],[v['bigChances'+suffix],0.30,2.2],[v['shotsInsideBox'+suffix],0.20,7],[v['shots'+suffix],0.10,13]].forEach(([x,wt,base])=>{if(Number.isFinite(x)){n+=(x/base)*wt;w+=wt;}});
-          return w ? n/w : null;
+          const v=a?.averages||{}, suffix=against?'Against':'';
+          const r=(key,base)=>Number.isFinite(v[key+suffix])?Math.max(.55,Math.min(1.55,v[key+suffix]/base)):null;
+          const quality=[r('bigChances',2.2),r('shotsOnTarget',4.5)].filter(Number.isFinite);
+          const volume=[r('shotsInsideBox',7),r('shots',13)].filter(Number.isFinite);
+          const q=quality.length?quality.reduce((x,y)=>x+y,0)/quality.length:null;
+          const vol=volume.length?volume.reduce((x,y)=>x+y,0)/volume.length:null;
+          if(q==null) return vol; if(vol==null) return q;
+          return .72*q+.28*vol;
         };
         const homeAttackQuality=chance(shModel), awayAttackQuality=chance(saModel);
         const awayConcessionQuality=chance(saModel,true), homeConcessionQuality=chance(shModel,true);
@@ -290,8 +309,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const calibratedMarketProbabilities = calibrated.goals;
   const smOverallSample = Math.min(sportmonksHistorical?.rawHome?.sample || 0, sportmonksHistorical?.rawAway?.sample || 0);
   const smVenueSample = Math.min(sportmonksHistorical?.home?.sample || 0, sportmonksHistorical?.away?.sample || 0);
-  const playedSample = Math.min(Number(homePlayed || 0), Number(awayPlayed || 0));
-  const dataHealthScore = Number(premium?.dataHealth?.score || 0);
+  const playedSample = Math.min(Number(homeForm?.played || 0), Number(awayForm?.played || 0));
+  const sourceCoverage = [homeForm?.played>0,awayForm?.played>0,standingsTable.length>0,smOverallSample>0,homeAdvanced?.sample>0,awayAdvanced?.sample>0].filter(Boolean).length/6;
+  const dataHealthScore = Math.round(sourceCoverage*100);
   const sampleStrength = Math.min(1, Math.max(playedSample / 8, smOverallSample / 10));
   const venueStrength = smVenueSample > 0 ? Math.min(1, smVenueSample / 6) : Math.min(1, playedSample / 8);
   const healthStrength = Math.max(.25, Math.min(1, dataHealthScore / 80));
