@@ -240,15 +240,32 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       const sh = hh.ok ? sportmonks.aggregateTeamHistory(hh.fixtures, smMatch.homeTeamId) : null;
       const sa = ah.ok ? sportmonks.aggregateTeamHistory(ah.fixtures, smMatch.awayTeamId) : null;
       if ((sh?.sample || 0) >= 5 && (sa?.sample || 0) >= 5) {
-        sportmonksHistorical = { home:sh, away:sa };
+        // Venue-specific history is materially more predictive for this fixture.
+        // Require >=3 same-venue matches; otherwise blend the small venue sample
+        // into the recency-weighted overall sample rather than overfitting it.
+        const venueBlend = (overall, venue) => {
+          if (!venue?.sample) return overall;
+          if (venue.sample >= 3) return venue;
+          const oa=overall?.averages||{}, va=venue?.averages||{}, averages={};
+          for (const key of new Set([...Object.keys(oa),...Object.keys(va)])) {
+            const o=oa[key], v=va[key];
+            averages[key]=Number.isFinite(v)&&Number.isFinite(o) ? +(v*.35+o*.65).toFixed(2) : (Number.isFinite(v)?v:o);
+          }
+          return { sample:overall.sample, venueSample:venue.sample, averages, blended:true };
+        };
+        const shModel=venueBlend(sh,sh.home);
+        const saModel=venueBlend(sa,sa.away);
+        sportmonksHistorical = { home:shModel, away:saModel, rawHome:sh, rawAway:sa, venueSplit:true };
         const chance = (a, against=false) => {
           const v=a?.averages||{}; let n=0,w=0;
           const suffix = against ? 'Against' : '';
-          [[v['shotsOnTarget'+suffix],0.45,4.5],[v['shotsInsideBox'+suffix],0.25,7],[v['bigChances'+suffix],0.20,2.2],[v['shots'+suffix],0.10,13]].forEach(([x,wt,base])=>{if(Number.isFinite(x)){n+=(x/base)*wt;w+=wt;}});
+          // Goal/chance-quality market weighting: SOT and big chances carry most
+          // weight, box entries support them, raw shots are deliberately weaker.
+          [[v['shotsOnTarget'+suffix],0.40,4.5],[v['bigChances'+suffix],0.30,2.2],[v['shotsInsideBox'+suffix],0.20,7],[v['shots'+suffix],0.10,13]].forEach(([x,wt,base])=>{if(Number.isFinite(x)){n+=(x/base)*wt;w+=wt;}});
           return w ? n/w : null;
         };
-        const homeAttackQuality=chance(sh), awayAttackQuality=chance(sa);
-        const awayConcessionQuality=chance(sa,true), homeConcessionQuality=chance(sh,true);
+        const homeAttackQuality=chance(shModel), awayAttackQuality=chance(saModel);
+        const awayConcessionQuality=chance(saModel,true), homeConcessionQuality=chance(shModel,true);
         const blendQuality = (attack, opponentConcession) => {
           if (attack == null) return opponentConcession;
           if (opponentConcession == null) return attack;
