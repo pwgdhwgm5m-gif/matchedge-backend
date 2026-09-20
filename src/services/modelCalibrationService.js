@@ -2,6 +2,7 @@ const Prediction = require('../models/PredictionSnapshot');
 const ModelCalibration = require('../models/ModelCalibration');
 
 const MARKETS = ['home','draw','away','over25','btts'];
+const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig)/i;
 let cached = new Map();
 let cacheUntil = 0;
 const clamp = (x, low, high) => Math.min(high, Math.max(low, x));
@@ -31,8 +32,10 @@ async function retrain() {
   const snapshots = await Prediction.find({
     status:'settled', settledAt:{$gte:since}, capturedAt:{$lt:new Date()},
   }).select('league kickoff capturedAt probabilities rawProbabilities actual').sort({ kickoff:1 }).lean();
+  // Adaptive calibration is intentionally restricted to the prospective Süper Lig ledger.
+  const targetSnapshots = snapshots.filter(s => TARGET_LEAGUE.test(String(s.league || '')));
   const groups = new Map();
-  for (const s of snapshots) {
+  for (const s of targetSnapshots) {
     if (!s.kickoff || !s.capturedAt || s.capturedAt >= s.kickoff) continue;
     for (const market of MARKETS) {
       const p = s.rawProbabilities?.[market] ?? s.probabilities?.[market];
@@ -59,7 +62,7 @@ async function retrain() {
     if (result.active) active++;
   }
   cacheUntil = 0;
-  return { observations:snapshots.length, evaluated:groups.size, active };
+  return { league:'Turkish Super Lig', observations:targetSnapshots.length, evaluated:groups.size, active };
 }
 async function offsets() {
   if (Date.now() < cacheUntil) return cached;
