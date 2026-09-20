@@ -204,6 +204,38 @@ router.post('/', async (req, res) => {
     res.status(201).json({coupon,balance:user.edgeCoins});
   }catch(error){console.error('[coupons/create]',error.message);res.status(500).json({error:'Kupon oluşturulamadı.'})}
 });
+router.post('/recompute', async (req,res)=>{
+  try{
+    // Recompute pending selections from final scores already persisted on the coupon.
+    // This is provider-independent and repairs old slips without changing settled/rewarded ones.
+    const coupons=await Coupon.find({userId:req.user.userId,status:'pending'}).sort({createdAt:1}).limit(250);
+    let couponsUpdated=0, selectionsUpdated=0;
+    for(const coupon of coupons){
+      let changed=false;
+      if(coupon.legs?.length){
+        for(const leg of coupon.legs){
+          if(leg.selection?.result!=='pending')continue;
+          const h=leg.finalScore?.home,a=leg.finalScore?.away;
+          if(h==null||a==null)continue;
+          const r=settleSelection(leg.selection.key,Number(h),Number(a),null,null,null);
+          if(r!=='pending'){leg.selection.result=r;changed=true;selectionsUpdated++}
+        }
+        if(changed){
+          const rs=coupon.legs.map(l=>l.selection.result);
+          coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';
+          coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('legs');await coupon.save();couponsUpdated++;
+        }
+      }else if(coupon.finalScore?.home!=null&&coupon.finalScore?.away!=null){
+        for(const s of coupon.selections||[]){if(s.result==='pending'){s.result=settleSelection(s.key,Number(coupon.finalScore.home),Number(coupon.finalScore.away),null,null,null);changed=true;selectionsUpdated++}}
+        if(changed){const rs=coupon.selections.map(s=>s.result);coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('selections');await coupon.save();couponsUpdated++}
+      }
+    }
+    // Then refresh unresolved slips from canonical providers once.
+    await settlePending(req.user.userId);
+    res.json({ok:true,couponsUpdated,selectionsUpdated});
+  }catch(error){console.error('[coupons/recompute]',error.message);res.status(500).json({error:'Kuponlar yeniden hesaplanamadı.'})}
+});
+
 router.post('/settle', async (req, res) => {
   try {
     const checked = await settlePending(req.user.userId);
