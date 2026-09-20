@@ -12,6 +12,7 @@ const modelCalibration = require('./modelCalibrationService');
 const accuracy = require('./accuracyEngineService');
 const footballDataOdds = require('./footballDataUpcomingOddsService');
 const sportmonks = require('./sportmonksService');
+const powerRating = require('./powerRatingService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -125,6 +126,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? awayFixturesResult.value.teamId
     : away;
 
+  // V2 Elo power rating: construct a chronological league/team evidence pool
+  // from already-fetched completed fixtures. This is fail-open and bounded.
+  const eloPool=[...homeFixtures,...awayFixtures].filter((f,i,a)=>a.findIndex(x=>String(x.fixture?.id)===String(f.fixture?.id))===i);
+  const elo=powerRating.buildElo(eloPool);
+  const homeElo=elo.rating(homeTeamIdForStats), awayElo=elo.rating(awayTeamIdForStats);
+  const eloAdjustment=powerRating.matchupMultiplier(homeElo,awayElo,elo.games(homeTeamIdForStats),elo.games(awayTeamIdForStats));
+
   const homeTeamFullSplit = stats.splitHomeAwayForm(homeFixtures, homeTeamIdForStats, 5);
   const awayTeamFullSplit = stats.splitHomeAwayForm(awayFixtures, awayTeamIdForStats, 5);
   const homeAwaySplit = {
@@ -209,6 +217,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const strengthGap=Math.max(-1,Math.min(1,rankStrength(homeStanding)-rankStrength(awayStanding)));
   homeLambda=+(homeLambda*Math.max(.92,Math.min(1.08,1+.08*strengthGap))).toFixed(2);
   awayLambda=+(awayLambda*Math.max(.92,Math.min(1.08,1-.08*strengthGap))).toFixed(2);
+  homeLambda=+(homeLambda*eloAdjustment.home).toFixed(2);
+  awayLambda=+(awayLambda*eloAdjustment.away).toFixed(2);
   const robustRate=(rate,sample,anchor)=>{
     if(!Number.isFinite(rate)||!sample) return anchor;
     const clipped=Math.max(anchor*.45,Math.min(anchor*2.1,rate));
@@ -510,6 +520,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       sportmonks: smMarketEvidence,
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v2',
+      powerRating:{ homeElo, awayElo, homeGames:elo.games(homeTeamIdForStats), awayGames:elo.games(awayTeamIdForStats), adjustment:eloAdjustment },
       analysisStrength:{ score:Math.round(evidenceStrength*100), sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
       ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:'normalized-overround' },
       probabilityPipeline:['opponent-strength','robust-form','chance-quality-dedup','dixon-coles','calibration','evidence-shrinkage','market-ensemble'],
