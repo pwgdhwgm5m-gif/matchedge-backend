@@ -17,6 +17,15 @@ const sportmonks = require('../services/sportmonksService');
  *   - homeTeamName, awayTeamName, leagueName, kickoff: EKRANDA GOSTERMEK
  *     icin - hesaplamaya girmez, sadece yaniti tamamlar
  */
+router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
+  try {
+    const intel = await sportmonks.getFixtureIntelligence(req.params.fixtureId);
+    if (!intel.ok) return res.status(intel.status || 502).json({ ok:false, status:intel.status || null, error:intel.error || 'unavailable' });
+    const s=intel.rawStatistics || {};
+    res.json({ ok:true, fixtureId:intel.fixtureId, lineup:{home:intel.homeStarters?.length||0,away:intel.awayStarters?.length||0}, redCards:{home:intel.homeRedCards||0,away:intel.awayRedCards||0}, availableStats:Object.entries(s).filter(([,v])=>v!=null).map(([k])=>k) });
+  } catch(e) { res.status(500).json({ok:false,error:e.message}); }
+});
+
 router.get('/:fixtureId', async (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
@@ -90,14 +99,5 @@ router.get('/:fixtureId', async (req, res) => {
   }
 });
 
-
-router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
-  try {
-    const intel = await sportmonks.getFixtureIntelligence(req.params.fixtureId);
-    if (!intel.ok) return res.status(intel.status || 502).json({ ok:false, status:intel.status || null, error:intel.error || 'unavailable' });
-    const s=intel.rawStatistics || {};
-    res.json({ ok:true, fixtureId:intel.fixtureId, lineup:{home:intel.homeStarters?.length||0,away:intel.awayStarters?.length||0}, redCards:{home:intel.homeRedCards||0,away:intel.awayRedCards||0}, availableStats:Object.entries(s).filter(([,v])=>v!=null).map(([k])=>k) });
-  } catch(e) { res.status(500).json({ok:false,error:e.message}); }
-});
 
 module.exports = router;
