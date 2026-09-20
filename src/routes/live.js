@@ -6,6 +6,7 @@ const sportsDb = require('../services/sportsDbService');
 const liveXg = require('../services/liveXgService');
 const bsdService = require('../services/bsdService');
 const footballDataOrg = require('../services/footballDataOrgService');
+const sportmonks = require('../services/sportmonksService');
 
 /**
  * GET /api/live
@@ -32,6 +33,22 @@ router.get('/', async (req, res) => {
     // event timeline. If the provider cannot verify it, keep null rather than
     // inventing 0-0.
     simplified = await sportsDb.attachHalftimeScores(simplified);
+    // Sportmonks is the primary verified enrichment for subscribed leagues.
+    // It never removes a match: when unavailable, the existing providers remain fallback.
+    const smLive = await cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay());
+    if (smLive.ok) {
+      simplified.forEach(m => {
+        const sm = sportmonks.findMatch(smLive.fixtures, m.homeTeam, m.awayTeam);
+        if (!sm) return;
+        if (sm.homeScore != null && sm.awayScore != null) {
+          m.homeScore = sm.homeScore; m.awayScore = sm.awayScore; m.scoreSource = 'sportmonks';
+        }
+        if (sm.halftimeHome != null && sm.halftimeAway != null) {
+          m.halftimeHome = sm.halftimeHome; m.halftimeAway = sm.halftimeAway; m.halftimeSource = 'sportmonks';
+        }
+        m.sportmonksId = sm.sportmonksId;
+      });
+    }
     await Promise.all(simplified.map(async m => {
       if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
         const date=(m.kickoff||new Date().toISOString()).slice(0,10);
