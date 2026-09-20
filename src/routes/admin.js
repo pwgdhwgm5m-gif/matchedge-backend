@@ -51,6 +51,14 @@ router.get('/walk-forward-audit', async (req, res) => {
   catch (error) { console.error('[walk-forward-audit]', error); res.status(500).json({ error: 'Walk-forward audit alınamadı.' }); }
 });
 
+router.post('/power-rating-backfill', async (req,res)=>{
+  try{
+    const {league,teamId,days}=req.body||{}; if(!teamId)return res.status(400).json({error:'teamId gerekli'});
+    const powerRating=require('../services/powerRatingService');
+    res.json(await powerRating.backfillFromSportmonks({league,teamId,days:Math.min(730,Math.max(60,Number(days)||365))}));
+  }catch(error){console.error('[power-rating-backfill]',error);res.status(500).json({error:'Power rating backfill başarısız'});}
+});
+
 router.get('/model-calibration', async (req, res) => {
   try {
     const rows = await ModelCalibration.find({}).sort({active:-1,trainedAt:-1}).limit(60).lean();
