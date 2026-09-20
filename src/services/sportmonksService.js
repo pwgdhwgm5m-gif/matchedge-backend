@@ -36,19 +36,36 @@ function scoreValue(scores, participant) {
 
 function halftimeValue(scores, participant) {
   const rows = Array.isArray(scores) ? scores : [];
-  // SportMonks score descriptions are not guaranteed to use the legacy
-  // "1ST_HALF" spelling. Accept the documented/common first-half variants
-  // while still requiring the requested participant side.
-  const row = rows.find(s => {
-    const d = String(s.description || s.type?.developer_name || s.type?.name || '')
-      .toUpperCase().replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
+  // SportMonks v3 represents period scores primarily with description
+  // "1ST_HALF" / "1ST_HALF_ONLY" and participant in score.participant.
+  // Some plans/responses expose numeric type ids instead of descriptions.
+  const candidates = rows.filter(s => {
+    const raw = String(s.description || s.type?.developer_name || s.type?.name || '')
+      .toUpperCase().replace(/[- ]+/g,'_').replace(/_+/g,'_').trim();
     const p = String(s.score?.participant || s.participant || s.location || '').toLowerCase();
-    const firstHalf = d === '1ST HALF' || d === '1ST HALF SCORE' ||
-      d === 'FIRST HALF' || d === 'HALFTIME' || d === 'HALF TIME' || d === 'HT' ||
-      d.includes('1ST HALF') || d.includes('FIRST HALF');
-    return firstHalf && p === participant;
+    if (p !== participant) return false;
+    return raw === '1ST_HALF' || raw === '1ST_HALF_ONLY' || raw === 'FIRST_HALF' ||
+      raw === 'HALFTIME' || raw === 'HALF_TIME' || raw === 'HT' ||
+      raw.includes('1ST_HALF') || raw.includes('FIRST_HALF');
   });
+  const row = candidates[0];
   return row?.score?.goals ?? row?.goals ?? row?.value ?? null;
+}
+
+function halftimeFromPeriods(periods, participant) {
+  const rows = Array.isArray(periods) ? periods : [];
+  const first = rows.find(p => {
+    const t = String(p.type?.developer_name || p.type?.name || p.description || p.type || '')
+      .toUpperCase().replace(/[- ]+/g,'_');
+    return t === '1ST_HALF' || t === 'FIRST_HALF' || t === '1H' || Number(p.type_id) === 1;
+  });
+  if (!first) return null;
+  const score = first.score || first.scores || {};
+  const v = participant === 'home'
+    ? (score.home ?? score.home_score ?? first.home_score ?? first.home)
+    : (score.away ?? score.away_score ?? first.away_score ?? first.away);
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
 }
 
 function participantName(fixture, location) {
@@ -90,8 +107,8 @@ function transformFixture(f) {
     awayTeamId: participantId(f, 'away'),
     homeScore: scoreValue(scores, 'home'),
     awayScore: scoreValue(scores, 'away'),
-    halftimeHome: halftimeValue(scores, 'home'),
-    halftimeAway: halftimeValue(scores, 'away'),
+    halftimeHome: halftimeValue(scores, 'home') ?? halftimeFromPeriods(f.periods, 'home'),
+    halftimeAway: halftimeValue(scores, 'away') ?? halftimeFromPeriods(f.periods, 'away'),
     kickoff: f.starting_at || null,
     stateId: f.state_id,
     // SportMonks state ids: 1 NS, 2 1H, 3 HT, 4 BREAK, 5 FT,
