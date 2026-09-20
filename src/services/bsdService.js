@@ -258,19 +258,50 @@ function toScoreNumber(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-function extractHalftimeScore(e) {
-  const home = pickField(e, [
-    'halftime_home_score','half_time_home_score','ht_home_score',
-    'halftime_score.home','half_time_score.home','score.halftime.home','scores.halftime.home'
-  ]);
-  const away = pickField(e, [
-    'halftime_away_score','half_time_away_score','ht_away_score',
-    'halftime_score.away','half_time_score.away','score.halftime.away','scores.halftime.away'
-  ]);
-  const h=toScoreNumber(home), a=toScoreNumber(away);
-  return h !== null && a !== null ? { home:h, away:a } : null;
+function parseScorePair(v) {
+  if (v === null || v === undefined) return null;
+  if (Array.isArray(v) && v.length >= 2) {
+    const h=toScoreNumber(v[0]), a=toScoreNumber(v[1]);
+    return h !== null && a !== null ? {home:h,away:a} : null;
+  }
+  if (typeof v === 'string') {
+    const m=v.match(/(\d+)\s*[-:]\s*(\d+)/);
+    return m ? {home:Number(m[1]),away:Number(m[2])} : null;
+  }
+  if (typeof v === 'object') {
+    const h=toScoreNumber(v.home ?? v.home_score ?? v.homeScore ?? v.h);
+    const a=toScoreNumber(v.away ?? v.away_score ?? v.awayScore ?? v.a);
+    return h !== null && a !== null ? {home:h,away:a} : null;
+  }
+  return null;
 }
 
+function extractHalftimeScore(e) {
+  // BSD schemas seen across event feeds can expose HT as separate fields,
+  // a nested score object, a "1-0" string, or period arrays.
+  const directHome = pickField(e, ['halftime_home_score','half_time_home_score','ht_home_score','score.halftime.home','scores.halftime.home','scores.ht.home']);
+  const directAway = pickField(e, ['halftime_away_score','half_time_away_score','ht_away_score','score.halftime.away','scores.halftime.away','scores.ht.away']);
+  const dh=toScoreNumber(directHome), da=toScoreNumber(directAway);
+  if (dh !== null && da !== null) return {home:dh,away:da};
+
+  const pairCandidates=[
+    pickField(e,['halftime_score']),
+    pickField(e,['half_time_score']),
+    pickField(e,['ht_score']),
+    pickField(e,['score.halftime']),
+    pickField(e,['scores.halftime']),
+    pickField(e,['scores.ht'])
+  ];
+  for (const v of pairCandidates) { const p=parseScorePair(v); if(p) return p; }
+
+  const periods=pickField(e,['periods','scores.periods','score.periods']);
+  if (Array.isArray(periods)) {
+    const first=periods.find(p=>String(p.period ?? p.name ?? p.type ?? '').toLowerCase().match(/^(1|1h|first|first_half|1st)$/)) || periods[0];
+    const p=parseScorePair(first && (first.score ?? first));
+    if(p) return p;
+  }
+  return null;
+}
 async function getHalftimeScoreForMatch(homeTeam, awayTeam, kickoffIso) {
   if (!API_KEY) return { available:false };
   const cacheKey='bsd-ht:'+normalizeTeamName(homeTeam)+':'+normalizeTeamName(awayTeam)+':'+String(kickoffIso||'').slice(0,10);
