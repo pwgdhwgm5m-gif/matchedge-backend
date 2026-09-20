@@ -44,3 +44,16 @@ async function backfillFromSportmonks({league,teamId,days=365}){
 }
 
 module.exports.backfillFromSportmonks=backfillFromSportmonks;
+
+async function backfillLeagueFromSportmonks({leagueId,leagueName,days=365}){
+ try{
+  const sportmonks=require('./sportmonksService'),r=await sportmonks.getLeagueTeamsFromRecentFixtures(leagueId,days);
+  if(!r?.ok)return {ok:false,error:r?.error||'league_history_unavailable',processed:0};
+  const seen=new Set(),rows=(r.fixtures||[]).filter(x=>x.homeTeamId&&x.awayTeamId&&x.homeScore!=null&&x.awayScore!=null).sort((a,b)=>new Date(a.kickoff)-new Date(b.kickoff));
+  let processed=0,skipped=0;
+  for(const x of rows){const id=String(x.sportmonksId);if(seen.has(id)){skipped++;continue;}seen.add(id);const out=await persistFromMatch({league:leagueName||String(leagueId),season:x.seasonId,fixtureId:id,kickoff:x.kickoff,home:{id:x.homeTeamId,name:x.homeTeam},away:{id:x.awayTeamId,name:x.awayTeam},homeGoals:x.homeScore,awayGoals:x.awayScore});if(out?.skipped)skipped++;else if(out)processed++;}
+  return {ok:true,leagueId:String(leagueId),league:leagueName||String(leagueId),teams:r.teams?.length||0,totalFixtures:rows.length,processed,skipped};
+ }catch(e){return {ok:false,error:e.message,processed:0};}
+}
+
+module.exports.backfillLeagueFromSportmonks=backfillLeagueFromSportmonks;
