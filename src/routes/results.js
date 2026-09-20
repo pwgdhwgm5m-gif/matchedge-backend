@@ -24,7 +24,8 @@ router.get('/', async (req, res) => {
   // SportsMonks-first: one subscribed daily feed is the canonical fixture,
   // score and half-time source. Legacy providers are used only when a
   // SportMonks match is unavailable; they never overwrite SportMonks data.
-  const [smResult, legacyResult, verifiedResult, supplemental] = await Promise.all([
+  const [turkeySmResult, smResult, legacyResult, verifiedResult, supplemental] = await Promise.all([
+    cache.getOrFetch(`sportmonks:tr:600:${date}`, config.cache.ttlLive, () => sportmonks.getLeagueFixturesByDate(date, 600)),
     Promise.race([
       cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
       new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_date_timeout'}), 5000))
@@ -34,7 +35,9 @@ router.get('/', async (req, res) => {
     cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date))
   ]);
 
-  const sportmonksMatches = smResult?.ok ? sportmonks.toResultMatches(smResult.fixtures) : [];
+  const allSmFixtures = [...(turkeySmResult?.ok ? turkeySmResult.fixtures : []), ...(smResult?.ok ? smResult.fixtures : [])];
+  const uniqueSm = new Map(allSmFixtures.map(f => [String(f.sportmonksId), f]));
+  const sportmonksMatches = sportmonks.toResultMatches([...uniqueSm.values()]);
   let legacyMatches = legacyResult?.ok
     ? (legacyResult.data?.events || []).map(sportsDb.transformEvent).filter(m => sportsDb.isWhitelistedLeague(m.leagueId))
     : [];
@@ -67,7 +70,7 @@ router.get('/', async (req, res) => {
   res.json({
     date,
     matches: simplified,
-    primarySource: smResult?.ok ? 'sportmonks' : 'fallback',
+    primarySource: (turkeySmResult?.ok || smResult?.ok) ? 'sportmonks' : 'fallback',
     sportmonksCount: sportmonksMatches.length,
     fallbackCount: Math.max(0, simplified.length - sportmonksMatches.length)
   });
