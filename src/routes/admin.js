@@ -59,6 +59,14 @@ router.post('/power-rating-backfill', async (req,res)=>{
   }catch(error){console.error('[power-rating-backfill]',error);res.status(500).json({error:'Power rating backfill başarısız'});}
 });
 
+router.post('/power-rating-backfill-league', async (req,res)=>{
+ try{
+  const {leagueId,leagueName,days}=req.body||{};if(!leagueId)return res.status(400).json({error:'leagueId gerekli'});
+  const powerRating=require('../services/powerRatingService');
+  res.json(await powerRating.backfillLeagueFromSportmonks({leagueId,leagueName,days:Math.min(730,Math.max(60,Number(days)||365))}));
+ }catch(error){console.error('[power-rating-backfill-league]',error);res.status(500).json({error:'League power rating backfill başarısız'});}
+});
+
 router.get('/model-calibration', async (req, res) => {
   try {
     const rows = await ModelCalibration.find({}).sort({active:-1,trainedAt:-1}).limit(60).lean();
