@@ -180,15 +180,15 @@ router.get('/:fixtureId', async (req, res) => {
   // henuz yoksa (mac yeni basladiysa) tum degerler 0 olur ve asagidaki
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
-    shotsOnTarget: stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0,
-    shotsOffTarget: 0,
-    corners: stats.corners ? (stats.corners.home ?? 0) : 0,
+    shotsOnTarget: smStats.shotsOnTargetHome ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? 0) : 0),
+    shotsOffTarget: (smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : 0,
+    corners: smStats.cornersHome ?? (stats.corners ? (stats.corners.home ?? 0) : 0),
     dangerousAttacks: 0,
   };
   const awayRawStats = {
-    shotsOnTarget: stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0,
-    shotsOffTarget: 0,
-    corners: stats.corners ? (stats.corners.away ?? 0) : 0,
+    shotsOnTarget: smStats.shotsOnTargetAway ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? 0) : 0),
+    shotsOffTarget: (smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : 0,
+    corners: smStats.cornersAway ?? (stats.corners ? (stats.corners.away ?? 0) : 0),
     dangerousAttacks: 0,
   };
 
@@ -241,7 +241,8 @@ router.get('/:fixtureId', async (req, res) => {
     xgSource,
     momentum,
     goalProximity,
-    possession: (smStats.possessionHome != null && smStats.possessionAway != null) ? { home: smStats.possessionHome, away: smStats.possessionAway } : (stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 }),\n    liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
+    possession: (smStats.possessionHome != null && smStats.possessionAway != null) ? { home: smStats.possessionHome, away: smStats.possessionAway } : (stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 }),
+    liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
     stats: {
       shotsOnTargetHome: homeRawStats.shotsOnTarget,
       shotsOnTargetAway: awayRawStats.shotsOnTarget,
