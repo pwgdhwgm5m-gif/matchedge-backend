@@ -18,6 +18,10 @@ async function loadPersistent(league,teamId){
 async function persistFromMatch({league,season,fixtureId,kickoff,home,away,homeGoals,awayGoals,homeXg=null,awayXg=null}){
  try{
   const PowerRating=require('../models/PowerRating'); if(!home?.id||!away?.id||homeGoals==null||awayGoals==null)return null;
+  const PowerRatingEvent=require('../models/PowerRatingEvent');
+  const eventKey={league:String(league||''),fixtureId:String(fixtureId)};
+  try{await PowerRatingEvent.create({...eventKey,kickoff:kickoff?new Date(kickoff):null,homeTeamId:String(home.id),awayTeamId:String(away.id)});}
+  catch(e){if(e?.code===11000)return {skipped:true,reason:'already_processed'};throw e;}
   const [h,a]=await Promise.all([PowerRating.findOne({league:String(league),teamId:String(home.id)}),PowerRating.findOne({league:String(league),teamId:String(away.id)})]);
   if((h?.lastFixtureId&&String(h.lastFixtureId)===String(fixtureId))||(a?.lastFixtureId&&String(a.lastFixtureId)===String(fixtureId)))return {skipped:true,reason:'already_processed'};
   const hr=h?.elo||BASE,ar=a?.elo||BASE,eh=expected(hr+55,ar),resultScore=score(Number(homeGoals),Number(awayGoals));
@@ -28,7 +32,10 @@ async function persistFromMatch({league,season,fixtureId,kickoff,home,away,homeG
   const update=(doc,team,elo,gf,ga,xgf,xga)=>{const n=doc?.games||0,priorGames=6,validXgf=xgf!=null&&Number.isFinite(Number(xgf)),validXga=xga!=null&&Number.isFinite(Number(xga)),attackObs=clamp(((validXgf?Number(xgf):gf)+.35)/1.7,.45,1.8),defenseObs=clamp(1.7/((validXga?Number(xga):ga)+.35),.45,1.8);return {league:String(league),teamId:String(team.id),teamName:team.name||'',elo:+elo.toFixed(1),attack:+clamp(((doc?.attack||1)*(n+priorGames)+attackObs)/(n+priorGames+1),.45,1.8).toFixed(3),defense:+clamp(((doc?.defense||1)*(n+priorGames)+defenseObs)/(n+priorGames+1),.45,1.8).toFixed(3),games:n+1,lastFixtureId:String(fixtureId),lastMatchAt:kickoff?new Date(kickoff):new Date(),season:String(season||'')};};
   const hu=update(h,home,hr+delta,Number(homeGoals),Number(awayGoals),homeXg,awayXg),au=update(a,away,ar-delta,Number(awayGoals),Number(homeGoals),awayXg,homeXg);
   await Promise.all([PowerRating.findOneAndUpdate({league:hu.league,teamId:hu.teamId},{$set:hu},{upsert:true,new:true}),PowerRating.findOneAndUpdate({league:au.league,teamId:au.teamId},{$set:au},{upsert:true,new:true})]);return {home:hu,away:au};
- }catch(_){return null;}
+ }catch(e){
+  try{if(fixtureId){const PowerRatingEvent=require('../models/PowerRatingEvent');await PowerRatingEvent.deleteOne({league:String(league||''),fixtureId:String(fixtureId)});}}catch(_){}
+  return null;
+ }
 }
 module.exports.loadPersistent=loadPersistent;module.exports.persistFromMatch=persistFromMatch;
 
