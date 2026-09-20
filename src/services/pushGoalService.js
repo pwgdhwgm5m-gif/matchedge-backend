@@ -73,8 +73,8 @@ async function checkGoals() {
 
 function startPushGoalMonitor() {
   if (!configured()) { console.log('[push] VAPID not configured'); return; }
-  setTimeout(checkGoals, 15000);
-  setInterval(checkGoals, 20000);
+  setTimeout(checkGoals, 3000);
+  setInterval(checkGoals, 5000);
 }
 
 module.exports = { startPushGoalMonitor };
