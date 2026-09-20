@@ -40,6 +40,17 @@ router.get('/', async (req, res) => {
     cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date))
   ]);
 
+  console.log('[results:sportmonks:turkey]', JSON.stringify({
+    date,
+    ok: !!turkeySmResult?.ok,
+    error: turkeySmResult?.error || null,
+    count: turkeySmResult?.fixtures?.length || 0,
+    fixtures: (turkeySmResult?.fixtures || []).map(f => ({
+      id:f.sportmonksId, leagueId:f.leagueId, league:f.leagueName,
+      home:f.homeTeam, away:f.awayTeam, homeScore:f.homeScore, awayScore:f.awayScore,
+      halftimeHome:f.halftimeHome, halftimeAway:f.halftimeAway, stateId:f.stateId
+    }))
+  }));
   const allSmFixtures = [...(turkeySmResult?.ok ? turkeySmResult.fixtures : []), ...(smResult?.ok ? smResult.fixtures : [])];
   const uniqueSm = new Map(allSmFixtures.map(f => [String(f.sportmonksId), f]));
   const sportmonksMatches = sportmonks.toResultMatches([...uniqueSm.values()]);
