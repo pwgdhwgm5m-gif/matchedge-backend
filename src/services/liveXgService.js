@@ -16,30 +16,32 @@ const WEIGHTS = {
 };
 
 function estimateLiveXg(stats) {
-  // stats: { shotsOnTarget, shotsOffTarget, corners, dangerousAttacks }
-  const xg =
-    (stats.shotsOnTarget || 0) * WEIGHTS.shotOnTarget +
-    (stats.shotsOffTarget || 0) * WEIGHTS.shotOffTarget +
-    (stats.corners || 0) * WEIGHTS.corner +
-    (stats.dangerousAttacks || 0) * WEIGHTS.dangerousAttack +
-    (stats.blockedShots || 0) * WEIGHTS.blockedShot +
-    (stats.shotsInsideBox || 0) * WEIGHTS.shotInsideBox +
-    (stats.bigChances || 0) * WEIGHTS.bigChance;
-
-  return +xg.toFixed(2);
+  const fields = [
+    ['shotsOnTarget','shotOnTarget'],['shotsOffTarget','shotOffTarget'],['corners','corner'],
+    ['dangerousAttacks','dangerousAttack'],['blockedShots','blockedShot'],
+    ['shotsInsideBox','shotInsideBox'],['bigChances','bigChance']
+  ];
+  let xg = 0, observed = 0;
+  for (const [field, weight] of fields) {
+    const v = stats?.[field];
+    if (Number.isFinite(v)) { xg += v * WEIGHTS[weight]; observed++; }
+  }
+  return { value:+xg.toFixed(2), available:observed > 0, completeness:+(observed/fields.length*100).toFixed(0) };
 }
 
 /** Iki takimin canli istatistiginden momentum yuzdesi (kim baski kuruyor) */
 function calculateMomentum(homeStats, awayStats) {
-  const homeXg = estimateLiveXg(homeStats);
-  const awayXg = estimateLiveXg(awayStats);
+  const hx = estimateLiveXg(homeStats), ax = estimateLiveXg(awayStats);
+  if (!hx.available && !ax.available) return { home:null, away:null, available:false };
+  const homeXg = hx.value, awayXg = ax.value;
   const total = homeXg + awayXg;
 
-  if (total === 0) return { home: 50, away: 50 };
+  if (total === 0) return { home:null, away:null, available:false };
 
   return {
     home: +((homeXg / total) * 100).toFixed(1),
     away: +((awayXg / total) * 100).toFixed(1),
+    available: true,
   };
 }
 
@@ -87,13 +89,22 @@ function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg, co
   if (ar) awayScore *= Math.max(0.55, 1 - 0.18 * ar);
   const total = homeScore + awayScore;
 
-  if (total === 0) {
-    return { home: 50, away: 50 };
+  const minute = Number(context.minute);
+  const hs = Number(context.homeScore), as = Number(context.awayScore);
+  if (Number.isFinite(minute) && minute > 0) {
+    const urgency = Math.max(0, Math.min(1, (minute - 45) / 45));
+    if (Number.isFinite(hs) && Number.isFinite(as) && hs !== as) {
+      if (hs < as) homeScore *= 1 + 0.10 * urgency;
+      else awayScore *= 1 + 0.10 * urgency;
+    }
   }
+  const total = homeScore + awayScore;
+  if (total === 0) return { home:null, away:null, available:false };
 
   return {
     home: +((homeScore / total) * 100).toFixed(1),
     away: +((awayScore / total) * 100).toFixed(1),
+    available: true,
   };
 }
 
