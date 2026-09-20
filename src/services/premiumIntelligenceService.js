@@ -16,7 +16,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence }) {
   let health = Number(dataHealth?.score || 0);
   const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
   const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
@@ -41,14 +41,27 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     { key: 'mostGoalsEqual', market: 'EN GOLLÜ YARI', label: 'Eşit', probability: Number(halfMarkets?.mostGoalsHalf?.equal || 0) },
     { key: 'mostGoalsSecond', market: 'EN GOLLÜ YARI', label: 'İkinci Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.second || 0) },
   ].filter(item => Number.isFinite(item.probability) && item.probability > 0 && item.probability < 100)
-    .map(item => ({
-      ...item,
-      probability: +item.probability.toFixed(1),
-      score: +((item.probability - 50) * 0.72 + health * 0.28).toFixed(1),
-      dataHealth: health,
-      isValue: premium?.status === 'VALUE' && premium?.selection === item.key,
-      edgePoints: premium?.selection === item.key ? premium?.bestEdge?.edgePoints ?? null : null,
-    }))
+    .map(item => {
+      const ev=sportmonksMarketEvidence||{};
+      let evidence=null;
+      if(item.market==='1X2') evidence=item.key==='home'?ev.homeThreat:item.key==='away'?ev.awayThreat:(ev.homeThreat!=null&&ev.awayThreat!=null?1-Math.min(.25,Math.abs(ev.homeThreat-ev.awayThreat)*.35):null);
+      else if(item.key==='over25') evidence=ev.goalQuality;
+      else if(item.key==='under25') evidence=ev.goalQuality!=null?2-ev.goalQuality:null;
+      else if(item.key==='bttsYes') evidence=ev.bttsQuality;
+      else if(item.key==='bttsNo') evidence=ev.bttsQuality!=null?2-ev.bttsQuality:null;
+      else if(item.market==='KORNER') evidence=item.key==='cornersOver95'?ev.cornerQuality:(ev.cornerQuality!=null?2-ev.cornerQuality:null);
+      const evidenceBonus=evidence==null?0:clamp((evidence-1)*12,-4,4);
+      return {
+        ...item,
+        probability: +item.probability.toFixed(1),
+        score: +(((item.probability - 50) * 0.72 + health * 0.28)+evidenceBonus).toFixed(1),
+        dataHealth: health,
+        sportmonksEvidence: evidence==null?null:+evidence.toFixed(3),
+        sportmonksEvidenceBonus:+evidenceBonus.toFixed(1),
+        isValue: premium?.status === 'VALUE' && premium?.selection === item.key,
+        edgePoints: premium?.selection === item.key ? premium?.bestEdge?.edgePoints ?? null : null,
+      };
+    })
     .sort((a, b) => b.score - a.score || b.probability - a.probability);
 
   return {
