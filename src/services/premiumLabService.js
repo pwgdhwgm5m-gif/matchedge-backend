@@ -1,4 +1,5 @@
 const Prediction=require('../models/PredictionSnapshot');
+const oddsApi=require('./oddsApiService');
 function clamp(v,min,max){return Math.max(min,Math.min(max,v))}
 function poisson(l,k){let p=Math.exp(-l);for(let i=1;i<=k;i++)p*=l/i;return p}
 function hashSeed(s){let h=2166136261;for(const ch of String(s||'')){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
@@ -100,5 +101,26 @@ async function patternFinder({minProbability=60,minQuality=50,maxGap=8,league=''
  return{filters:{minProbability,minQuality,maxSimulationGap:maxGap,league:league||'all'},count:n,wins,losses:n-wins,hitRatePercent:n?+(100*wins/n).toFixed(1):null,readiness:n<30?'collecting':n<100?'early-signal':'decision-ready',markets:Object.values(byMarket).map(x=>({...x,hitRatePercent:+(100*x.wins/x.count).toFixed(1)})),method:'settled prospective snapshots only; simulation is used as a robustness filter, not as historical input from after kickoff'};
 }
 
+
+const ODDS_LEAGUE_MAP=[
+ [/premier|epl/i,'soccer_epl'],[/la liga|laliga/i,'soccer_spain_la_liga'],[/serie a/i,'soccer_italy_serie_a'],[/bundesliga/i,'soccer_germany_bundesliga'],[/ligue 1/i,'soccer_france_ligue_one'],[/eredivisie/i,'soccer_netherlands_eredivisie'],[/portugal|primeira/i,'soccer_portugal_primeira_liga'],[/belg/i,'soccer_belgium_first_div'],[/super lig|süper lig|turkey|türkiye/i,'soccer_turkey_super_league'],[/scott|premiership/i,'soccer_spl']
+];
+function oddsLeagueKey(league){const x=ODDS_LEAGUE_MAP.find(([re])=>re.test(String(league||'')));return x?x[1]:null}
+async function valueFinder({limit=30}={}){
+ const rows=await available(Math.min(80,Math.max(5,Number(limit)||30))),byLeague=new Map(),results=[],errors=[];
+ for(const row of rows){const k=oddsLeagueKey(row.league);if(k&&!byLeague.has(k))byLeague.set(k,null)}
+ for(const key of byLeague.keys()){const r=await oddsApi.getOddsForLeague(key);byLeague.set(key,r.ok?r.data:null);if(!r.ok)errors.push({leagueKey:key,error:String(r.error||'odds_unavailable')})}
+ for(const row of rows){
+  const key=oddsLeagueKey(row.league),data=key?byLeague.get(key):null;if(!data)continue;
+  const odds=oddsApi.extractMatchOdds(data,row.homeTeam,row.awayTeam);if(!odds)continue;
+  const market=oddsApi.shinImpliedProbabilities(odds)||oddsApi.normalizeImpliedProbabilities(odds),p=row.probabilities||{};
+  const model={home:Number(p.home)*100,draw:Number(p.draw)*100,away:Number(p.away)*100};
+  const outcomes={};
+  for(const side of ['home','draw','away']){if(!Number.isFinite(model[side])||!Number.isFinite(Number(odds[side])))continue;const edge=+(model[side]-Number(market[side])).toFixed(1),ev=+((model[side]/100)*Number(odds[side])-1).toFixed(3);outcomes[side]={odds:Number(odds[side]),modelProbability:+model[side].toFixed(1),marketProbability:Number(market[side]),edgePercent:edge,expectedValuePercent:+(ev*100).toFixed(1),positiveEV:ev>0}}
+  results.push({fixtureId:row.fixtureId,kickoff:row.kickoff,league:row.league,match:row.homeTeam+' - '+row.awayTeam,provider:'The Odds API',deVigMethod:market.method,overroundPercent:market.overroundPercent,outcomes});
+ }
+ return{provider:'The Odds API',providerAvailable:results.length>0||errors.length===0,pricedMatches:results.length,matches:results,errors:errors.length?errors:undefined,note:results.length?'Live bookmaker prices were fetched; EV is model probability versus current decimal price.':'No verified current bookmaker prices were returned; no value claim is produced.'};
+}
+
 async function simulateFixture(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();if(!row){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0)){const e=new Error('expected_goals_unavailable');e.status=422;throw e}return{fixtureId:row.fixtureId,match:row.homeTeam+' - '+row.awayTeam,kickoff:row.kickoff,league:row.league,simulation:simulationFromLambdas(row.homeLambda,row.awayLambda),modelSnapshot:row.probabilities}}
-module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder};
+module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder,valueFinder};
