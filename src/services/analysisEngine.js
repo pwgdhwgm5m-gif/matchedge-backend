@@ -193,6 +193,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const homeDefenseWeakBase = homeForm.played > 0 ? homeForm.avgGoalsAgainst / LEAGUE_AVG_AWAY_GOALS : 1.0;
   const awayAttackBase = awayForm.played > 0 ? awayForm.avgGoalsFor / LEAGUE_AVG_AWAY_GOALS : 1.0;
   const awayDefenseWeakBase = awayForm.played > 0 ? awayForm.avgGoalsAgainst / LEAGUE_AVG_HOME_GOALS : 1.0;
+  const powerComponents = {
+    home: { attack:+homeAttackBase.toFixed(3), defense:+(1/Math.max(.45,homeDefenseWeakBase)).toFixed(3) },
+    away: { attack:+awayAttackBase.toFixed(3), defense:+(1/Math.max(.45,awayDefenseWeakBase)).toFixed(3) }
+  };
 
   const homeAttack = homeAttackBase * homeInjuryImpact.attackMultiplier * homeFatigue * homeStreakMult * homeAdvantageMultiplier;
   const homeDefenseWeak = homeDefenseWeakBase * homeInjuryImpact.defenseWeaknessMultiplier;
@@ -326,16 +330,28 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const venueStrength = smVenueSample > 0 ? Math.min(1, smVenueSample / 6) : Math.min(1, playedSample / 8);
   const healthStrength = Math.max(.25, Math.min(1, dataHealthScore / 80));
   const evidenceStrength = Math.max(.35, Math.min(1, .45 * sampleStrength + .25 * venueStrength + .30 * healthStrength));
+  const norm3=v=>{const s=v.reduce((a,b)=>a+b,0)||1;return v.map(x=>100*x/s);};
+  const dcVector=[Number(calibratedMatchProbabilities.homeWinProbability),Number(calibratedMatchProbabilities.drawProbability),Number(calibratedMatchProbabilities.awayWinProbability)];
+  const eloHome=50 + 24*eloAdjustment.gap, eloAway=50-24*eloAdjustment.gap;
+  const eloVector=norm3([Math.max(12,eloHome),28,Math.max(12,eloAway)]);
+  const tableVector=norm3([Math.max(12,50+22*strengthGap),28,Math.max(12,50-22*strengthGap)]);
+  const vectors=[dcVector,eloVector,tableVector].filter(v=>v.every(Number.isFinite));
+  const consensus=vectors.length?vectors[0].map((_,i)=>vectors.reduce((s,v)=>s+v[i],0)/vectors.length):[33.33,33.34,33.33];
+  const disagreement=vectors.length?vectors.reduce((s,v)=>s+v.reduce((z,x,i)=>z+Math.abs(x-consensus[i]),0)/3,0)/vectors.length:0;
+  const agreementScore=Math.max(0,Math.min(100,100-disagreement*3.2));
+  const analysisStrength=Math.round(Math.max(25,Math.min(100,evidenceStrength*75+agreementScore*.25)));
   const shrink3 = probs => {
     const h=Number(probs?.homeWinProbability), d=Number(probs?.drawProbability), a=Number(probs?.awayWinProbability);
     if (![h,d,a].every(Number.isFinite)) return probs;
-    const vals=[h,d,a].map(p => 33.333 + evidenceStrength * (p - 33.333));
+    const effectiveStrength=Math.max(.30,Math.min(1,evidenceStrength*(.65+.35*agreementScore/100)));
+    const vals=[h,d,a].map(p => 33.333 + effectiveStrength * (p - 33.333));
     const sum=vals.reduce((s,x)=>s+x,0) || 100;
     return { ...probs, homeWinProbability:+(vals[0]*100/sum).toFixed(1), drawProbability:+(vals[1]*100/sum).toFixed(1), awayWinProbability:+(vals[2]*100/sum).toFixed(1) };
   };
   const shrinkBinary = (obj,key) => {
     const p=Number(obj?.[key]); if(!Number.isFinite(p)) return obj;
-    return { ...obj, [key]: +(50 + evidenceStrength*(p-50)).toFixed(1) };
+    const effectiveStrength=Math.max(.30,Math.min(1,evidenceStrength*(.65+.35*agreementScore/100)));
+    return { ...obj, [key]: +(50 + effectiveStrength*(p-50)).toFixed(1) };
   };
   const matchProbabilities = shrink3(calibratedMatchProbabilities);
   let marketProbabilities = shrinkBinary(calibratedMarketProbabilities,'over25GoalsPercent');
@@ -521,7 +537,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v2',
       powerRating:{ homeElo, awayElo, homeGames:elo.games(homeTeamIdForStats), awayGames:elo.games(awayTeamIdForStats), adjustment:eloAdjustment },
-      analysisStrength:{ score:Math.round(evidenceStrength*100), sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
+      powerComponents,
+      modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
+      analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
       ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:'normalized-overround' },
       probabilityPipeline:['opponent-strength','robust-form','chance-quality-dedup','dixon-coles','calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
