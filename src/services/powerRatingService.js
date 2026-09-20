@@ -12,6 +12,16 @@ function buildElo(fixtures,options={}){
 function matchupMultiplier(hr,ar,hg=0,ag=0){const sample=Math.min(1,Math.min(hg,ag)/12),gap=clamp((Number(hr)-Number(ar))/400,-1,1),effect=.07*sample*gap;return {home:+clamp(1+effect,.93,1.07).toFixed(4),away:+clamp(1-effect,.93,1.07).toFixed(4),sample:+sample.toFixed(3),gap:+gap.toFixed(3)};}
 module.exports={buildElo,matchupMultiplier,BASE};
 
+async function loadPersistentByIdentity(league,teamId,teamName){
+ try{
+  const PowerRating=require('../models/PowerRating'),key=String(league||'');
+  if(teamId!=null){const byId=await PowerRating.findOne({league:key,teamId:String(teamId)}).lean();if(byId)return byId;}
+  if(!teamName)return null;
+  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'').replace(/[^a-z0-9]/g,'');
+  const target=norm(teamName),rows=await PowerRating.find({league:key}).lean();
+  return rows.find(x=>{const n=norm(x.teamName);return n===target||(n.length>3&&target.length>3&&(n.includes(target)||target.includes(n)));})||null;
+ }catch(_){return null;}
+}
 async function loadPersistent(league,teamId){
  try{const PowerRating=require('../models/PowerRating');return await PowerRating.findOne({league:String(league||''),teamId:String(teamId)}).lean();}catch(_){return null;}
 }
@@ -107,3 +117,5 @@ async function rebuildLeagueFromSportmonks({leagueId,leagueName,days=365}){
  }catch(e){return {ok:false,error:e.message};}
 }
 module.exports.rebuildLeagueFromSportmonks=rebuildLeagueFromSportmonks;
+
+module.exports.loadPersistentByIdentity=loadPersistentByIdentity;
