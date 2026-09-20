@@ -63,6 +63,25 @@ router.get('/', async (req, res) => {
 
   const matches = mergeMissing(smMatches, fallback);
 
+  console.log('[scores:pipeline]', JSON.stringify({
+    date,
+    sportmonksCount: smMatches.length,
+    fallbackCount: fallback.length,
+    total: matches.length,
+    sportmonksByLeague: smMatches.reduce((acc,m)=>{
+      const k=String(m.leagueId||'unknown')+'|'+String(m.league||'unknown');
+      acc[k]=(acc[k]||0)+1; return acc;
+    },{}),
+    premierLeague: matches.filter(m=>/premier league/i.test(String(m.league||''))).map(m=>({
+      id:m.fixtureId, leagueId:m.leagueId, home:m.homeTeam, away:m.awayTeam,
+      homeScore:m.homeScore, awayScore:m.awayScore, source:m.dataSource||m.scoreSource||'fallback'
+    })),
+    superLig: matches.filter(m=>String(m.leagueId||'')==='600'||/super lig|süper lig/i.test(String(m.league||''))).map(m=>({
+      id:m.fixtureId, leagueId:m.leagueId, home:m.homeTeam, away:m.awayTeam,
+      homeScore:m.homeScore, awayScore:m.awayScore, source:m.dataSource||m.scoreSource||'fallback'
+    }))
+  }));
+
   res.set('Cache-Control','no-store');
   return res.json({
     date,
