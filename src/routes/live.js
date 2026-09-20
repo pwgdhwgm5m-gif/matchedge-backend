@@ -235,9 +235,11 @@ router.get('/:fixtureId', async (req, res) => {
       awayLiveXg = bsdXg.away;
       xgSource = 'bsd';
     } else {
-      homeLiveXg = liveXg.estimateLiveXg(homeRawStats);
-      awayLiveXg = liveXg.estimateLiveXg(awayRawStats);
-      xgSource = 'estimate';
+      const hx = liveXg.estimateLiveXg(homeRawStats);
+      const ax = liveXg.estimateLiveXg(awayRawStats);
+      homeLiveXg = hx.available ? hx.value : null;
+      awayLiveXg = ax.available ? ax.value : null;
+      xgSource = (hx.available || ax.available) ? 'estimate' : null;
     }
   }
 
@@ -254,7 +256,10 @@ router.get('/:fixtureId', async (req, res) => {
     possessionHome: possessionObserved?.home,
     possessionAway: possessionObserved?.away,
     redCardsHome: redHome,
-    redCardsAway: redAway
+    redCardsAway: redAway,
+    minute: match.minute,
+    homeScore: match.homeScore,
+    awayScore: match.awayScore
   });
 
   res.json({
@@ -308,8 +313,11 @@ router.get('/:fixtureId', async (req, res) => {
     // dereference pre-match fields that are absent from /api/live/:fixtureId.
     livePrediction: (() => {
       const minute = Number(match.minute || 0);
-      const home = Number(goalProximity?.home ?? momentum?.home ?? 50);
-      const away = Number(goalProximity?.away ?? momentum?.away ?? 50);
+      const homeSignal = goalProximity?.available ? goalProximity.home : (momentum?.available ? momentum.home : null);
+      const awaySignal = goalProximity?.available ? goalProximity.away : (momentum?.available ? momentum.away : null);
+      if (!Number.isFinite(homeSignal) || !Number.isFinite(awaySignal)) return { available:false, market:null, selection:null, probability:null, dataHealth:0 };
+      const home = Number(homeSignal);
+      const away = Number(awaySignal);
       const total = home + away;
       if (!Number.isFinite(home) || !Number.isFinite(away) || total <= 0) {
         return { available: false, market: null, selection: null, probability: null, dataHealth: null };
