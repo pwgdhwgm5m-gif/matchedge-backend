@@ -243,9 +243,20 @@ function aggregateTeamHistory(fixtures, teamId) {
 
 async function getLeagueFixturesBetween(leagueId,start,end){
  if(!leagueId)return {ok:false,error:'league_id_missing',fixtures:[]};
- const result=await request('/fixtures/between/'+start+'/'+end,{include:'participants;scores;statistics.type',filters:'fixtureLeagues:'+leagueId});
- if(!result.ok)return result;
- return {ok:true,fixtures:(result.data?.data||[]).map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId))};
+ // SportMonks date-range endpoints are paginated. Fetch every page so a
+ // season backfill is complete instead of silently stopping at page one.
+ const fixtures=[]; let page=1;
+ while(page<=100){
+  const result=await request('/fixtures/between/'+start+'/'+end,{include:'participants;scores;statistics.type',filters:'fixtureLeagues:'+leagueId,page,per_page:50});
+  if(!result.ok)return result;
+  const body=result.data||{}, rows=Array.isArray(body.data)?body.data:[];
+  fixtures.push(...rows.map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId)));
+  const p=body.pagination||{};
+  const hasMore=p.has_more===true || (Number(p.current_page||page)<Number(p.last_page||page));
+  if(!hasMore || rows.length===0)break;
+  page=Number(p.current_page||page)+1;
+ }
+ return {ok:true,fixtures};
 }
 async function getLeagueTeamsFromRecentFixtures(leagueId,days=365){
  const end=new Date(),start=new Date(end.getTime()-Math.max(30,days)*86400000),iso=d=>d.toISOString().slice(0,10);
