@@ -10,6 +10,9 @@ const WEIGHTS = {
   shotOffTarget: 0.03,
   corner: 0.02,
   dangerousAttack: 0.015,
+  blockedShot: 0.025,
+  shotInsideBox: 0.06,
+  bigChance: 0.12,
 };
 
 function estimateLiveXg(stats) {
@@ -18,7 +21,10 @@ function estimateLiveXg(stats) {
     (stats.shotsOnTarget || 0) * WEIGHTS.shotOnTarget +
     (stats.shotsOffTarget || 0) * WEIGHTS.shotOffTarget +
     (stats.corners || 0) * WEIGHTS.corner +
-    (stats.dangerousAttacks || 0) * WEIGHTS.dangerousAttack;
+    (stats.dangerousAttacks || 0) * WEIGHTS.dangerousAttack +
+    (stats.blockedShots || 0) * WEIGHTS.blockedShot +
+    (stats.shotsInsideBox || 0) * WEIGHTS.shotInsideBox +
+    (stats.bigChances || 0) * WEIGHTS.bigChance;
 
   return +xg.toFixed(2);
 }
@@ -50,6 +56,9 @@ const GOAL_PROXIMITY_WEIGHTS = {
   dangerousAttacks: 0.4,
   corners: 0.8,
   liveXg: 12,
+  blockedShots: 0.7,
+  shotsInsideBox: 1.4,
+  bigChances: 3.2,
 };
 
 function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg) {
@@ -57,6 +66,9 @@ function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg) {
     (stats.shotsOnTarget || 0) * GOAL_PROXIMITY_WEIGHTS.shotsOnTarget +
     (stats.dangerousAttacks || 0) * GOAL_PROXIMITY_WEIGHTS.dangerousAttacks +
     (stats.corners || 0) * GOAL_PROXIMITY_WEIGHTS.corners +
+    (stats.blockedShots || 0) * GOAL_PROXIMITY_WEIGHTS.blockedShots +
+    (stats.shotsInsideBox || 0) * GOAL_PROXIMITY_WEIGHTS.shotsInsideBox +
+    (stats.bigChances || 0) * GOAL_PROXIMITY_WEIGHTS.bigChances +
     (liveXg || 0) * GOAL_PROXIMITY_WEIGHTS.liveXg;
 
   const homeScore = score(homeStats, homeLiveXg);
