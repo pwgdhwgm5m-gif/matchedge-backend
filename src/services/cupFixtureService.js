@@ -48,8 +48,26 @@ async function getSupplementalMatches(date) {
 }
 
 function mergeUnique(primary, supplemental) {
-  const seen = new Set(primary.map(match => String(match.fixtureId)));
-  return primary.concat(supplemental.filter(match => !seen.has(String(match.fixtureId))));
+  // Provider fixture ids are not comparable (SportMonks vs TheSportsDB etc).
+  // De-duplicate by normalized teams + local fixture date as well, while
+  // preserving the primary provider object so SportMonks scores/status win.
+  const norm = value => String(value || '').toLowerCase().normalize('NFD')
+    .replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i')
+    .replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'')
+    .replace(/spor$/g,'').replace(/[^a-z0-9]/g,'');
+  const dateKey = match => String(match.kickoff || match.date || '').slice(0,10);
+  const matchKey = match => [dateKey(match), norm(match.homeTeam), norm(match.awayTeam)].join('|');
+  const seenIds = new Set((primary || []).map(match => String(match.fixtureId ?? match.id ?? '')));
+  const seenMatches = new Set((primary || []).map(matchKey));
+  const additions = (supplemental || []).filter(match => {
+    const id = String(match.fixtureId ?? match.id ?? '');
+    const key = matchKey(match);
+    if ((id && seenIds.has(id)) || seenMatches.has(key)) return false;
+    if (id) seenIds.add(id);
+    seenMatches.add(key);
+    return true;
+  });
+  return (primary || []).concat(additions);
 }
 
 module.exports = { getSupplementalMatches, mergeUnique, transformFixture };
