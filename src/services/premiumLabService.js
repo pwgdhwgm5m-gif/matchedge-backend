@@ -88,5 +88,17 @@ async function similarMatches(fixtureId,{limit=20}={}){
  return{fixtureId:target.fixtureId,match:target.homeTeam+' - '+target.awayTeam,targetPick:target.strongestPick||null,count:comparable.length,graded:graded.length,comparableHitRatePercent:graded.length?+(100*wins/graded.length).toFixed(1):null,matches:comparable,method:'pre-kickoff feature distance; historical rows are strictly earlier than target kickoff'};
 }
 
+
+async function patternFinder({minProbability=60,minQuality=50,maxGap=8,league=''}={}){
+ minProbability=clamp(Number(minProbability)||60,50,90);minQuality=clamp(Number(minQuality)||50,0,100);maxGap=clamp(Number(maxGap)||8,0,30);
+ const q={status:'settled',strongestPick:{$ne:null}};if(league)q.league={$regex:String(league),$options:'i'};
+ const rows=await Prediction.find(q).select('fixtureId kickoff league homeTeam awayTeam homeLambda awayLambda dataQualityScore strongestPick actual').sort({kickoff:1}).limit(2000).lean();
+ const evaluated=[];
+ for(const row of rows){const p=row.strongestPick||{},prob=Number(p.probability)||0,quality=Number(row.dataQualityScore)||0;if(prob<minProbability||quality<minQuality)continue;let gap=null;if(Number(row.homeLambda)>0&&Number(row.awayLambda)>0){const sim=monteCarlo50k(row,5000),sp=simProbabilityForPick(p,sim);if(sp!=null)gap=Math.abs(prob-sp)}if(gap!=null&&gap>maxGap)continue;const hit=pickActualHit(p.key,row.actual);if(hit===null)continue;evaluated.push({fixtureId:row.fixtureId,kickoff:row.kickoff,league:row.league,market:marketFamily(p),probability:prob,quality,simulationGap:gap==null?null:+gap.toFixed(1),hit});}
+ const wins=evaluated.filter(x=>x.hit).length,n=evaluated.length;
+ const byMarket={};for(const x of evaluated){const g=byMarket[x.market]||(byMarket[x.market]={market:x.market,count:0,wins:0});g.count++;if(x.hit)g.wins++}
+ return{filters:{minProbability,minQuality,maxSimulationGap:maxGap,league:league||'all'},count:n,wins,losses:n-wins,hitRatePercent:n?+(100*wins/n).toFixed(1):null,readiness:n<30?'collecting':n<100?'early-signal':'decision-ready',markets:Object.values(byMarket).map(x=>({...x,hitRatePercent:+(100*x.wins/x.count).toFixed(1)})),method:'settled prospective snapshots only; simulation is used as a robustness filter, not as historical input from after kickoff'};
+}
+
 async function simulateFixture(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();if(!row){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0)){const e=new Error('expected_goals_unavailable');e.status=422;throw e}return{fixtureId:row.fixtureId,match:row.homeTeam+' - '+row.awayTeam,kickoff:row.kickoff,league:row.league,simulation:simulationFromLambdas(row.homeLambda,row.awayLambda),modelSnapshot:row.probabilities}}
-module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches};
+module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder};
