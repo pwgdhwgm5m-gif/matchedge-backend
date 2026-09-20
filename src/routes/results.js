@@ -21,96 +21,55 @@ const bsdService = require('../services/bsdService');
 router.get('/', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
 
-  // NOT: gunun fikstur listesi (eventsday.php) ile gercek zamanli livescore
-  // AYNI ANDA cekiliyor - liste eventsday.php'den geliyor ama canli maclarin
-  // skoru/dakikasi, /api/live'in de kullandigi GUNCEL livescore kaynagiyla
-  // "bindiriliyor" (asagida applyLiveOverlay). Aksi halde bu ekran, mac
-  // detayina (canli simulator) gore eski/yanlis skor gosterebiliyordu.
-  const [result, liveResult, verifiedResult, supplemental, oddsEventsResult, sportmonksResult] = await Promise.all([
-    cache.getOrFetch(
-      `results:${date}`,
-      config.cache.ttlLive,
-      () => sportsDb.getMatchesByDate(date)
-    ),
-    cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
-    cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
-    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
-    cache.getOrFetch(`odds-events:${date}`, config.cache.ttlStatic, () => oddsApi.getFixtureEventsByDate(date)),
+  // SportsMonks-first: one subscribed daily feed is the canonical fixture,
+  // score and half-time source. Legacy providers are used only when a
+  // SportMonks match is unavailable; they never overwrite SportMonks data.
+  const [smResult, legacyResult, verifiedResult, supplemental] = await Promise.all([
     Promise.race([
       cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
-      new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_date_timeout'}), 2800))
+      new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_date_timeout'}), 5000))
     ]),
+    cache.getOrFetch(`results:${date}`, config.cache.ttlLive, () => sportsDb.getMatchesByDate(date)),
+    cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
+    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date))
   ]);
 
-  const rawEvents = result && result.ok ? (result.data?.events || []) : [];
-  let simplified = rawEvents
-    .map(sportsDb.transformEvent)
-    .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
+  const sportmonksMatches = smResult?.ok ? sportmonks.toResultMatches(smResult.fixtures) : [];
+  let legacyMatches = legacyResult?.ok
+    ? (legacyResult.data?.events || []).map(sportsDb.transformEvent).filter(m => sportsDb.isWhitelistedLeague(m.leagueId))
+    : [];
 
+  // Only fill fixtures absent from SportsMonks. Do not let legacy score/HT
+  // fields overwrite a subscribed SportMonks fixture.
+  let simplified = cupFixtures.mergeUnique(sportmonksMatches, legacyMatches);
   const supplementalMatches = Array.isArray(supplemental)
-    ? supplemental
-    : (Array.isArray(supplemental?.matches) ? supplemental.matches : []);
+    ? supplemental : (Array.isArray(supplemental?.matches) ? supplemental.matches : []);
   simplified = cupFixtures.mergeUnique(simplified, supplementalMatches);
 
-  // Keep the screen usable if the primary fixture source is temporarily unavailable.
-  // Odds events supply fixture identity; verified score sources below can still enrich matches.
-  if (simplified.length===0 && (!result||!result.ok)) {
-    const oddsFallback=await cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date));
-    if(oddsFallback?.ok&&Array.isArray(oddsFallback.matches)) simplified=oddsFallback.matches;
+  // football-data.org is fallback verification only for matches that did not
+  // arrive from SportMonks.
+  if (verifiedResult?.ok) {
+    const smIds = new Set(sportmonksMatches.map(m => String(m.sportmonksId || '')));
+    const fallback = simplified.filter(m => !smIds.has(String(m.sportmonksId || '')));
+    const verified = footballDataOrg.mergeVerifiedScores(fallback, verifiedResult.matches);
+    let vi=0;
+    simplified = simplified.map(m => smIds.has(String(m.sportmonksId || '')) ? m : verified[vi++]);
   }
 
-  if (liveResult.ok) {
-    const rawLive = (liveResult.data?.livescore || []).filter(
-      e => String(e.strSport || '').toLowerCase() === 'soccer'
-    );
-    simplified = sportsDb.applyLiveOverlay(simplified, rawLive);
+  // HT fallback is deliberately restricted to non-SportMonks fixtures.
+  const nonSm = simplified.filter(m => !m.sportmonksId);
+  if (nonSm.length) {
+    const enriched = await sportsDb.attachHalftimeScores(nonSm);
+    let ei=0;
+    simplified = simplified.map(m => m.sportmonksId ? m : enriched[ei++]);
   }
-
-  // football-data.org is the primary score verifier for the competitions it
-  // covers. It supplies explicit full-time and half-time score objects.
-  // Unmatched leagues stay untouched and continue through TheSportsDB.
-  if (verifiedResult.ok) {
-    simplified = footballDataOrg.mergeVerifiedScores(simplified, verifiedResult.matches);
-  }
-
-  // For every league included in our SportMonks subscription, prefer its
-  // verified current/full-time and first-half scores. Unsubscribed leagues
-  // remain on the existing providers; no hard-coded league allow-list is needed.
-  if (sportmonksResult?.ok) {
-    simplified = sportmonks.enrichMatches(simplified, sportmonksResult.fixtures);
-  }
-
-  // Sonuclar ekraninda "Ilk Yari - Mac Sonu" skorunu gosterebilmek icin,
-  // suresi dolmus (veya ilk yariyi gecmis canli) maclarin ilk yari skorunu
-  // mac zaman cizelgesinden hesaplayip dolduruyoruz (bkz. sportsDbService).
-  // Sonucu cache'lendigi icin bu sadece her mac icin ilk seferde maliyetli.
-  simplified = await sportsDb.attachHalftimeScores(simplified);
-
-  // Final HT fallback for matches that are already past half-time/finished.
-  // This mirrors the live route: SportMonks/football-data/TheSportsDB stay
-  // preferred, BSD is queried only when HT is still genuinely missing.
-  await Promise.all(simplified.map(async m => {
-    if (m.halftimeHome != null && m.halftimeAway != null) return;
-    const finished = String(m.statusShort || '').toUpperCase() === 'FT';
-    const pastHalf = m.isLive && Number(m.minute) > 45;
-    if (!finished && !pastHalf) return;
-    const ht = await Promise.race([
-      bsdService.getHalftimeScoreForMatch(m.homeTeam, m.awayTeam, m.kickoff),
-      new Promise(resolve => setTimeout(() => resolve({available:false}), 1800))
-    ]);
-    if (ht?.available) {
-      m.halftimeHome = ht.home;
-      m.halftimeAway = ht.away;
-      m.halftimeSource = ht.source || 'bsd';
-    }
-  }));
 
   res.json({
     date,
     matches: simplified,
-    fromCache: !!result?.fromCache,
-    verificationSource: verifiedResult.ok ? 'football-data.org' : 'thesportsdb-fallback',
+    primarySource: smResult?.ok ? 'sportmonks' : 'fallback',
+    sportmonksCount: sportmonksMatches.length,
+    fallbackCount: Math.max(0, simplified.length - sportmonksMatches.length)
   });
 });
-
 module.exports = router;
