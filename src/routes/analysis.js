@@ -121,11 +121,12 @@ router.get('/:fixtureId', async (req, res) => {
         // Confirmed lineups are evidence, not an arbitrary performance multiplier.
         // Only a complete XI for both teams is allowed to improve confidence.
         const lineupStatus = lineupComplete ? 'CONFIRMED' : (homeStarterCount || awayStarterCount ? 'PARTIAL' : 'UNAVAILABLE');
+        const lineupEvidence = { confirmed: lineupComplete, status: lineupStatus, homeCount: homeStarterCount, awayCount: awayStarterCount, affectsProbabilities: false };
         const verifiedStats = Object.values(intel.rawStatistics || {}).filter(v => v != null).length;
         const smQualityBonus = Math.min(13, (verifiedStats >= 2 ? 3 : 0) + (verifiedStats >= 6 ? 3 : 0) + (verifiedStats >= 10 ? 2 : 0) + (lineupComplete ? 5 : 0));
         result = { ...result,
           dataQualityScore: Math.min(100, Number(result.dataQualityScore || 0) + smQualityBonus),
-          sportmonks: { fixtureId: sm.sportmonksId, verified: verifiedStats > 0 || lineupComplete || !!smHistory, verifiedStats, lineupComplete, lineupStatus, lineupCounts:{home:homeStarterCount,away:awayStarterCount}, homeStarters: lineupComplete ? intel.homeStarters : [], awayStarters: lineupComplete ? intel.awayStarters : [], homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics, historical: smHistory },
+          sportmonks: { fixtureId: sm.sportmonksId, verified: verifiedStats > 0 || lineupComplete || !!smHistory, verifiedStats, lineupComplete, lineupStatus, lineupEvidence, lineupCounts:{home:homeStarterCount,away:awayStarterCount}, homeStarters: lineupComplete ? intel.homeStarters : [], awayStarters: lineupComplete ? intel.awayStarters : [], homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics, historical: smHistory },
           enhancedDataSource: 'sportmonks'
         };
         if (result.marketBoard) {
@@ -139,7 +140,9 @@ router.get('/:fixtureId', async (req, res) => {
             result.premium.dataHealth.score = health;
             result.premium.dataHealth.level = health >= 80 ? 'high' : health >= 55 ? 'medium' : 'low';
             result.premium.dataHealth.checks = { ...(result.premium.dataHealth.checks || {}), confirmedLineups: lineupComplete };
-            if (!lineupComplete && !result.premium.blockers?.includes('LINEUPS_UNCONFIRMED')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_UNCONFIRMED'];
+            if (lineupStatus === 'PARTIAL' && !result.premium.blockers?.includes('LINEUPS_PARTIAL')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_PARTIAL'];
+            if (lineupStatus === 'UNAVAILABLE' && !result.premium.blockers?.includes('LINEUPS_UNAVAILABLE')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_UNAVAILABLE'];
+            result.premium.lineupEvidence = lineupEvidence;
           }
           result.dataQualityScore = health;
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
