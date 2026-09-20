@@ -58,13 +58,19 @@ router.get('/:fixtureId', async (req, res) => {
     const analysisPromise = computeFullAnalysis({
       fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey,
     });
-    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 15000));
+    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 22000));
     let result = await Promise.race([analysisPromise, timeoutPromise]);
     // Add verified Sportmonks fixture intelligence when we can map the match.
-    const smLive = await cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores());
+    const smLive = await Promise.race([
+      cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores()),
+      new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_timeout'}), 3500))
+    ]);
     const sm = smLive.ok ? sportmonks.findMatch(smLive.fixtures, homeTeamName, awayTeamName) : null;
     if (sm?.sportmonksId) {
-      const intel = await cache.getOrFetch(`sportmonks:intel:${sm.sportmonksId}`, 300, () => sportmonks.getFixtureIntelligence(sm.sportmonksId));
+      const intel = await Promise.race([
+        cache.getOrFetch(`sportmonks:intel:${sm.sportmonksId}`, 300, () => sportmonks.getFixtureIntelligence(sm.sportmonksId)),
+        new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_intel_timeout'}), 3500))
+      ]);
       if (intel.ok) {
         const lineupComplete = (intel.homeStarters?.length || 0) >= 11 && (intel.awayStarters?.length || 0) >= 11;
         const smQualityBonus = 8 + (lineupComplete ? 5 : 0);
