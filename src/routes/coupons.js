@@ -51,6 +51,22 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   return 'void';
 }
 
+function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
+function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
+function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
+async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam){
+  const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(matchDate),footballDataOrg.getMatchesByDate(matchDate),sportmonks.getFixturesByDate(matchDate).catch(()=>({ok:false,fixtures:[]}))]);
+  let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
+  if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);
+  fallback=await sportsDb.attachHalftimeScores(fallback);
+  const smRows=sm.ok?(sm.fixtures||[]):[];
+  let m=smRows.find(x=>String(x.sportmonksId||x.fixtureId)===String(fixtureId))||smRows.find(x=>teamPairMatch(x,homeTeam,awayTeam));
+  if(m&&[5,8,9].includes(Number(m.stateId))&&m.homeScore!=null&&m.awayScore!=null)return {source:'sportmonks',match:{...m,statusShort:'FT',isFinished:true}};
+  m=fallback.find(x=>String(x.fixtureId)===String(fixtureId))||fallback.find(x=>teamPairMatch(x,homeTeam,awayTeam));
+  if(finalMatch(m))return {source:'fallback',match:m};
+  return {source:null,match:null};
+}
+
 async function settlePending(userId) {
   const coupons=await Coupon.find({userId,status:'pending'}).sort({createdAt:-1}).limit(30);
   for(const coupon of coupons){
@@ -93,31 +109,9 @@ async function settlePending(userId) {
     for(const leg of coupon.legs){
       if(leg.selection.result!=='pending') continue;
       if(!leg.matchDate) continue;
-      const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(leg.matchDate),footballDataOrg.getMatchesByDate(leg.matchDate),sportmonks.getFixturesByDate(leg.matchDate).catch(()=>({ok:false,fixtures:[]}))]);
-      let matches=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
-      if(verified.ok)matches=footballDataOrg.mergeVerifiedScores(matches,verified.matches);
-      matches=await sportsDb.attachHalftimeScores(matches);
-      let match=matches.find(m=>String(m.fixtureId)===String(leg.fixtureId));
-      // Coupon fixture IDs can come from different providers. Prefer an exact
-      // SportsMonks ID, then safely match by both team names for the same date.
-      const smMatch=sm.ok?((sm.fixtures||[]).find(m=>String(m.sportmonksId)===String(leg.fixtureId))||sportmonks.findMatch(sm.fixtures||[],leg.homeTeam,leg.awayTeam)):null;
-      if(smMatch && [5,8,9].includes(Number(smMatch.stateId))){
-        match={...(match||{}),fixtureId:leg.fixtureId,statusShort:'FT',homeScore:smMatch.homeScore,awayScore:smMatch.awayScore,halftimeHome:smMatch.halftimeHome,halftimeAway:smMatch.halftimeAway};
-      }
-      // Cross-provider IDs often differ. If the date feed found the same teams,
-      // settle by team identity instead of requiring the stored fixture ID.
-      if(!match){
-        const byTeams=(matches||[]).find(m=>sportmonks.findMatch([{
-          homeTeam:m.homeTeam,awayTeam:m.awayTeam
-        }],leg.homeTeam,leg.awayTeam));
-        if(byTeams) match=byTeams;
-      }
-      const finalStatus=String(match?.statusShort||match?.status||'').toUpperCase();
-      const isFinal=match?.isFinished===true || ['FT','AET','PEN','AWARDED'].includes(finalStatus);
-      if(!match||!isFinal||match.homeScore==null||match.awayScore==null){
-        console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam,rawStatus:match?.statusShort||match?.status||null,smOk:!!sm.ok,smFound:!!smMatch}));
-        continue;
-      }
+      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam);
+      const match=resolved.match;
+      if(!match){console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam}));continue;}
       let corners=null;
       if(leg.selection.key.startsWith('corners')){
         const stats=await sportsDb.getEventStatsFormatted(leg.fixtureId);
