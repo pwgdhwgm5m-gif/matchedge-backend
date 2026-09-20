@@ -64,3 +64,19 @@ async function backfillLeagueFromSportmonks({leagueId,leagueName,days=365}){
 }
 
 module.exports.backfillLeagueFromSportmonks=backfillLeagueFromSportmonks;
+
+async function seedLeagueEventsFromSportmonks({leagueId,leagueName,days=365}){
+ try{
+  if(!leagueId||!leagueName)return {ok:false,error:'leagueId_and_leagueName_required'};
+  const sportmonks=require('./sportmonksService'),PowerRatingEvent=require('../models/PowerRatingEvent');
+  const r=await sportmonks.getLeagueTeamsFromRecentFixtures(leagueId,days);
+  if(!r?.ok)return {ok:false,error:r?.error||'league_history_unavailable'};
+  const rows=(r.fixtures||[]).filter(x=>x.sportmonksId&&x.homeTeamId&&x.awayTeamId&&x.homeScore!=null&&x.awayScore!=null);
+  const ops=rows.map(x=>({updateOne:{filter:{league:String(leagueName),fixtureId:String(x.sportmonksId)},update:{$setOnInsert:{league:String(leagueName),fixtureId:String(x.sportmonksId),kickoff:x.kickoff?new Date(x.kickoff):null,homeTeamId:String(x.homeTeamId),awayTeamId:String(x.awayTeamId),processedAt:new Date()}},upsert:true}}));
+  if(!ops.length)return {ok:true,league:leagueName,totalFixtures:0,seeded:0,existing:0};
+  const out=await PowerRatingEvent.bulkWrite(ops,{ordered:false});
+  const seeded=Number(out.upsertedCount||0);
+  return {ok:true,league:leagueName,totalFixtures:rows.length,seeded,existing:rows.length-seeded};
+ }catch(e){return {ok:false,error:e.message};}
+}
+module.exports.seedLeagueEventsFromSportmonks=seedLeagueEventsFromSportmonks;
