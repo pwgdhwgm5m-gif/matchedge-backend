@@ -259,11 +259,30 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const matchProbabilities = calibrated.match;
   const marketProbabilities = calibrated.goals;
   const cornerProjection = accuracy.cornerProjection(homeAdvanced, awayAdvanced);
-  const smCornerHome = sportmonksHistorical?.home?.averages?.corners;
-  const smCornerAway = sportmonksHistorical?.away?.averages?.corners;
-  const smCornerReady = Number.isFinite(smCornerHome) && Number.isFinite(smCornerAway) && sportmonksHistorical.home.sample >= 5 && sportmonksHistorical.away.sample >= 5;
+  const smHome = sportmonksHistorical?.home;
+  const smAway = sportmonksHistorical?.away;
+  const ha = smHome?.averages || {}, aa = smAway?.averages || {};
+  const smCornerReady = Number.isFinite(ha.corners) && Number.isFinite(aa.corners) && smHome.sample >= 5 && smAway.sample >= 5;
+  const cornerPressure = a => {
+    const parts = [];
+    if (Number.isFinite(a.shots)) parts.push([a.shots / 13, .25]);
+    if (Number.isFinite(a.blockedShots)) parts.push([a.blockedShots / 3.5, .30]);
+    if (Number.isFinite(a.dangerousAttacks)) parts.push([a.dangerousAttacks / 45, .30]);
+    if (Number.isFinite(a.shotsInsideBox)) parts.push([a.shotsInsideBox / 7, .15]);
+    const w = parts.reduce((s,p)=>s+p[1],0);
+    return w ? parts.reduce((s,p)=>s+p[0]*p[1],0)/w : 1;
+  };
+  let smExpectedHome = null, smExpectedAway = null;
+  if (smCornerReady) {
+    const baseHome = Number.isFinite(aa.cornersAgainst) ? (ha.corners + aa.cornersAgainst) / 2 : ha.corners;
+    const baseAway = Number.isFinite(ha.cornersAgainst) ? (aa.corners + ha.cornersAgainst) / 2 : aa.corners;
+    // Pressure is only a bounded supporting adjustment; observed corner for/against
+    // remains the primary signal.
+    smExpectedHome = +(baseHome * Math.max(.90, Math.min(1.10, cornerPressure(ha)))).toFixed(2);
+    smExpectedAway = +(baseAway * Math.max(.90, Math.min(1.10, cornerPressure(aa)))).toFixed(2);
+  }
   const cornerMetrics = smCornerReady
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smCornerHome, smCornerAway), { sample: Math.min(sportmonksHistorical.home.sample,sportmonksHistorical.away.sample), source:'sportmonks-history' })
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', expectedHome:smExpectedHome, expectedAway:smExpectedAway })
     : cornerProjection
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample })
     : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'goal-intensity-fallback' });
@@ -383,7 +402,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOdds: matchOdds,
     marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
-    dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'api-football'),
+    dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable'),
   };
 }
 
