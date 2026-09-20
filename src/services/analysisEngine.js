@@ -360,10 +360,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     const sum=vals.reduce((s,x)=>s+x,0) || 100;
     return { ...probs, homeWinProbability:+(vals[0]*100/sum).toFixed(1), drawProbability:+(vals[1]*100/sum).toFixed(1), awayWinProbability:+(vals[2]*100/sum).toFixed(1) };
   };
+  // Binary markets (O/U, BTTS) must not inherit the 1X2 agreement score.
+  // Until each binary market has its own independent agreement model, shrink
+  // only by evidence/data strength.
   const shrinkBinary = (obj,key) => {
     const p=Number(obj?.[key]); if(!Number.isFinite(p)) return obj;
-    const effectiveStrength=Math.max(.30,Math.min(1,evidenceStrength*(.65+.35*agreementScore/100)));
-    return { ...obj, [key]: +(50 + effectiveStrength*(p-50)).toFixed(1) };
+    const binaryStrength=Math.max(.30,Math.min(1,evidenceStrength));
+    return { ...obj, [key]: +(50 + binaryStrength*(p-50)).toFixed(1) };
   };
   const matchProbabilities = shrink3(calibratedMatchProbabilities);
   let marketProbabilities = shrinkBinary(calibratedMarketProbabilities,'over25GoalsPercent');
