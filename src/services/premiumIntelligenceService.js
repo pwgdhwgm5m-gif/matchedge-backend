@@ -16,8 +16,11 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium }) {
-  const health = Number(dataHealth?.score || 0);
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel }) {
+  let health = Number(dataHealth?.score || 0);
+  if (sportmonksIntel?.verified) health = Math.min(100, health + 8);
+  const lineupComplete = (sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11;
+  if (lineupComplete) health = Math.min(100, health + 5);
   const candidates = [
     { key: 'home', market: '1X2', label: 'Ev Sahibi', probability: Number(modelProbabilities?.homeWinProbability || 0) },
     { key: 'draw', market: '1X2', label: 'Beraberlik', probability: Number(modelProbabilities?.drawProbability || 0) },
@@ -51,7 +54,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   return {
     allMarkets: candidates,
     topPredictions: candidates.slice(0, 3),
-    best: candidates[0] || null,
+    best: (health >= 45 ? candidates[0] : null),
     valuePicks: candidates.filter(item => item.isValue),
   };
 }
