@@ -21,6 +21,7 @@ function poissonProbability(lambda, k) {
  * gercek deger lige gore backtesting ile kalibre edilebilir (bkz. sohbet).
  */
 const DEFAULT_RHO = -0.13;
+const clamp = (x, low, high) => Math.min(high, Math.max(low, x));
 
 function dixonColesTau(x, y, lambda, mu, rho) {
   if (x === 0 && y === 0) return 1 - (lambda * mu * rho);
