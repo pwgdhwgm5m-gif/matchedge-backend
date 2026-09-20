@@ -282,6 +282,18 @@ function aggregateTeamHistory(fixtures, teamId) {
 }
 
 
+async function getLeagueFixturesByDate(date, leagueId) {
+  if (!date || !leagueId) return {ok:false,error:'date_or_league_missing',fixtures:[]};
+  const result=await request('/fixtures/between/'+date+'/'+date,{
+    include:'participants;scores;periods',
+    filters:'fixtureLeagues:'+leagueId,
+    per_page:50
+  });
+  if(!result.ok)return result;
+  const rows=Array.isArray(result.data?.data)?result.data.data:[];
+  return {ok:true,fixtures:rows.map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId))};
+}
+
 async function getFixturesByDate(date) {
   if (!date) return { ok:false, error:'date_missing', fixtures:[] };
   // One request covers every league included in the account subscription.
@@ -356,4 +368,4 @@ function toResultMatches(fixtures) {
   }));
 }
 
-module.exports = { toResultMatches, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+module.exports = { toResultMatches, getLeagueFixturesByDate, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
