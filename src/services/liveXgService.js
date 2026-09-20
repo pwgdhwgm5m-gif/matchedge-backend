@@ -61,7 +61,7 @@ const GOAL_PROXIMITY_WEIGHTS = {
   bigChances: 3.2,
 };
 
-function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg) {
+function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg, context = {}) {
   const score = (stats, liveXg) =>
     (stats.shotsOnTarget || 0) * GOAL_PROXIMITY_WEIGHTS.shotsOnTarget +
     (stats.dangerousAttacks || 0) * GOAL_PROXIMITY_WEIGHTS.dangerousAttacks +
@@ -71,8 +71,20 @@ function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg) {
     (stats.bigChances || 0) * GOAL_PROXIMITY_WEIGHTS.bigChances +
     (liveXg || 0) * GOAL_PROXIMITY_WEIGHTS.liveXg;
 
-  const homeScore = score(homeStats, homeLiveXg);
-  const awayScore = score(awayStats, awayLiveXg);
+  let homeScore = score(homeStats, homeLiveXg);
+  let awayScore = score(awayStats, awayLiveXg);
+
+  // Small bounded context adjustments. Possession only counts when both values
+  // are actually observed; red cards are explicit match-state penalties.
+  if (Number.isFinite(context.possessionHome) && Number.isFinite(context.possessionAway)) {
+    const diff = Math.max(-20, Math.min(20, context.possessionHome - context.possessionAway));
+    homeScore *= 1 + diff * 0.003;
+    awayScore *= 1 - diff * 0.003;
+  }
+  const hr = Math.max(0, Number(context.redCardsHome || 0));
+  const ar = Math.max(0, Number(context.redCardsAway || 0));
+  if (hr) homeScore *= Math.max(0.55, 1 - 0.18 * hr);
+  if (ar) awayScore *= Math.max(0.55, 1 - 0.18 * ar);
   const total = homeScore + awayScore;
 
   if (total === 0) {
