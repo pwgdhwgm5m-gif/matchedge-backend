@@ -51,6 +51,19 @@ function participantName(fixture, location) {
   return p?.name || null;
 }
 
+function statisticValue(f, labels, participant) {
+  const rows = Array.isArray(f.statistics) ? f.statistics : [];
+  const wanted = labels.map(x => x.toLowerCase());
+  const row = rows.find(s => {
+    const name = String(s.type?.name || s.type?.code || s.name || '').toLowerCase();
+    const loc = String(s.location || s.meta?.location || '').toLowerCase();
+    return wanted.some(w => name === w || name.includes(w)) && (!loc || loc === participant);
+  });
+  const v = row?.data?.value ?? row?.value ?? null;
+  const n = Number(String(v ?? '').replace('%',''));
+  return Number.isFinite(n) ? n : null;
+}
+
 function transformFixture(f) {
   const scores = f.scores || [];
   return {
@@ -65,6 +78,16 @@ function transformFixture(f) {
     halftimeAway: halftimeValue(scores, 'away'),
     kickoff: f.starting_at || null,
     stateId: f.state_id,
+    stats: {
+      shotsOnTargetHome: statisticValue(f,['shots on target','shots-on-target'],'home'),
+      shotsOnTargetAway: statisticValue(f,['shots on target','shots-on-target'],'away'),
+      shotsHome: statisticValue(f,['shots total','total shots'],'home'),
+      shotsAway: statisticValue(f,['shots total','total shots'],'away'),
+      cornersHome: statisticValue(f,['corners','corner kicks'],'home'),
+      cornersAway: statisticValue(f,['corners','corner kicks'],'away'),
+      possessionHome: statisticValue(f,['ball possession','possession'],'home'),
+      possessionAway: statisticValue(f,['ball possession','possession'],'away'),
+    },
     raw: f,
   };
 }
