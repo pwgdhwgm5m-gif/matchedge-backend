@@ -241,6 +241,35 @@ function aggregateTeamHistory(fixtures, teamId) {
 }
 
 
+async function getFixturesByDate(date) {
+  if (!date) return { ok:false, error:'date_missing', fixtures:[] };
+  // One request covers every league included in the account subscription.
+  // Do not hard-code league IDs here: SportMonks itself is the entitlement boundary.
+  const all=[]; let page=1;
+  while(page<=20){
+    const result=await request('/fixtures/date/'+date,{include:'participants;scores;periods',page,per_page:50});
+    if(!result.ok)return result;
+    const body=result.data||{},rows=Array.isArray(body.data)?body.data:[];
+    all.push(...rows.map(transformFixture));
+    const p=body.pagination||{};
+    if(p.has_more!==true||rows.length===0)break;
+    page=Number(p.current_page||page)+1;
+  }
+  const unique=new Map();for(const x of all)unique.set(String(x.sportmonksId),x);
+  return {ok:true,fixtures:[...unique.values()]};
+}
+
+function enrichMatches(matches, sportmonksFixtures) {
+  return (matches||[]).map(m=>{
+    const sm=findMatch(sportmonksFixtures,m.homeTeam,m.awayTeam);
+    if(!sm)return m;
+    const out={...m,sportmonksId:sm.sportmonksId,sportmonksLeagueId:sm.leagueId};
+    if(sm.homeScore!=null&&sm.awayScore!=null){out.homeScore=sm.homeScore;out.awayScore=sm.awayScore;out.scoreSource='sportmonks';}
+    if(sm.halftimeHome!=null&&sm.halftimeAway!=null){out.halftimeHome=sm.halftimeHome;out.halftimeAway=sm.halftimeAway;out.halftimeSource='sportmonks';}
+    return out;
+  });
+}
+
 async function getLeagueFixturesBetween(leagueId,start,end){
  if(!leagueId)return {ok:false,error:'league_id_missing',fixtures:[]};
  // SportMonks allows at most 100 days per date-range request. Split longer
@@ -271,4 +300,4 @@ async function getLeagueTeamsFromRecentFixtures(leagueId,days=365){
  return {ok:true,teams:[...teams.values()],fixtures:r.fixtures};
 }
 
-module.exports = { getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+module.exports = { getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
