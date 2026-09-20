@@ -23,10 +23,14 @@ router.get('/', async (req, res) => {
 
   if (liveResult.ok) {
     const rawLive = liveResult.data?.livescore || [];
-    const simplified = rawLive
+    let simplified = rawLive
       .filter(e => String(e.strSport || '').toLowerCase() === 'soccer')
       .map(sportsDb.transformLiveEvent)
       .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
+    // After halftime, enrich live matches with the verified HT score from the
+    // event timeline. If the provider cannot verify it, keep null rather than
+    // inventing 0-0.
+    simplified = await sportsDb.attachHalftimeScores(simplified);
     return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
   }
 
@@ -41,9 +45,10 @@ router.get('/', async (req, res) => {
   }
 
   const rawEvents = result.data?.events || [];
-  const simplified = rawEvents
+  let simplified = rawEvents
     .map(sportsDb.transformEvent)
     .filter(m => m.isLive && sportsDb.isWhitelistedLeague(m.leagueId));
+  simplified = await sportsDb.attachHalftimeScores(simplified);
 
   res.json({ matches: simplified, fromCache: result.fromCache, source: 'eventsday-fallback' });
 });
