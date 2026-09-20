@@ -196,8 +196,10 @@ async function getTeamFixtureHistory(teamId, days = 120) {
 
 function aggregateTeamHistory(fixtures, teamId) {
   const rows = Array.isArray(fixtures) ? fixtures : [];
+  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOnTargetAgainst','shotsAgainst','blockedShotsAgainst','shotsInsideBoxAgainst','bigChancesAgainst','dangerousAttacksAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
   const values = [];
-  for (const f of rows.slice(0,10)) {
+
+  for (const [index, f] of rows.slice(0,14).entries()) {
     const raw = f.raw || {};
     const homeId = participantId(raw,'home');
     const awayId = participantId(raw,'away');
@@ -206,7 +208,11 @@ function aggregateTeamHistory(fixtures, teamId) {
     const pick = key => f.stats?.[key + loc] ?? null;
     const oppLoc = loc === 'Home' ? 'Away' : 'Home';
     const pickOpp = key => f.stats?.[key + oppLoc] ?? null;
+    // Recency decay: newest completed matches matter more, without discarding
+    // the older sample that stabilises early-season analysis.
+    const recencyWeight = Math.pow(0.90, index);
     values.push({
+      venue: loc.toLowerCase(), recencyWeight,
       shotsOnTarget: pick('shotsOnTarget'), shots: pick('shots'), corners: pick('corners'),
       cornersAgainst: pickOpp('corners'), shotsOnTargetAgainst: pickOpp('shotsOnTarget'), shotsAgainst: pickOpp('shots'),
       blockedShotsAgainst: pickOpp('blockedShots'), shotsInsideBoxAgainst: pickOpp('shotsInsideBox'), bigChancesAgainst: pickOpp('bigChances'),
@@ -215,13 +221,23 @@ function aggregateTeamHistory(fixtures, teamId) {
       blockedShots: pick('blockedShots'), shotsInsideBox: pick('shotsInsideBox'), bigChances: pick('bigChances')
     });
   }
-  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOnTargetAgainst','shotsAgainst','blockedShotsAgainst','shotsInsideBoxAgainst','bigChancesAgainst','dangerousAttacksAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
-  const averages={};
-  for (const k of keys) {
-    const nums=values.map(v=>v[k]).filter(Number.isFinite);
-    averages[k]=nums.length ? +(nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(2) : null;
-  }
-  return { sample: values.length, averages };
+
+  const summarize = subset => {
+    const averages={};
+    for (const k of keys) {
+      const valid=subset.filter(v=>Number.isFinite(v[k]));
+      const totalWeight=valid.reduce((s,v)=>s+v.recencyWeight,0);
+      averages[k]=totalWeight
+        ? +(valid.reduce((s,v)=>s+v[k]*v.recencyWeight,0)/totalWeight).toFixed(2)
+        : null;
+    }
+    return { sample:subset.length, averages };
+  };
+
+  const overall=summarize(values);
+  const home=summarize(values.filter(v=>v.venue==='home'));
+  const away=summarize(values.filter(v=>v.venue==='away'));
+  return { ...overall, home, away, weighting:'recency-0.90', window:14 };
 }
 
 module.exports = { request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
