@@ -8,6 +8,11 @@ const bsdService = require('../services/bsdService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const sportmonks = require('../services/sportmonksService');
 
+const quickBound = (promise, fallback, ms = 2500) => Promise.race([
+  promise,
+  new Promise(resolve => setTimeout(() => resolve(fallback), ms))
+]);
+
 /**
  * GET /api/live
  * Su an oynanan tum maclarin listesi.
@@ -19,10 +24,6 @@ const sportmonks = require('../services/sportmonksService');
  * canli gorunebiliyordu). V2 basarisiz olursa eski yontem yedek olarak devrede.
  */
 router.get('/', async (req, res) => {
-  const quickBound = (promise, fallback, ms = 2500) => Promise.race([
-    promise,
-    new Promise(resolve => setTimeout(() => resolve(fallback), ms))
-  ]);
   const liveResult = await quickBound(
     cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
     { ok:false, error:'live_lookup_timeout' }
