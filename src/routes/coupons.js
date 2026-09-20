@@ -5,6 +5,7 @@ const CommunityPick = require('../models/CommunityPick');
 const { requireAuth } = require('../middleware/authMiddleware');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
+const sportmonks = require('../services/sportmonksService');
 const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require('../services/gamificationService');
 
 const router = express.Router();
@@ -92,12 +93,18 @@ async function settlePending(userId) {
     for(const leg of coupon.legs){
       if(leg.selection.result!=='pending') continue;
       if(!leg.matchDate) continue;
-      const [raw,verified]=await Promise.all([sportsDb.getMatchesByDate(leg.matchDate),footballDataOrg.getMatchesByDate(leg.matchDate)]);
+      const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(leg.matchDate),footballDataOrg.getMatchesByDate(leg.matchDate),sportmonks.getFixturesByDate(leg.matchDate).catch(()=>({ok:false,fixtures:[]}))]);
       let matches=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
       if(verified.ok)matches=footballDataOrg.mergeVerifiedScores(matches,verified.matches);
       matches=await sportsDb.attachHalftimeScores(matches);
-      const match=matches.find(m=>String(m.fixtureId)===String(leg.fixtureId));
-      if(!match||match.statusShort!=='FT')continue;
+      let match=matches.find(m=>String(m.fixtureId)===String(leg.fixtureId));
+      // Coupon fixture IDs can come from different providers. Prefer an exact
+      // SportsMonks ID, then safely match by both team names for the same date.
+      const smMatch=sm.ok?((sm.fixtures||[]).find(m=>String(m.sportmonksId)===String(leg.fixtureId))||sportmonks.findMatch(sm.fixtures||[],leg.homeTeam,leg.awayTeam)):null;
+      if(smMatch && [5,8,9].includes(Number(smMatch.stateId))){
+        match={...(match||{}),fixtureId:leg.fixtureId,statusShort:'FT',homeScore:smMatch.homeScore,awayScore:smMatch.awayScore,halftimeHome:smMatch.halftimeHome,halftimeAway:smMatch.halftimeAway};
+      }
+      if(!match||match.statusShort!=='FT'||match.homeScore==null||match.awayScore==null)continue;
       let corners=null;
       if(leg.selection.key.startsWith('corners')){
         const stats=await sportsDb.getEventStatsFormatted(leg.fixtureId);
