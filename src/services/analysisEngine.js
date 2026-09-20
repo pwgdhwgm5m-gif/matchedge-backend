@@ -37,12 +37,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId)
-      : () => footballApi.getTeamForm(home, 15);
+      : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const awayFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId)
-      : () => footballApi.getTeamForm(away, 15);
+      : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const homeFormCacheKey = isSuperLig
     ? `tff-form:${homeTeamName}`
     : isMappedLeague
@@ -72,7 +72,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       }))
     : isMappedLeague
       ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
-      : () => (league && season ? footballApi.getStandings(league, season) : Promise.resolve({ ok: false }));
+      : () => Promise.resolve({ ok:false, error:'legacy_api_disabled' });
   const standingsCacheKey = isSuperLig
     ? 'tff-standings'
     : isMappedLeague
