@@ -251,4 +251,45 @@ async function getRealXgForMatch(homeTeam, awayTeam, kickoffIso, isFinished) {
   return xg;
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg };
+
+function toScoreNumber(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function extractHalftimeScore(e) {
+  const home = pickField(e, [
+    'halftime_home_score','half_time_home_score','ht_home_score',
+    'halftime_score.home','half_time_score.home','score.halftime.home','scores.halftime.home'
+  ]);
+  const away = pickField(e, [
+    'halftime_away_score','half_time_away_score','ht_away_score',
+    'halftime_score.away','half_time_score.away','score.halftime.away','scores.halftime.away'
+  ]);
+  const h=toScoreNumber(home), a=toScoreNumber(away);
+  return h !== null && a !== null ? { home:h, away:a } : null;
+}
+
+async function getHalftimeScoreForMatch(homeTeam, awayTeam, kickoffIso) {
+  if (!API_KEY) return { available:false };
+  const cacheKey='bsd-ht:'+normalizeTeamName(homeTeam)+':'+normalizeTeamName(awayTeam)+':'+String(kickoffIso||'').slice(0,10);
+  const cached=cache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  let match=null;
+  const live=await getLiveFootballEvents();
+  if (live.ok) match=findMatchingEvent(extractList(live.data),homeTeam,awayTeam,kickoffIso);
+
+  if (!match) {
+    const dateKey=(kickoffIso||'').slice(0,10)||new Date().toISOString().slice(0,10);
+    const day=await getFootballEventsForDate(dateKey,homeTeam);
+    if (day.ok) match=findMatchingEvent(extractList(day.data),homeTeam,awayTeam,kickoffIso);
+  }
+  const ht=match ? extractHalftimeScore(match) : null;
+  const result=ht ? {available:true,home:ht.home,away:ht.away,source:'bsd'} : {available:false};
+  cache.set(cacheKey,result,ht ? 60*60*6 : 60);
+  return result;
+}
+
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch };
