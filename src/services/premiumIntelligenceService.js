@@ -147,10 +147,10 @@ function buildPremiumIntelligence({
   if (!hasStandings) blockers.push('NO_STANDINGS');
   if (dataHealth.score < 55) blockers.push('LOW_DATA_HEALTH');
 
-  // Do not force a betting pick from weak or undersampled data.
-  let status = 'NO_BET';
-  if (hasModel && minSample >= 5 && dataHealth.score >= 55) status = 'PICK';
-  if (hasOdds && minSample >= 5 && dataHealth.score >= 55 && bestEdge?.edgePoints >= 3) status = 'VALUE';
+  // Keep data-quality/sample issues as transparent warnings, but do not block
+  // the model's selection. The user decides whether to act on the probabilities.
+  let status = hasModel ? 'PICK' : 'UNAVAILABLE';
+  if (hasOdds && bestEdge?.edgePoints >= 3) status = 'VALUE';
 
   const drivers = [];
   if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_XG_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
