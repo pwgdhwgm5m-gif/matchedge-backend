@@ -147,4 +147,9 @@ app.listen(config.port, async () => {
   };
   setTimeout(settlePredictions, 45000);
   setInterval(settlePredictions, 15 * 60 * 1000);
+  // Prospectively tag future fixtures selected by Coupon V4. These tags are written before kickoff
+  // and are later graded only after the prediction ledger settles the fixture.
+  const captureV4Validation=async()=>{try{const premium=require('./services/premiumLabService');const r=await premium.captureValidation();if(r.tagged)console.log('[premium-v4/validation-capture]',JSON.stringify(r))}catch(error){console.warn('[premium-v4/validation-capture]',error.message)}};
+  setTimeout(captureV4Validation, 90000);
+  setInterval(captureV4Validation, 6 * 60 * 60 * 1000);
 });
