@@ -70,7 +70,7 @@ async function settlePending(userId) {
       coupon.finalScore={home:match.homeScore,away:match.awayScore};
       coupon.settledAt=coupon.status==='pending'?null:new Date();
       coupon.markModified('selections');
-      await coupon.save();
+      try { await coupon.save(); } catch (e) { if (e.name === 'VersionError') continue; throw e; }
       if(coupon.status!=='pending'&&!coupon.rewardedAt){
         const claimed=await Coupon.findOneAndUpdate({_id:coupon._id,rewardedAt:null},{$set:{rewardedAt:new Date()}},{new:true});
         if(claimed){
@@ -102,7 +102,8 @@ async function settlePending(userId) {
     }
     const results=coupon.legs.map(l=>l.selection.result);
     coupon.status=results.some(x=>x==='lost')?'lost':results.some(x=>x==='pending')?'pending':results.some(x=>x==='won')?'won':'void';
-    coupon.settledAt=coupon.status==='pending'?null:new Date(); coupon.markModified('legs'); await coupon.save();
+    coupon.settledAt=coupon.status==='pending'?null:new Date(); coupon.markModified('legs');
+    try { await coupon.save(); } catch (e) { if (e.name === 'VersionError') continue; throw e; }
     if(coupon.status!=='pending'&&!coupon.rewardedAt){
       const claimed=await Coupon.findOneAndUpdate({_id:coupon._id,rewardedAt:null},{$set:{rewardedAt:new Date()}},{new:true});
       if(claimed){
