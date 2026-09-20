@@ -17,7 +17,7 @@ async function loadPersistentByIdentity(league,teamId,teamName){
   const PowerRating=require('../models/PowerRating'),key=String(league||'');
   if(teamId!=null){const byId=await PowerRating.findOne({league:key,teamId:String(teamId)}).lean();if(byId)return byId;}
   if(!teamName)return null;
-  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'').replace(/[^a-z0-9]/g,'');
+  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i').replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'').replace(/spor$/g,'').replace(/[^a-z0-9]/g,'');
   const target=norm(teamName),rows=await PowerRating.find({league:key}).lean();
   const exact=rows.find(x=>norm(x.teamName)===target);if(exact)return {...exact,_identityMatch:'name-exact'};
   const fuzzy=rows.filter(x=>{const n=norm(x.teamName);return n.length>4&&target.length>4&&(n.includes(target)||target.includes(n));});
