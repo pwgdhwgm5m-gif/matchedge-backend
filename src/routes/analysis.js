@@ -72,12 +72,34 @@ router.get('/:fixtureId', async (req, res) => {
         new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_intel_timeout'}), 3500))
       ]);
       if (intel.ok) {
+        // Historical Sportmonks layer: only completed fixtures, bounded so it can
+        // never block the base model. These aggregates are evidence/context, not
+        // arbitrary probability multipliers.
+        let smHistory = null;
+        if (sm.homeTeamId && sm.awayTeamId) {
+          const [hh, ah] = await Promise.all([
+            Promise.race([
+              cache.getOrFetch(`sportmonks:history:${sm.homeTeamId}`, 1800, () => sportmonks.getTeamFixtureHistory(sm.homeTeamId)),
+              new Promise(resolve => setTimeout(() => resolve({ok:false,error:'history_timeout'}), 3000))
+            ]),
+            Promise.race([
+              cache.getOrFetch(`sportmonks:history:${sm.awayTeamId}`, 1800, () => sportmonks.getTeamFixtureHistory(sm.awayTeamId)),
+              new Promise(resolve => setTimeout(() => resolve({ok:false,error:'history_timeout'}), 3000))
+            ])
+          ]);
+          if (hh.ok || ah.ok) {
+            smHistory = {
+              home: hh.ok ? sportmonks.aggregateTeamHistory(hh.fixtures, sm.homeTeamId) : null,
+              away: ah.ok ? sportmonks.aggregateTeamHistory(ah.fixtures, sm.awayTeamId) : null
+            };
+          }
+        }
         const lineupComplete = (intel.homeStarters?.length || 0) >= 11 && (intel.awayStarters?.length || 0) >= 11;
         const verifiedStats = Object.values(intel.rawStatistics || {}).filter(v => v != null).length;
         const smQualityBonus = Math.min(13, (verifiedStats >= 2 ? 3 : 0) + (verifiedStats >= 6 ? 3 : 0) + (verifiedStats >= 10 ? 2 : 0) + (lineupComplete ? 5 : 0));
         result = { ...result,
           dataQualityScore: Math.min(100, Number(result.dataQualityScore || 0) + smQualityBonus),
-          sportmonks: { fixtureId: sm.sportmonksId, verified: verifiedStats > 0 || lineupComplete, verifiedStats, lineupComplete, homeStarters: intel.homeStarters, awayStarters: intel.awayStarters, homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics },
+          sportmonks: { fixtureId: sm.sportmonksId, verified: verifiedStats > 0 || lineupComplete || !!smHistory, verifiedStats, lineupComplete, homeStarters: intel.homeStarters, awayStarters: intel.awayStarters, homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics, historical: smHistory },
           enhancedDataSource: 'sportmonks'
         };
         if (result.marketBoard) {
