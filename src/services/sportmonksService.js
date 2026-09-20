@@ -208,12 +208,14 @@ function aggregateTeamHistory(fixtures, teamId) {
     const pickOpp = key => f.stats?.[key + oppLoc] ?? null;
     values.push({
       shotsOnTarget: pick('shotsOnTarget'), shots: pick('shots'), corners: pick('corners'),
-      cornersAgainst: pickOpp('corners'),
+      cornersAgainst: pickOpp('corners'), shotsOnTargetAgainst: pickOpp('shotsOnTarget'), shotsAgainst: pickOpp('shots'),
+      blockedShotsAgainst: pickOpp('blockedShots'), shotsInsideBoxAgainst: pickOpp('shotsInsideBox'), bigChancesAgainst: pickOpp('bigChances'),
+      dangerousAttacksAgainst: pickOpp('dangerousAttacks'),
       shotsOffTarget: pick('shotsOffTarget'), attacks: pick('attacks'), dangerousAttacks: pick('dangerousAttacks'),
       blockedShots: pick('blockedShots'), shotsInsideBox: pick('shotsInsideBox'), bigChances: pick('bigChances')
     });
   }
-  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
+  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOnTargetAgainst','shotsAgainst','blockedShotsAgainst','shotsInsideBoxAgainst','bigChancesAgainst','dangerousAttacksAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
   const averages={};
   for (const k of keys) {
     const nums=values.map(v=>v[k]).filter(Number.isFinite);
