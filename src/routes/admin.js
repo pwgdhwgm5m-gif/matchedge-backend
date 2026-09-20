@@ -76,6 +76,14 @@ router.post('/power-rating-seed-ledger', async (req,res)=>{
  }catch(error){console.error('[power-rating-seed-ledger]',error);res.status(500).json({error:'Power rating ledger seed başarısız'});}
 });
 
+router.post('/power-rating-rebuild-league', async (req,res)=>{
+ try{
+  const {leagueId,leagueName,days}=req.body||{};if(!leagueId||!leagueName)return res.status(400).json({error:'leagueId ve leagueName gerekli'});
+  const powerRating=require('../services/powerRatingService');
+  res.json(await powerRating.rebuildLeagueFromSportmonks({leagueId,leagueName,days:Math.min(730,Math.max(60,Number(days)||365))}));
+ }catch(error){console.error('[power-rating-rebuild-league]',error);res.status(500).json({error:'League power rating rebuild başarısız'});}
+});
+
 router.get('/model-calibration', async (req, res) => {
   try {
     const rows = await ModelCalibration.find({}).sort({active:-1,trainedAt:-1}).limit(60).lean();
