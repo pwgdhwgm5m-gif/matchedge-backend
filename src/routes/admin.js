@@ -51,6 +51,11 @@ router.get('/walk-forward-audit', async (req, res) => {
   catch (error) { console.error('[walk-forward-audit]', error); res.status(500).json({ error: 'Walk-forward audit alınamadı.' }); }
 });
 
+router.get('/paired-model-audit', async (req, res) => {
+  try { res.json(await ledger.pairedAudit()); }
+  catch (error) { console.error('[paired-model-audit]', error); res.status(500).json({ error: 'Paired model audit alınamadı.' }); }
+});
+
 router.post('/power-rating-backfill', async (req,res)=>{
   try{
     const {league,teamId,days}=req.body||{}; if(!teamId)return res.status(400).json({error:'teamId gerekli'});
