@@ -5,117 +5,73 @@ const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const cupFixtures = require('../services/cupFixtureService');
-const oddsApi = require('../services/oddsApiService');
 const sportmonks = require('../services/sportmonksService');
-const bsdService = require('../services/bsdService');
+
+const normTeam = value => String(value || '').toLowerCase().normalize('NFD')
+  .replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i')
+  .replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'')
+  .replace(/spor$/g,'').replace(/[^a-z0-9]/g,'');
+
+const matchKey = m => normTeam(m.homeTeam) + '|' + normTeam(m.awayTeam);
+
+function validMatch(m) {
+  return !!(m && m.homeTeam && m.awayTeam);
+}
+
+function mergeMissing(primary, fallback) {
+  const out = (primary || []).filter(validMatch);
+  const seen = new Set(out.map(matchKey));
+  for (const m of (fallback || []).filter(validMatch)) {
+    const key = matchKey(m);
+    if (!seen.has(key)) { seen.add(key); out.push(m); }
+  }
+  return out;
+}
 
 /**
- * GET /api/results?date=2026-09-09
- * Belirli bir gunun tum mac sonuclarini, sadelestirilmis formatta dondurur.
- * Canli maclar da bu listede "isLive: true" olarak gorunur.
- *
- * NOT: Eskiden freeFootballApiService kullaniyordu - o kaynak aylik
- * kotasini doldurdugu icin artik sportsDbService (TheSportsDB) kullaniyor,
- * /api/matches route'uyla ayni kaynak.
+ * Scores pipeline, deliberately simple:
+ * 1. SportMonks daily fixtures are canonical.
+ * 2. TheSportsDB only supplies matches absent from SportMonks.
+ * 3. Supplemental/cup feed only supplies matches still absent.
+ * 4. football-data.org may verify/enrich fallback rows only.
+ * A fallback provider can never replace a SportMonks score, status or HT.
  */
-router.get('/sportmonks-turkey-diagnostic', async (req, res) => {
-  const date = req.query.date || new Date().toISOString().split('T')[0];
-  const result = await sportmonks.getLeagueFixturesByDate(date, 600);
-  return res.json({
-    date, leagueId:600, ok:!!result?.ok, error:result?.error||null,
-    count:result?.fixtures?.length||0,
-    fixtures:(result?.fixtures||[]).map(f=>({
-      id:f.sportmonksId, leagueId:f.leagueId, league:f.leagueName,
-      home:f.homeTeam, away:f.awayTeam, homeScore:f.homeScore, awayScore:f.awayScore,
-      halftimeHome:f.halftimeHome, halftimeAway:f.halftimeAway,
-      stateId:f.stateId, statusShort:f.statusShort
-    }))
-  });
-});
-
 router.get('/', async (req, res) => {
-  const date = req.query.date || new Date().toISOString().split('T')[0];
-  const normTeam = value => String(value || '').toLowerCase().normalize('NFD')
-    .replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i')
-    .replace(/\b(fc|cf|afc|sc|fk|sk|ac|as)\b/g,'')
-    .replace(/spor$/g,'').replace(/[^a-z0-9]/g,'');
-  const sameMatch = (a,b) => normTeam(a.homeTeam)===normTeam(b.homeTeam) && normTeam(a.awayTeam)===normTeam(b.awayTeam);
+  const date = req.query.date || new Date().toISOString().slice(0,10);
 
-  // SportsMonks-first: one subscribed daily feed is the canonical fixture,
-  // score and half-time source. Legacy providers are used only when a
-  // SportMonks match is unavailable; they never overwrite SportMonks data.
-  const [turkeySmResult, smResult, legacyResult, verifiedResult, supplemental] = await Promise.all([
-    cache.getOrFetch(`sportmonks:tr:600:${date}`, config.cache.ttlLive, () => sportmonks.getLeagueFixturesByDate(date, 600)),
-    Promise.race([
-      cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
-      new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_date_timeout'}), 5000))
-    ]),
-    cache.getOrFetch(`results:${date}`, config.cache.ttlLive, () => sportsDb.getMatchesByDate(date)),
-    cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
-    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date))
+  const [smResult, legacyResult, supplementalResult, verifiedResult] = await Promise.all([
+    cache.getOrFetch('scores:sm:'+date, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
+    cache.getOrFetch('scores:legacy:'+date, config.cache.ttlLive, () => sportsDb.getMatchesByDate(date)),
+    cache.getOrFetch('scores:supplemental:'+date, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
+    cache.getOrFetch('scores:verified:'+date, 300, () => footballDataOrg.getMatchesByDate(date))
   ]);
 
-  console.log('[results:sportmonks:turkey]', JSON.stringify({
-    date,
-    ok: !!turkeySmResult?.ok,
-    error: turkeySmResult?.error || null,
-    count: turkeySmResult?.fixtures?.length || 0,
-    fixtures: (turkeySmResult?.fixtures || []).map(f => ({
-      id:f.sportmonksId, leagueId:f.leagueId, league:f.leagueName,
-      home:f.homeTeam, away:f.awayTeam, homeScore:f.homeScore, awayScore:f.awayScore,
-      halftimeHome:f.halftimeHome, halftimeAway:f.halftimeAway, stateId:f.stateId
-    }))
-  }));
-  const allSmFixtures = [...(turkeySmResult?.ok ? turkeySmResult.fixtures : []), ...(smResult?.ok ? smResult.fixtures : [])];
-  const uniqueSm = new Map(allSmFixtures.map(f => [String(f.sportmonksId), f]));
-  const sportmonksMatches = sportmonks.toResultMatches([...uniqueSm.values()]);
-  let legacyMatches = legacyResult?.ok
+  const smMatches = smResult?.ok ? sportmonks.toResultMatches(smResult.fixtures || []) : [];
+  const legacyMatches = legacyResult?.ok
     ? (legacyResult.data?.events || []).map(sportsDb.transformEvent).filter(m => sportsDb.isWhitelistedLeague(m.leagueId))
     : [];
+  const supplementalMatches = Array.isArray(supplementalResult)
+    ? supplementalResult : (Array.isArray(supplementalResult?.matches) ? supplementalResult.matches : []);
 
-  // Only fill fixtures absent from SportsMonks. Do not let legacy score/HT
-  // fields overwrite a subscribed SportMonks fixture.
-  let simplified = cupFixtures.mergeUnique(sportmonksMatches, legacyMatches);
-  const supplementalMatches = Array.isArray(supplemental)
-    ? supplemental : (Array.isArray(supplemental?.matches) ? supplemental.matches : []);
-  simplified = cupFixtures.mergeUnique(simplified, supplementalMatches);
+  let fallback = mergeMissing(legacyMatches, supplementalMatches);
 
-  // football-data.org is fallback verification only for matches that did not
-  // arrive from SportMonks.
-  if (verifiedResult?.ok) {
-    const smIds = new Set(sportmonksMatches.map(m => String(m.sportmonksId || '')));
-    const fallback = simplified.filter(m => !smIds.has(String(m.sportmonksId || '')));
-    const verified = footballDataOrg.mergeVerifiedScores(fallback, verifiedResult.matches);
-    let vi=0;
-    simplified = simplified.map(m => smIds.has(String(m.sportmonksId || '')) ? m : verified[vi++]);
+  // Enrich only fallback rows. SportMonks remains untouched.
+  if (verifiedResult?.ok && fallback.length) {
+    fallback = footballDataOrg.mergeVerifiedScores(fallback, verifiedResult.matches);
   }
+  if (fallback.length) fallback = await sportsDb.attachHalftimeScores(fallback);
 
-  // The Turkish scoreboard must never become incomplete merely because
-  // SportMonks daily entitlement returned only part of league 600. The legacy
-  // fixture feed is already loaded above, so restore any missing Turkish
-  // fixtures by team identity while keeping SportMonks authoritative where it
-  // exists.
-  const turkishLegacy = legacyMatches.filter(m =>
-    String(m.leagueId || '') === '4339' || /turk|super lig|süper lig/i.test(String(m.league || m.leagueName || ''))
-  );
-  for (const m of turkishLegacy) {
-    if (!simplified.some(x => sameMatch(x,m))) simplified.push(m);
-  }
+  const matches = mergeMissing(smMatches, fallback);
 
-  // HT fallback is deliberately restricted to non-SportMonks fixtures.
-  const nonSm = simplified.filter(m => !m.sportmonksId);
-  if (nonSm.length) {
-    const enriched = await sportsDb.attachHalftimeScores(nonSm);
-    let ei=0;
-    simplified = simplified.map(m => m.sportmonksId ? m : enriched[ei++]);
-  }
-
-  res.json({
+  res.set('Cache-Control','no-store');
+  return res.json({
     date,
-    matches: simplified,
-    primarySource: (turkeySmResult?.ok || smResult?.ok) ? 'sportmonks' : 'fallback',
-    sportmonksCount: sportmonksMatches.length,
-    fallbackCount: Math.max(0, simplified.length - sportmonksMatches.length)
+    matches,
+    primarySource: smMatches.length ? 'sportmonks' : 'fallback',
+    sportmonksCount: smMatches.length,
+    fallbackCount: Math.max(0, matches.length-smMatches.length),
+    sourceOrder: ['sportmonks','thesportsdb','supplemental','football-data-org']
   });
 });
+
 module.exports = router;
