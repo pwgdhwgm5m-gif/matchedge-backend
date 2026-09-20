@@ -115,12 +115,14 @@ async function valueFinder({limit=30}={}){
  for(const key of byLeague.keys()){const r=await oddsApi.getOddsForLeague(key);byLeague.set(key,r.ok?r.data:null);if(!r.ok)errors.push({leagueKey:key,error:String(r.error||'odds_unavailable')})}
  for(const row of rows){
   const key=oddsLeagueKey(row.league),data=key?byLeague.get(key):null;if(!data)continue;
-  const odds=oddsApi.extractMatchOdds(data,row.homeTeam,row.awayTeam);if(!odds)continue;
-  const market=oddsApi.shinImpliedProbabilities(odds)||oddsApi.normalizeImpliedProbabilities(odds),p=row.probabilities||{};
-  const model={home:Number(p.home)*100,draw:Number(p.draw)*100,away:Number(p.away)*100};
+  const marketOdds=oddsApi.extractMatchMarketOdds(data,row.homeTeam,row.awayTeam);if(!marketOdds)continue;
+  const h={home:marketOdds.best.home?.price,draw:marketOdds.best.draw?.price,away:marketOdds.best.away?.price};if(!h.home||!h.draw||!h.away)continue;
+  const market=oddsApi.shinImpliedProbabilities(h)||oddsApi.normalizeImpliedProbabilities(h),p=row.probabilities||{};
+  const model={home:Number(p.home)*100,draw:Number(p.draw)*100,away:Number(p.away)*100,over25:Number(p.over25)*100,under25:(1-Number(p.over25))*100,bttsYes:Number(p.btts)*100,bttsNo:(1-Number(p.btts))*100};
   const outcomes={};
-  for(const side of ['home','draw','away']){if(!Number.isFinite(model[side])||!Number.isFinite(Number(odds[side])))continue;const edge=+(model[side]-Number(market[side])).toFixed(1),ev=+((model[side]/100)*Number(odds[side])-1).toFixed(3);outcomes[side]={odds:Number(odds[side]),modelProbability:+model[side].toFixed(1),marketProbability:Number(market[side]),edgePercent:edge,expectedValuePercent:+(ev*100).toFixed(1),positiveEV:ev>0}}
-  results.push({fixtureId:row.fixtureId,kickoff:row.kickoff,league:row.league,match:row.homeTeam+' - '+row.awayTeam,provider:'The Odds API',deVigMethod:market.method,overroundPercent:market.overroundPercent,outcomes});
+  for(const side of ['home','draw','away']){const price=marketOdds.best[side]?.price;if(!Number.isFinite(model[side])||!Number.isFinite(Number(price)))continue;const edge=+(model[side]-Number(market[side])).toFixed(1),ev=+((model[side]/100)*Number(price)-1).toFixed(3);outcomes[side]={odds:Number(price),bookmaker:marketOdds.best[side]?.bookmaker,modelProbability:+model[side].toFixed(1),marketProbability:Number(market[side]),edgePercent:edge,expectedValuePercent:+(ev*100).toFixed(1),positiveEV:ev>0}}
+  const op=marketOdds.best.over25?.price,up=marketOdds.best.under25?.price;if(op&&up){const rawO=1/op,rawU=1/up,sum=rawO+rawU,mpO=100*rawO/sum,mpU=100*rawU/sum;for(const [side,price,mp] of [['over25',op,mpO],['under25',up,mpU]]){const ev=(model[side]/100)*price-1;outcomes[side]={odds:Number(price),bookmaker:marketOdds.best[side]?.bookmaker,modelProbability:+model[side].toFixed(1),marketProbability:+mp.toFixed(1),edgePercent:+(model[side]-mp).toFixed(1),expectedValuePercent:+(100*ev).toFixed(1),positiveEV:ev>0}}}
+  results.push({fixtureId:row.fixtureId,kickoff:row.kickoff,league:row.league,match:row.homeTeam+' - '+row.awayTeam,provider:'The Odds API',bookmakersChecked:marketOdds.bookmakers,deVigMethod:market.method,overroundPercent:market.overroundPercent,outcomes,bttsStatus:'provider request currently has h2h,totals only'});
  }
  return{provider:'The Odds API',providerAvailable:results.length>0||errors.length===0,pricedMatches:results.length,matches:results,errors:errors.length?errors:undefined,note:results.length?'Live bookmaker prices were fetched; EV is model probability versus current decimal price.':'No verified current bookmaker prices were returned; no value claim is produced.'};
 }
