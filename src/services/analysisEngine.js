@@ -512,6 +512,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     premium,
     halfMarkets,
     sportmonksMarketEvidence: smMarketEvidence,
+    evidenceStrength,
+    modelAgreementScore: agreementScore,
   });
 
   return {
