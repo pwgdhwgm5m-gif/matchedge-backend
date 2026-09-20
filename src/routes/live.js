@@ -168,7 +168,7 @@ router.get('/:fixtureId', async (req, res) => {
     cache.getOrFetch(`tsdb-highlights:${fixtureId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(fixtureId)),
   ]);
 
-  const stats = statsResult.available ? statsResult.stats : {};
+  const stats = statsResult.available ? statsResult.stats : {};\n  const smLiveDetail = await cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay());\n  const smMatch = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;\n  const smStats = smMatch?.stats || {};
 
   // Canli xG/momentum/gol yakinligi hesabi icin iki takimin ham istatistiklerini
   // ortak sekle getiriyoruz. TheSportsDB "tehlikeli atak" ve "isabetsiz sut"
@@ -238,7 +238,7 @@ router.get('/:fixtureId', async (req, res) => {
     xgSource,
     momentum,
     goalProximity,
-    possession: stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 },
+    possession: (smStats.possessionHome != null && smStats.possessionAway != null) ? { home: smStats.possessionHome, away: smStats.possessionAway } : (stats.possession ? { home: stats.possession.home ?? 50, away: stats.possession.away ?? 50 } : { home: 50, away: 50 }),\n    liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
     stats: {
       shotsOnTargetHome: homeRawStats.shotsOnTarget,
       shotsOnTargetAway: awayRawStats.shotsOnTarget,
@@ -256,7 +256,7 @@ router.get('/:fixtureId', async (req, res) => {
       redCardsHome: stats.redCards ? stats.redCards.home : null,
       redCardsAway: stats.redCards ? stats.redCards.away : null,
     },
-    statsAvailable: statsResult.available,
+    statsAvailable: Boolean(smMatch || statsResult.available),
     timeline: timelineResult.available ? timelineResult.events : [],
     lineup: lineupResult.available
       ? { home: lineupResult.home, away: lineupResult.away, homeSubs: lineupResult.homeSubs, awaySubs: lineupResult.awaySubs }
