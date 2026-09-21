@@ -1,6 +1,7 @@
 const mongoose=require('mongoose');
 const schema=new mongoose.Schema({
  username:{type:String,required:true,default:'adminxyz',lowercase:true,index:true},
+ rpID:{type:String,required:true,default:'matchedge-backend-kujb.onrender.com',index:true},
  credentialID:{type:String,required:true,unique:true},
  publicKey:{type:String,required:true},
  counter:{type:Number,default:0},
