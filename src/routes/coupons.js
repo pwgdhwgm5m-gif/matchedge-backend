@@ -120,6 +120,7 @@ async function settlePending(userId) {
       if(leg.selection.key.startsWith('corners')){
         const stats=await sportsDb.getEventStatsFormatted(leg.fixtureId);
         if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
+        if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
       }
       leg.selection.result=settleSelection(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
       leg.finalScore={home:match.homeScore,away:match.awayScore};
