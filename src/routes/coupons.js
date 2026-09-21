@@ -51,6 +51,14 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   return 'void';
 }
 
+function settleSelectionWithAvailableData(key,home,away,corners,halftimeHome,halftimeAway){
+  const needsCorners=String(key||'').startsWith('corners');
+  const needsHalftime=['fhHome','fhDraw','fhAway','shHome','shDraw','shAway','mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'].includes(key);
+  if(needsCorners&&corners==null)return 'pending';
+  if(needsHalftime&&(halftimeHome==null||halftimeAway==null))return 'pending';
+  return settleSelection(key,home,away,corners,halftimeHome,halftimeAway);
+}
+
 function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
 function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
@@ -81,16 +89,14 @@ async function settlePending(userId) {
     // Migrate/settle legacy one-match coupons created before multi-leg slips.
     if(!coupon.legs?.length){
       if(!coupon.fixtureId || !coupon.matchDate || !(coupon.selections||[]).length) continue;
-      const [raw,verified]=await Promise.all([sportsDb.getMatchesByDate(coupon.matchDate),footballDataOrg.getMatchesByDate(coupon.matchDate)]);
-      let matches=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
-      if(verified.ok)matches=footballDataOrg.mergeVerifiedScores(matches,verified.matches);
-      matches=await sportsDb.attachHalftimeScores(matches);
-      const match=matches.find(m=>String(m.fixtureId)===String(coupon.fixtureId));
-      if(!match||match.statusShort!=='FT')continue;
+      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam);
+      const match=resolved.match;
+      if(!match)continue;
       let corners=null;
       if(coupon.selections.some(s=>String(s.key||'').startsWith('corners'))){
         const stats=await sportsDb.getEventStatsFormatted(coupon.fixtureId);
         if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
+        if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
       }
       for(const selection of coupon.selections){
         if(selection.result!=='pending')continue;
@@ -226,7 +232,7 @@ router.post('/recompute', async (req,res)=>{
           if(leg.selection?.result!=='pending')continue;
           const h=leg.finalScore?.home,a=leg.finalScore?.away;
           if(h==null||a==null)continue;
-          const r=settleSelection(leg.selection.key,Number(h),Number(a),null,null,null);
+          const r=settleSelectionWithAvailableData(leg.selection.key,Number(h),Number(a),null,null,null);
           if(r!=='pending'){leg.selection.result=r;changed=true;selectionsUpdated++}
         }
         if(changed){
@@ -235,7 +241,7 @@ router.post('/recompute', async (req,res)=>{
           coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('legs');await coupon.save();couponsUpdated++;
         }
       }else if(coupon.finalScore?.home!=null&&coupon.finalScore?.away!=null){
-        for(const s of coupon.selections||[]){if(s.result==='pending'){s.result=settleSelection(s.key,Number(coupon.finalScore.home),Number(coupon.finalScore.away),null,null,null);changed=true;selectionsUpdated++}}
+        for(const s of coupon.selections||[]){if(s.result==='pending'){const r=settleSelectionWithAvailableData(s.key,Number(coupon.finalScore.home),Number(coupon.finalScore.away),null,null,null);if(r!=='pending'){s.result=r;changed=true;selectionsUpdated++}}}
         if(changed){const rs=coupon.selections.map(s=>s.result);coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('selections');await coupon.save();couponsUpdated++}
       }
     }
