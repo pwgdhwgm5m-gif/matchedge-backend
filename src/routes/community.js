@@ -72,7 +72,7 @@ router.get('/edge-dna',async(req,res)=>{
 router.get('/weekly-challenge',async(req,res)=>{
  const start=weekStart(),end=new Date(start.getTime()+7*86400000),weekKey=start.toISOString().slice(0,10);
  const coupons=await Coupon.find({userId:req.user.userId,createdAt:{$gte:start,$lt:end}}).lean();
- const settled=coupons.filter(x=>x.status!=='pending'),perfect=settled.filter(x=>x.status==='won'&&(x.legs?.length||0)>=5).length;
+ const settled=coupons.filter(x=>x.status!=='pending'),perfect=settled.filter(x=>x.status==='won'&&(x.legs?.length||0)>=3).length;
  const legs=coupons.reduce((n,x)=>n+(x.legs?.length||0),0),progress={slips:coupons.length,legs,perfect},goals={slips:3,legs:10,perfect:1};
  let user=await getWalletUser(req.user.userId);if(!user)return res.status(404).json({error:'Kullanıcı bulunamadı.'});
  if(user.weeklyChallengeKey!==weekKey){user.weeklyChallengeKey=weekKey;user.weeklyChallengeRewards={slips:false,legs:false,perfect:false};await user.save()}
