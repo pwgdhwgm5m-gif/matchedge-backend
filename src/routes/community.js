@@ -49,7 +49,7 @@ router.get('/leaderboard',async(req,res)=>{
  const users=await User.find({xp:{$gte:250}}).sort({xp:-1,correctPicks:-1,createdAt:1}).limit(50).lean();
  const leaderboard=users.map((u,i)=>publicUser(u,i+1));
  const me=await getWalletUser(req.user.userId);
- const myPosition=me && (me.xp||0)>=250 ? await User.countDocuments({xp:{$gte:250,$gt:me.xp||0}})+1 : null;
+ let myPosition=null;if(me&&(me.xp||0)>=250){myPosition=await User.countDocuments({xp:{$gte:250},$or:[{xp:{$gt:me.xp||0}},{xp:me.xp||0,correctPicks:{$gt:me.correctPicks||0}},{xp:me.xp||0,correctPicks:me.correctPicks||0,createdAt:{$lt:me.createdAt}}]})+1;}
  res.json({leaderboard,me:me?publicUser(me,myPosition):null});
 });
 router.get('/fixture/:fixtureId',async(req,res)=>{
