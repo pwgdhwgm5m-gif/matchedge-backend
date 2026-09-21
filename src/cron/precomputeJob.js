@@ -7,6 +7,7 @@ const sportsDb = require('../services/sportsDbService');
 const { computeFullAnalysis } = require('../services/analysisEngine');
 const ledger = require('../services/predictionLedgerService');
 const modelCalibration = require('../services/modelCalibrationService');
+const premiumLab = require('../services/premiumLabService');
 
 const PRECOMPUTE_TSDB_LEAGUES = {
   '4339': '71',   // Türkiye Süper Lig (TFF scraper)
@@ -120,6 +121,7 @@ async function precomputeTodaysMatches() {
 
       cache.set(`precomputed:${fixture.fixtureId}`, precomputed, config.cache.ttlPrecomputed);
       await ledger.capture(result, { fixtureId: fixture.fixtureId, kickoff: fixture.kickoff, league: fixture.leagueName, homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName });
+      await premiumLab.lockFixtureValidation(fixture.fixtureId);
     } catch (err) {
       console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
     }
