@@ -146,7 +146,13 @@ async function settlePending(userId) {
   return coupons.length;
 }
 async function cleanupFinishedCoupons(){
-  const result=await Coupon.deleteMany({status:{$in:['won','lost','void']}});
+  // A slip can become LOST as soon as one leg loses while later legs are
+  // still pending. Never purge it until every leg/selection is settled.
+  const result=await Coupon.deleteMany({
+    status:{$in:['won','lost','void']},
+    'legs.selection.result':{$ne:'pending'},
+    'selections.result':{$ne:'pending'}
+  });
   return Number(result.deletedCount||0);
 }
 
