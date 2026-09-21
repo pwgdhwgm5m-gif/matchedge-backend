@@ -8,6 +8,11 @@ function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace
 function teamPairMatch(m,h,a){const x=normTeam(h),y=normTeam(a),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!x&&!!y&&!!mh&&!!ma&&(mh===x||mh.includes(x)||x.includes(mh))&&(ma===y||ma.includes(y)||y.includes(ma))}
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
 async function canonicalResult(date,p){
+ if(p.fixtureId){
+  const direct=await sportsDb.getEventById(p.fixtureId).catch(()=>({ok:false}));
+  const event=direct.ok?(direct.data?.events||[])[0]:null;
+  if(event){let exact=sportsDb.transformEvent(event);exact=(await sportsDb.attachHalftimeScores([exact]))[0]||exact;if(finalMatch(exact))return exact;}
+ }
  const base=new Date(date+'T12:00:00Z'),dates=[-1,0,1].map(n=>new Date(base.getTime()+n*86400000).toISOString().slice(0,10));
  for(const day of dates){
   const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(day).catch(()=>({ok:false})),footballDataOrg.getMatchesByDate(day).catch(()=>({ok:false,matches:[]})),sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]}))]);
