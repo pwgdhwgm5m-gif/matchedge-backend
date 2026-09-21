@@ -234,8 +234,8 @@ function transformEvent(e) {
     awayId: e.idAwayTeam || null,
     homeBadge: e.strHomeTeamBadge || null,
     awayBadge: e.strAwayTeamBadge || null,
-    homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : 0,
-    awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : 0,
+    homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined && e.intHomeScore !== '' ? parseInt(e.intHomeScore, 10) : null,
+    awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined && e.intAwayScore !== '' ? parseInt(e.intAwayScore, 10) : null,
     // NOT: TheSportsDB'nin gunluk/gecmis mac listesi endpoint'leri
     // (eventsday.php, eventspastleague.php) ilk yari skorunu hic saglamiyor -
     // sadece mac sonu skoru var. Bu alan bu yuzden hep null; frontend zaten
