@@ -17,6 +17,7 @@ const sportmonks = require('../services/sportmonksService');
  *   - homeTeamName, awayTeamName, leagueName, kickoff: EKRANDA GOSTERMEK
  *     icin - hesaplamaya girmez, sadece yaniti tamamlar
  */
+router.get('/sportmonks/predictions-access',async(req,res)=>{try{const r=await sportmonks.request('/predictions/probabilities',{per_page:1});res.status(r.ok?200:(r.status||502)).json({ok:r.ok,status:r.status||200,predictionsAccess:r.ok,count:r.ok?(r.data?.data?.length||0):0,error:r.ok?null:r.error})}catch(e){res.status(500).json({ok:false,predictionsAccess:false,error:e.message})}});
 router.get('/sportmonks/match-diagnostic', async (req, res) => {
   try {
     const { homeTeamName, awayTeamName } = req.query;
