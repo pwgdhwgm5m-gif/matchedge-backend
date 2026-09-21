@@ -150,5 +150,19 @@ async function captureValidation(){
  return{runs:runs.length,tagged};
 }
 
+async function lockFixtureValidation(fixtureId){
+ const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).lean();
+ if(!row)return {locked:false,reason:'fixture_not_in_prospective_ledger'};
+ if(!row.strongestPick)return {locked:false,reason:'strongest_pick_unavailable'};
+ if((row.v4Validation||[]).some(v=>v&&v.kind==='fixture-cross-check'))return {locked:false,alreadyLocked:true};
+ if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0))return {locked:false,reason:'expected_goals_unavailable'};
+ const sim=monteCarlo50k(row),sp=simProbabilityForPick(row.strongestPick,sim),prob=Number(row.strongestPick.probability),gap=Number.isFinite(prob)&&sp!=null?+Math.abs(prob-sp).toFixed(1):null;
+ const agreement=gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict';
+ const marker={kind:'fixture-cross-check',engine:'premium-v4-intelligence',capturedAt:new Date(),key:row.strongestPick.key,market:row.strongestPick.market,label:row.strongestPick.label,probability:prob,simulation:sp,gap,agreement,runs:sim.runs,dataQualityScore:row.dataQualityScore};
+ const x=await Prediction.updateOne({_id:row._id,status:'pending','v4Validation':{$not:{$elemMatch:{kind:'fixture-cross-check'}}}},{$push:{v4Validation:marker}});
+ return {locked:Boolean(x.modifiedCount),marker};
+}
+async function fixtureValidation(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId)}).lean();if(!row)return null;return (row.v4Validation||[]).find(v=>v&&v.kind==='fixture-cross-check')||null;}
+
 async function simulateFixture(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();if(!row){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0)){const e=new Error('expected_goals_unavailable');e.status=422;throw e}return{fixtureId:row.fixtureId,match:row.homeTeam+' - '+row.awayTeam,kickoff:row.kickoff,league:row.league,simulation:simulationFromLambdas(row.homeLambda,row.awayLambda),modelSnapshot:row.probabilities}}
-module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder,valueFinder,validationSnapshot,validationReport,captureValidation};
+module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder,valueFinder,validationSnapshot,validationReport,captureValidation,lockFixtureValidation,fixtureValidation};
