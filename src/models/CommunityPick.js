@@ -12,7 +12,11 @@ const communityPickSchema = new mongoose.Schema({
   label: { type: String, required: true },
   result: { type: String, enum: ['pending','won','lost','void'], default: 'pending' },
   settledAt: { type: Date, default: null },
+  verified: { type: Boolean, default: false, index: true },
+  lockedAt: { type: Date, default: null },
+  source: { type: String, enum: ['analysis','match-room','legacy'], default: 'legacy' },
 }, { timestamps: true });
 communityPickSchema.index({ userId: 1, fixtureId: 1, key: 1 }, { unique: true });
 communityPickSchema.index({ fixtureId: 1, key: 1 });
+communityPickSchema.index({ verified: 1, result: 1, kickoff: 1 });
 module.exports = mongoose.model('CommunityPick', communityPickSchema);
