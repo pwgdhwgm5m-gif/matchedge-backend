@@ -1,5 +1,9 @@
 const Prediction=require('../models/PredictionSnapshot');
 const oddsApi=require('./oddsApiService');
+const patternCache=new Map(),oddsCache=new Map();
+const PATTERN_CACHE_MS=30*60*1000,ODDS_CACHE_MS=10*60*1000;
+function cacheGet(map,key,ttl){const x=map.get(key);if(!x||Date.now()-x.at>ttl){if(x)map.delete(key);return null}return x.value}
+function cacheSet(map,key,value){map.set(key,{at:Date.now(),value});return value}
 function clamp(v,min,max){return Math.max(min,Math.min(max,v))}
 function poisson(l,k){let p=Math.exp(-l);for(let i=1;i<=k;i++)p*=l/i;return p}
 function hashSeed(s){let h=2166136261;for(const ch of String(s||'')){h^=ch.charCodeAt(0);h=Math.imul(h,16777619)}return h>>>0}
@@ -100,13 +104,14 @@ async function similarMatches(fixtureId,{limit=20}={}){
 
 async function patternFinder({minProbability=60,minQuality=50,maxGap=8,league=''}={}){
  minProbability=clamp(Number(minProbability)||60,50,90);minQuality=clamp(Number(minQuality)||50,0,100);maxGap=clamp(Number(maxGap)||8,0,30);
+ const cacheKey=[minProbability,minQuality,maxGap,String(league||'').toLowerCase()].join('|'),cached=cacheGet(patternCache,cacheKey,PATTERN_CACHE_MS);if(cached)return {...cached,cache:{hit:true,ttlMinutes:30}};
  const q={status:'settled',strongestPick:{$ne:null}};if(league)q.league={$regex:String(league),$options:'i'};
  const rows=await Prediction.find(q).select('fixtureId kickoff league homeTeam awayTeam homeLambda awayLambda dataQualityScore strongestPick actual').sort({kickoff:1}).limit(2000).lean();
  const evaluated=[];
  for(const row of rows){const p=row.strongestPick||{},prob=Number(p.probability)||0,quality=Number(row.dataQualityScore)||0;if(prob<minProbability||quality<minQuality)continue;let gap=null;if(Number(row.homeLambda)>0&&Number(row.awayLambda)>0){const sim=monteCarlo50k(row,5000),sp=simProbabilityForPick(p,sim);if(sp!=null)gap=Math.abs(prob-sp)}if(gap!=null&&gap>maxGap)continue;const hit=pickActualHit(p.key,row.actual);if(hit===null)continue;evaluated.push({fixtureId:row.fixtureId,kickoff:row.kickoff,league:row.league,market:marketFamily(p),probability:prob,quality,simulationGap:gap==null?null:+gap.toFixed(1),hit});}
  const wins=evaluated.filter(x=>x.hit).length,n=evaluated.length;
  const byMarket={};for(const x of evaluated){const g=byMarket[x.market]||(byMarket[x.market]={market:x.market,count:0,wins:0});g.count++;if(x.hit)g.wins++}
- return{filters:{minProbability,minQuality,maxSimulationGap:maxGap,league:league||'all'},count:n,wins,losses:n-wins,hitRatePercent:n?+(100*wins/n).toFixed(1):null,readiness:n<30?'collecting':n<100?'early-signal':'decision-ready',markets:Object.values(byMarket).map(x=>({...x,hitRatePercent:+(100*x.wins/x.count).toFixed(1)})),method:'settled prospective snapshots only; simulation is used as a robustness filter, not as historical input from after kickoff'};
+ const result={filters:{minProbability,minQuality,maxSimulationGap:maxGap,league:league||'all'},count:n,wins,losses:n-wins,hitRatePercent:n?+(100*wins/n).toFixed(1):null,readiness:n<30?'collecting':n<100?'early-signal':'decision-ready',markets:Object.values(byMarket).map(x=>({...x,hitRatePercent:+(100*x.wins/x.count).toFixed(1)})),method:'settled prospective snapshots only; simulation is used as a robustness filter, not as historical input from after kickoff',cache:{hit:false,ttlMinutes:30}};cacheSet(patternCache,cacheKey,result);return result;
 }
 
 
@@ -117,7 +122,7 @@ function oddsLeagueKey(league){const x=ODDS_LEAGUE_MAP.find(([re])=>re.test(Stri
 async function valueFinder({limit=30}={}){
  const rows=await available(Math.min(80,Math.max(5,Number(limit)||30))),byLeague=new Map(),results=[],errors=[];
  for(const row of rows){const k=oddsLeagueKey(row.league);if(k&&!byLeague.has(k))byLeague.set(k,null)}
- for(const key of byLeague.keys()){const r=await oddsApi.getOddsForLeague(key);byLeague.set(key,r.ok?r.data:null);if(!r.ok)errors.push({leagueKey:key,error:String(r.error||'odds_unavailable')})}
+ for(const key of byLeague.keys()){let data=cacheGet(oddsCache,key,ODDS_CACHE_MS);if(data){byLeague.set(key,data);continue}const r=await oddsApi.getOddsForLeague(key);data=r.ok?r.data:null;byLeague.set(key,data);if(r.ok)cacheSet(oddsCache,key,data);else errors.push({leagueKey:key,error:String(r.error||'odds_unavailable')})}
  for(const row of rows){
   const key=oddsLeagueKey(row.league),data=key?byLeague.get(key):null;if(!data)continue;
   const marketOdds=oddsApi.extractMatchMarketOdds(data,row.homeTeam,row.awayTeam);if(!marketOdds)continue;
@@ -129,7 +134,7 @@ async function valueFinder({limit=30}={}){
   const op=marketOdds.best.over25?.price,up=marketOdds.best.under25?.price;if(op&&up){const rawO=1/op,rawU=1/up,sum=rawO+rawU,mpO=100*rawO/sum,mpU=100*rawU/sum;for(const [side,price,mp] of [['over25',op,mpO],['under25',up,mpU]]){const ev=(model[side]/100)*price-1;outcomes[side]={odds:Number(price),bookmaker:marketOdds.best[side]?.bookmaker,modelProbability:+model[side].toFixed(1),marketProbability:+mp.toFixed(1),edgePercent:+(model[side]-mp).toFixed(1),expectedValuePercent:+(100*ev).toFixed(1),positiveEV:ev>0}}}
   results.push({fixtureId:row.fixtureId,kickoff:row.kickoff,league:row.league,match:row.homeTeam+' - '+row.awayTeam,provider:'The Odds API',bookmakersChecked:marketOdds.bookmakers,deVigMethod:market.method,overroundPercent:market.overroundPercent,outcomes,bttsStatus:'provider request currently has h2h,totals only'});
  }
- return{provider:'The Odds API',providerAvailable:results.length>0||errors.length===0,pricedMatches:results.length,matches:results,errors:errors.length?errors:undefined,note:results.length?'Live bookmaker prices were fetched; EV is model probability versus current decimal price.':'No verified current bookmaker prices were returned; no value claim is produced.'};
+ return{provider:'The Odds API',providerAvailable:results.length>0||errors.length===0,pricedMatches:results.length,matches:results,errors:errors.length?errors:undefined,cacheTtlMinutes:10,note:results.length?'Live bookmaker prices were fetched; EV is model probability versus current decimal price.':'No verified current bookmaker prices were returned; no value claim is produced.'};
 }
 
 
