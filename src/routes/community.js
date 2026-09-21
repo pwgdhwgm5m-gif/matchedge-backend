@@ -160,4 +160,20 @@ router.get('/fixture/:fixtureId/consensus',async(req,res)=>{
  res.json({fixtureId,totalUsers:ids.length,selections:Object.values(rows).map(x=>({...x,communityPercent:communityTotal?Math.round(x.community/communityTotal*100):0,expertPercent:expertTotal?Math.round(x.experts/expertTotal*100):0}))});
 });
 
+router.get('/feed/following',async(req,res)=>{
+ const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
+ const ids=me.following||[];if(!ids.length)return res.json({items:[]});
+ const picks=await CommunityPick.find({userId:{$in:ids}}).sort({createdAt:-1}).limit(60).lean(),users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
+ res.json({items:picks.map(p=>{const u=byId.get(String(p.userId));return {id:p._id,fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt,user:u?publicUser(u):null}})});
+});
+router.post('/verified-picks',async(req,res)=>{
+ const b=req.body||{},fixtureId=String(b.fixtureId||''),key=String(b.key||''),market=String(b.market||'').slice(0,40),label=String(b.label||'').slice(0,60),homeTeam=String(b.homeTeam||'').slice(0,80),awayTeam=String(b.awayTeam||'').slice(0,80),league=String(b.league||'').slice(0,80),kickoff=b.kickoff?new Date(b.kickoff):null;
+ if(!fixtureId||!key||!market||!label||!homeTeam||!awayTeam)return res.status(400).json({error:'Missing pick data.'});
+ if(kickoff&&!Number.isNaN(kickoff.getTime())&&kickoff.getTime()<=Date.now())return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
+ const existing=await CommunityPick.findOne({userId:req.user.userId,fixtureId,key}).lean();if(existing)return res.json({pick:existing,locked:true});
+ const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,market}).lean();if(conflicting)return res.status(409).json({error:'A verified pick for this market is already locked.'});
+ const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam,awayTeam,league,kickoff,result:'pending'});
+ res.status(201).json({pick,locked:true});
+});
+
 module.exports=router;
