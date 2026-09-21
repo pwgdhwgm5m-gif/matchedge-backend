@@ -104,7 +104,7 @@ async function settlePending(userId) {
       }
       for(const selection of coupon.selections){
         if(selection.result!=='pending')continue;
-        selection.result=settleSelection(selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
+        selection.result=settleSelectionWithAvailableData(selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
       }
       const legacyResults=coupon.selections.map(s=>s.result);
       coupon.status=legacyResults.some(x=>x==='lost')?'lost':legacyResults.some(x=>x==='pending')?'pending':legacyResults.some(x=>x==='won')?'won':'void';
@@ -135,7 +135,7 @@ async function settlePending(userId) {
         if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
         if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
       }
-      leg.selection.result=settleSelection(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
+      leg.selection.result=settleSelectionWithAvailableData(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
       leg.finalScore={home:match.homeScore,away:match.awayScore};
     }
     const results=coupon.legs.map(l=>l.selection.result);
