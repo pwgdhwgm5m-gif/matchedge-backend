@@ -22,7 +22,7 @@ async function settlePending(){
  const pending=await CommunityPick.find({verified:true,result:'pending',kickoff:{$ne:null,$lt:new Date(Date.now()-90*60000)}}).sort({kickoff:1}).limit(300);if(!pending.length)return {settled:0,users:0};
  const groups=new Map();for(const p of pending){const date=new Date(p.kickoff).toISOString().slice(0,10),k=date+'|'+p.fixtureId;if(!groups.has(k))groups.set(k,{date,p,picks:[]});groups.get(k).picks.push(p)}
  let settled=0;const touched=new Set();
- for(const g of groups.values()){const m=await canonicalResult(g.date,g.p);if(!m)continue;let corners=null;if(g.picks.some(p=>String(p.key).startsWith('corners'))){try{const st=await sportsDb.getEventStatsFormatted(g.p.fixtureId);if(st.available&&st.stats?.corners)corners=Number(st.stats.corners.home||0)+Number(st.stats.corners.away||0)}catch(_){}}
+ for(const g of groups.values()){const m=await canonicalResult(g.date,g.p);if(!m)continue;let corners=null;if(g.picks.some(p=>String(p.key).startsWith('corners'))){try{const st=await sportsDb.getEventStatsFormatted(g.p.fixtureId);if(st.available&&st.stats?.corners)corners=Number(st.stats.corners.home||0)+Number(st.stats.corners.away||0)}catch(_){} if(corners==null&&m?.statistics?.corners){const ch=Number(m.statistics.corners.home),ca=Number(m.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}}
   const h=Number(m.homeScore),a=Number(m.awayScore),hh=m.halftimeHome==null?null:Number(m.halftimeHome),ha=m.halftimeAway==null?null:Number(m.halftimeAway);
   for(const p of g.picks){p.result=grade(p.key,h,a,corners,hh,ha);p.settledAt=new Date();await p.save();settled++;touched.add(String(p.userId))}
  }
