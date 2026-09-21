@@ -237,6 +237,18 @@ async function v4CrossCheckPerformance(){
  for(const p of rows){for(const v of (p.v4Validation||[]).filter(x=>x?.kind==='fixture-cross-check')){const hit=v4MarkerHit(p,v);if(hit===null)continue;const a=v.agreement||'unavailable',k=a+'::'+(v.market||'unknown'),g=groups[k]||(groups[k]={agreement:a,market:v.market||'unknown',count:0,wins:0});g.count++;if(hit)g.wins++}}
  return Object.values(groups).map(g=>({...g,losses:g.count-g.wins,hitRatePercent:g.count?+(100*g.wins/g.count).toFixed(1):null,readiness:g.count<30?'collecting':g.count<100?'early-signal':'decision-ready'}));
 }
+async function v4ActivationStatus(){
+ const rows=await Prediction.find({status:'settled','v4Validation.kind':'fixture-cross-check'}).select('strongestPick actual v4Validation').sort({kickoff:1}).lean();
+ let n=0,aiWins=0,v4Wins=0,aiBrier=0,v4Brier=0,calAi=0,calV4=0;
+ for(const p of rows){const v=(p.v4Validation||[]).find(x=>x?.kind==='fixture-cross-check');if(!v)continue;const hit=strongestPickHit(p);const ap=Number(p.strongestPick?.probability)/100,vp=Number(v.simulation)/100;if(hit===null||!Number.isFinite(ap)||!Number.isFinite(vp))continue;const y=hit?1:0;n++;if((ap>=.5)===!!y)aiWins++;if((vp>=.5)===!!y)v4Wins++;aiBrier+=(ap-y)**2;v4Brier+=(vp-y)**2;calAi+=Math.abs(ap-y);calV4+=Math.abs(vp-y)}
+ const aiB=n?aiBrier/n:null,v4B=n?v4Brier/n:null,aiHit=n?100*aiWins/n:null,v4Hit=n?100*v4Wins/n:null;
+ const eligible=n>=100;
+ // V4 may influence production only when it has at least 100 paired prospective results AND
+ // is not worse on hit rate, improves Brier by >=2%, and is not worse on mean calibration error.
+ const brierGain=eligible&&aiB>0?100*(aiB-v4B)/aiB:null;
+ const validated=!!(eligible&&v4Hit>=aiHit&&brierGain>=2&&(calV4/n)<=(calAi/n));
+ return{mode:validated?'validated':'shadow',validated,pairedResults:n,minimumPairedResults:100,remaining:Math.max(0,100-n),metrics:{aiHitRatePercent:aiHit==null?null:+aiHit.toFixed(1),v4HitRatePercent:v4Hit==null?null:+v4Hit.toFixed(1),aiBrier:aiB==null?null:+aiB.toFixed(4),v4Brier:v4B==null?null:+v4B.toFixed(4),v4BrierImprovementPercent:brierGain==null?null:+brierGain.toFixed(2),aiMeanAbsoluteCalibrationError:n?+(calAi/n).toFixed(4):null,v4MeanAbsoluteCalibrationError:n?+(calV4/n).toFixed(4):null},activationRule:'100 paired prospective settled picks + V4 hit rate >= AI + V4 Brier >=2% better + V4 calibration error <= AI',note:eligible&&!validated?'100 reached but validation criteria not met; V4 remains shadow and keeps collecting data':null};
+}
 async function reportCard(fixtureId){
  const [perf,snapshot]=await Promise.all([performance(),Prediction.findOne({fixtureId:String(fixtureId),modelVersion:VERSION}).lean()]);
  const marketMap={home:'home',draw:'draw',away:'away',over25:'over25',under25:'over25',bttsYes:'btts',bttsNo:'btts'};
@@ -246,4 +258,4 @@ async function reportCard(fixtureId){
  return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
-module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, VERSION };
