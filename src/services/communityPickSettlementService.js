@@ -8,11 +8,15 @@ function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace
 function teamPairMatch(m,h,a){const x=normTeam(h),y=normTeam(a),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!x&&!!y&&!!mh&&!!ma&&(mh===x||mh.includes(x)||x.includes(mh))&&(ma===y||ma.includes(y)||y.includes(ma))}
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
 async function canonicalResult(date,p){
- const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(date),footballDataOrg.getMatchesByDate(date),sportmonks.getFixturesByDate(date).catch(()=>({ok:false,fixtures:[]}))]);
- let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);fallback=await sportsDb.attachHalftimeScores(fallback);
- const rows=sm.ok?(sm.fixtures||[]):[];let m=rows.find(x=>String(x.sportmonksId||x.fixtureId)===String(p.fixtureId))||rows.find(x=>teamPairMatch(x,p.homeTeam,p.awayTeam));
- if(m&&[5,8,9].includes(Number(m.stateId))&&m.homeScore!=null&&m.awayScore!=null)return m;
- m=fallback.find(x=>String(x.fixtureId)===String(p.fixtureId))||fallback.find(x=>teamPairMatch(x,p.homeTeam,p.awayTeam));return finalMatch(m)?m:null
+ const base=new Date(date+'T12:00:00Z'),dates=[-1,0,1].map(n=>new Date(base.getTime()+n*86400000).toISOString().slice(0,10));
+ for(const day of dates){
+  const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(day).catch(()=>({ok:false})),footballDataOrg.getMatchesByDate(day).catch(()=>({ok:false,matches:[]})),sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]}))]);
+  let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);fallback=await sportsDb.attachHalftimeScores(fallback);
+  const rows=sm.ok?(sm.fixtures||[]):[];let m=rows.find(x=>String(x.sportmonksId||x.fixtureId)===String(p.fixtureId))||rows.find(x=>teamPairMatch(x,p.homeTeam,p.awayTeam));
+  if(m&&[5,8,9,17].includes(Number(m.stateId))&&m.homeScore!=null&&m.awayScore!=null)return m;
+  m=fallback.find(x=>String(x.fixtureId)===String(p.fixtureId))||fallback.find(x=>teamPairMatch(x,p.homeTeam,p.awayTeam));if(finalMatch(m))return m;
+ }
+ return null
 }
 function grade(key,h,a,c,hh,ha){const total=h+a;if(key==='home')return h>a?'won':'lost';if(key==='draw')return h===a?'won':'lost';if(key==='away')return a>h?'won':'lost';if(key==='over25')return total>2.5?'won':'lost';if(key==='under25')return total<2.5?'won':'lost';if(key==='bttsYes')return h>0&&a>0?'won':'lost';if(key==='bttsNo')return h===0||a===0?'won':'lost';if(key==='cornersOver95')return c==null?'void':c>=10?'won':'lost';if(key==='cornersUnder95')return c==null?'void':c<=9?'won':'lost';if(key==='cornersOver85')return c==null?'void':c>=9?'won':'lost';if(key==='cornersUnder85')return c==null?'void':c<=8?'won':'lost';if(hh==null||ha==null)return 'void';const sh=h-hh,sa=a-ha;if(key==='fhHome')return hh>ha?'won':'lost';if(key==='fhDraw')return hh===ha?'won':'lost';if(key==='fhAway')return ha>hh?'won':'lost';if(key==='shHome')return sh>sa?'won':'lost';if(key==='shDraw')return sh===sa?'won':'lost';if(key==='shAway')return sa>sh?'won':'lost';const fg=hh+ha,sg=sh+sa;if(key==='mostGoalsFirst')return fg>sg?'won':'lost';if(key==='mostGoalsEqual')return fg===sg?'won':'lost';if(key==='mostGoalsSecond')return sg>fg?'won':'lost';return 'void'}
 async function rebuildUserStats(userId){
