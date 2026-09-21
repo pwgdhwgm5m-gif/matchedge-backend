@@ -49,7 +49,7 @@ router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
   } catch(e) { res.status(500).json({ok:false,error:e.message}); }
 });
 
-router.get('/:fixtureId/v4-intelligence',async(req,res)=>{try{const fixtureId=String(req.params.fixtureId);const [sim,similar,patterns]=await Promise.all([premiumLab.simulateFixture(fixtureId).catch(e=>({unavailable:true,error:e.message})),premiumLab.similarMatches(fixtureId,{limit:20}).catch(e=>({unavailable:true,error:e.message})),premiumLab.patternFinder({}).catch(e=>({unavailable:true,error:e.message}))]);let value={unavailable:true};try{const vf=await premiumLab.valueFinder({limit:80});const m=(vf.matches||[]).find(x=>String(x.fixtureId)===fixtureId);value=m||{unavailable:true,providerAvailable:vf.providerAvailable,note:vf.note}}catch(e){value={unavailable:true,error:e.message}}const row=await ledger.reportCard(fixtureId);const pick=row.strongestPick||null,mc=sim.simulation&&pick?premiumLab.monteCarlo50k({fixtureId,homeLambda:sim.simulation.expectedGoals?.home,awayLambda:sim.simulation.expectedGoals?.away}):null;let simProb=null;if(mc&&pick){const k=pick.key;simProb=k==='home'?mc.home:k==='draw'?mc.draw:k==='away'?mc.away:k==='over25'?mc.over25:k==='under25'?mc.under25:k==='bttsYes'?mc.bttsYes:k==='bttsNo'?mc.bttsNo:null}const modelProb=Number(pick?.probability);const gap=Number.isFinite(modelProb)&&simProb!=null?+Math.abs(modelProb-simProb).toFixed(1):null;res.json({engine:'premium-v4-intelligence',fixtureId,edgeId:row.edgeId,strongestPick:pick,simulation:mc?{runs:mc.runs,probability:simProb,gap,agreement:gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict',expectedGoals:sim.simulation.expectedGoals,mostLikelyScores:sim.simulation.mostLikelyScores}:sim,similarMatches:similar,patterns,value,policy:{primaryModel:'socceredge-ai',v4Role:'cross-check-and-evidence',weakFillerAllowed:false,noValueClaimWithoutVerifiedOdds:true}})}catch(e){res.status(e.status||500).json({error:'v4_intelligence_unavailable',detail:e.message})}});
+router.get('/:fixtureId/v4-intelligence',async(req,res)=>{try{const fixtureId=String(req.params.fixtureId);const [sim,similar,patterns]=await Promise.all([premiumLab.simulateFixture(fixtureId).catch(e=>({unavailable:true,error:e.message})),premiumLab.similarMatches(fixtureId,{limit:20}).catch(e=>({unavailable:true,error:e.message})),premiumLab.patternFinder({}).catch(e=>({unavailable:true,error:e.message}))]);let value={unavailable:true};try{const vf=await premiumLab.valueFinder({limit:80});const m=(vf.matches||[]).find(x=>String(x.fixtureId)===fixtureId);value=m||{unavailable:true,providerAvailable:vf.providerAvailable,note:vf.note}}catch(e){value={unavailable:true,error:e.message}}const row=await ledger.reportCard(fixtureId);const lockedV4=await premiumLab.fixtureValidation(fixtureId);const pick=row.strongestPick||null,mc=sim.simulation&&pick?premiumLab.monteCarlo50k({fixtureId,homeLambda:sim.simulation.expectedGoals?.home,awayLambda:sim.simulation.expectedGoals?.away}):null;let simProb=null;if(mc&&pick){const k=pick.key;simProb=k==='home'?mc.home:k==='draw'?mc.draw:k==='away'?mc.away:k==='over25'?mc.over25:k==='under25'?mc.under25:k==='bttsYes'?mc.bttsYes:k==='bttsNo'?mc.bttsNo:null}const modelProb=Number(pick?.probability);const gap=Number.isFinite(modelProb)&&simProb!=null?+Math.abs(modelProb-simProb).toFixed(1):null;res.json({engine:'premium-v4-intelligence',fixtureId,edgeId:row.edgeId,strongestPick:pick,lockedValidation:lockedV4,simulation:mc?{runs:mc.runs,probability:simProb,gap,agreement:gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict',expectedGoals:sim.simulation.expectedGoals,mostLikelyScores:sim.simulation.mostLikelyScores}:sim,similarMatches:similar,patterns,value,policy:{primaryModel:'socceredge-ai',v4Role:'cross-check-and-evidence',weakFillerAllowed:false,noValueClaimWithoutVerifiedOdds:true}})}catch(e){res.status(e.status||500).json({error:'v4_intelligence_unavailable',detail:e.message})}});
 router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.reportCard(req.params.fixtureId))}catch(e){res.status(500).json({error:'report_card_unavailable'})}});
 router.get('/:fixtureId', async (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -69,6 +69,9 @@ router.get('/:fixtureId', async (req, res) => {
 
   const precomputed = cache.get(`precomputed:${fixtureId}`);
   if (precomputed) {
+    if (kickoff && homeTeamName && awayTeamName) {
+      try { await ledger.capture(precomputed,{fixtureId,kickoff,league:leagueName,homeTeam:homeTeamName,awayTeam:awayTeamName}); await premiumLab.lockFixtureValidation(fixtureId); } catch(e) { console.warn('[prediction-capture/precomputed]',e.message); }
+    }
     return res.json({
       ...precomputed,
       homeTeam: precomputed.homeTeam || homeTeamName,
@@ -174,8 +177,10 @@ router.get('/:fixtureId', async (req, res) => {
       }));
     }
     if (kickoff && homeTeamName && awayTeamName) {
-      ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName })
-        .catch(err => console.error('[prediction-capture]', err));
+      try {
+        await ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName });
+        await premiumLab.lockFixtureValidation(fixtureId);
+      } catch(err) { console.error('[prediction-capture]', err); }
     }
     res.json({
       ...result,
