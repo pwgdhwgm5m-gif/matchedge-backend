@@ -161,6 +161,12 @@ function transformFixture(f) {
       offsidesHome: statisticValue(f,['offsides'],'home'),
       offsidesAway: statisticValue(f,['offsides'],'away'),
     },
+    statistics: {
+      corners: {
+        home: statisticValue(f,['corners','corner kicks'],'home'),
+        away: statisticValue(f,['corners','corner kicks'],'away')
+      }
+    },
     raw: f,
   };
 }
@@ -291,7 +297,7 @@ async function getLeagueFixturesByDate(date, leagueId) {
   const all=[]; let page=1;
   while(page<=20){
     const result=await request('/fixtures/date/'+date,{
-      include:'league;participants;scores;periods',
+      include:'league;participants;scores;periods;statistics.type',
       filters:'fixtureLeagues:'+leagueId,
       page,
       per_page:50
@@ -313,7 +319,7 @@ async function getFixturesByDate(date) {
   // Do not hard-code league IDs here: SportMonks itself is the entitlement boundary.
   const all=[]; let page=1;
   while(page<=20){
-    const result=await request('/fixtures/date/'+date,{include:'participants;scores;periods',page,per_page:50});
+    const result=await request('/fixtures/date/'+date,{include:'participants;scores;periods;statistics.type',page,per_page:50});
     if(!result.ok)return result;
     const body=result.data||{},rows=Array.isArray(body.data)?body.data:[];
     all.push(...rows.map(transformFixture));
