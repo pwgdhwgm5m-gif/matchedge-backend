@@ -89,19 +89,7 @@ router.post('/register', async (req, res) => {
  * POST /api/auth/login
  * body: { username, password }
  */
-router.post('/recover-legacy-admin', async (req,res)=>{
-  const { username, password } = req.body || {};
-  if (String(username||'').toLowerCase() !== 'eddas34') return res.status(404).json({error:'Account not found.'});
-  if (!password || String(password).length < 12) return res.status(400).json({error:'New password must be at least 12 characters.'});
-  try {
-    const user = await User.findOne({username:'eddas34'});
-    if (!user) return res.status(404).json({error:'Legacy admin account not found.'});
-    user.passwordHash = await hashPassword(String(password));
-    user.role = 'admin'; user.emailVerified = true; await user.save();
-    const token = generateToken(user);
-    return res.json({token,username:user.username,emailVerified:true,isAdmin:true,recovered:true});
-  } catch(err){console.error('[auth/recover-legacy-admin]',err.message);return res.status(500).json({error:'Legacy admin recovery failed.'});}
-});
+
 
 router.post('/login', async (req, res) => {
   const { username, password, timezone, geoConsent } = req.body;
