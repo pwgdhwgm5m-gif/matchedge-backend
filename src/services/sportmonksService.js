@@ -383,7 +383,7 @@ function toResultMatches(fixtures) {
     kickoff: f.kickoff, statusShort: f.statusShort || null,
     minute: f.minute ?? null, isLive: !!f.isLive,
     scoreSource: 'sportmonks', halftimeSource: (f.halftimeHome != null && f.halftimeAway != null) ? 'sportmonks' : null,
-    statistics: (Number.isFinite(Number(f.statistics?.corners?.home)) && Number.isFinite(Number(f.statistics?.corners?.away))) ? { corners: { home:Number(f.statistics.corners.home), away:Number(f.statistics.corners.away) } } : undefined,
+    statistics: (f.statistics?.corners?.home != null && f.statistics?.corners?.away != null && Number.isFinite(Number(f.statistics.corners.home)) && Number.isFinite(Number(f.statistics.corners.away))) ? { corners: { home:Number(f.statistics.corners.home), away:Number(f.statistics.corners.away) } } : undefined,
     dataSource: 'sportmonks'
   }));
 }
