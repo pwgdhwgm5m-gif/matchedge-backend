@@ -17,6 +17,7 @@ async function canonicalResult(date,p){
 function grade(key,h,a,c,hh,ha){const total=h+a;if(key==='home')return h>a?'won':'lost';if(key==='draw')return h===a?'won':'lost';if(key==='away')return a>h?'won':'lost';if(key==='over25')return total>2.5?'won':'lost';if(key==='under25')return total<2.5?'won':'lost';if(key==='bttsYes')return h>0&&a>0?'won':'lost';if(key==='bttsNo')return h===0||a===0?'won':'lost';if(key==='cornersOver95')return c==null?'void':c>=10?'won':'lost';if(key==='cornersUnder95')return c==null?'void':c<=9?'won':'lost';if(key==='cornersOver85')return c==null?'void':c>=9?'won':'lost';if(key==='cornersUnder85')return c==null?'void':c<=8?'won':'lost';if(hh==null||ha==null)return 'void';const sh=h-hh,sa=a-ha;if(key==='fhHome')return hh>ha?'won':'lost';if(key==='fhDraw')return hh===ha?'won':'lost';if(key==='fhAway')return ha>hh?'won':'lost';if(key==='shHome')return sh>sa?'won':'lost';if(key==='shDraw')return sh===sa?'won':'lost';if(key==='shAway')return sa>sh?'won':'lost';const fg=hh+ha,sg=sh+sa;if(key==='mostGoalsFirst')return fg>sg?'won':'lost';if(key==='mostGoalsEqual')return fg===sg?'won':'lost';if(key==='mostGoalsSecond')return sg>fg?'won':'lost';return 'void'}
 async function rebuildUserStats(userId){
  const picks=await CommunityPick.find({userId,result:{$in:['won','lost']}}).sort({settledAt:1,createdAt:1}).lean();let won=0,lost=0,cur=0,best=0;for(const p of picks){if(p.result==='won'){won++;cur++;best=Math.max(best,cur)}else{lost++;cur=0}}await User.updateOne({_id:userId},{$set:{correctPicks:won,wrongPicks:lost,currentStreak:cur,bestStreak:best}});return {won,lost,currentStreak:cur,bestStreak:best}}
+async function rebuildAllAnalystStats(){const ids=await CommunityPick.distinct('userId',{result:{$in:['won','lost']}});for(const id of ids)await rebuildUserStats(id);return ids.length}
 async function settlePending(){
  const pending=await CommunityPick.find({result:'pending',kickoff:{$ne:null,$lt:new Date(Date.now()-90*60000)}}).sort({kickoff:1}).limit(300);if(!pending.length)return {settled:0,users:0};
  const groups=new Map();for(const p of pending){const date=new Date(p.kickoff).toISOString().slice(0,10),k=date+'|'+p.fixtureId;if(!groups.has(k))groups.set(k,{date,p,picks:[]});groups.get(k).picks.push(p)}
@@ -27,4 +28,4 @@ async function settlePending(){
  }
  for(const id of touched)await rebuildUserStats(id);return {settled,users:touched.size}
 }
-module.exports={settlePending,rebuildUserStats,grade};
+module.exports={settlePending,rebuildUserStats,rebuildAllAnalystStats,grade};
