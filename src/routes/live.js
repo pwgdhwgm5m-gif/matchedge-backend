@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
     let simplified = rawLive
       .filter(e => String(e.strSport || '').toLowerCase() === 'soccer')
       .map(sportsDb.transformLiveEvent)
-      .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
+      .filter(m => sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId, m.league));
     // After halftime, enrich live matches with the verified HT score from the
     // event timeline. If the provider cannot verify it, keep null rather than
     // inventing 0-0.
@@ -87,7 +87,7 @@ router.get('/', async (req, res) => {
   const rawEvents = result.data?.events || [];
   let simplified = rawEvents
     .map(sportsDb.transformEvent)
-    .filter(m => m.isLive && sportsDb.isWhitelistedLeague(m.leagueId));
+    .filter(m => m.isLive && sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId, m.league));
   simplified = await sportsDb.attachHalftimeScores(simplified);
   await Promise.all(simplified.map(async m => {
     if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
