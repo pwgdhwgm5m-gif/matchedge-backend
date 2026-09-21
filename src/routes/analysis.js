@@ -47,6 +47,7 @@ router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
   } catch(e) { res.status(500).json({ok:false,error:e.message}); }
 });
 
+router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.reportCard(req.params.fixtureId))}catch(e){res.status(500).json({error:'report_card_unavailable'})}});
 router.get('/:fixtureId', async (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
