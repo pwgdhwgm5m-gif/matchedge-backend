@@ -2,12 +2,15 @@ const webpush = require('web-push');
 const PushSubscription = require('../models/PushSubscription');
 const Favorite = require('../models/Favorite');
 const Coupon = require('../models/Coupon');
+const CommunityPick = require('../models/CommunityPick');
+const User = require('../models/User');
 const sportsDb = require('./sportsDbService');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
 // overlapping provider snapshots, or a temporary score rollback.
 const sentGoalKeys = new Map();
+const sentSmartKeys = new Map();
 const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
 
@@ -98,10 +101,23 @@ async function checkGoals() {
   } finally { running = false; }
 }
 
+async function checkSmartNotifications(){
+ if(!configured())return;
+ const since=new Date(Date.now()-12*60*1000);
+ const picks=await CommunityPick.find({verified:true,$or:[{createdAt:{$gte:since}},{settledAt:{$gte:since}}]}).lean();
+ for(const p of picks){
+  const analyst=await User.findById(p.userId).select('username followers').lean();if(!analyst)continue;
+  if(p.createdAt>=since){const k='vp:new:'+p._id;if(!sentSmartKeys.has(k)){sentSmartKeys.set(k,Date.now());await sendToUsers((analyst.followers||[]).map(String),{type:'verified-pick',eventId:k,title:'✓ New Verified Pick',body:'@'+analyst.username+' · '+p.homeTeam+' – '+p.awayTeam+' · '+p.label,url:'/match-room.html?fixtureId='+encodeURIComponent(p.fixtureId)+'&home='+encodeURIComponent(p.homeTeam)+'&away='+encodeURIComponent(p.awayTeam)+'&league='+encodeURIComponent(p.league||'')})}}
+  if(p.settledAt&&p.settledAt>=since){const k='vp:settled:'+p._id+':'+p.result;if(!sentSmartKeys.has(k)){sentSmartKeys.set(k,Date.now());await sendToUsers((analyst.followers||[]).map(String),{type:'verified-result',eventId:k,title:'Verified Pick · '+String(p.result).toUpperCase(),body:'@'+analyst.username+' · '+p.homeTeam+' – '+p.awayTeam+' · '+p.label,url:'/social-profile.html?u='+encodeURIComponent(analyst.username)})}}
+ }
+ const now=Date.now();for(const [k,t] of sentSmartKeys)if(now-t>24*60*60*1000)sentSmartKeys.delete(k);
+}
 function startPushGoalMonitor() {
   if (!configured()) { console.log('[push] VAPID not configured'); return; }
   setTimeout(checkGoals, 3000);
   setInterval(checkGoals, 5000);
+  setTimeout(checkSmartNotifications, 8000);
+  setInterval(checkSmartNotifications, 5 * 60 * 1000);
 }
 
-module.exports = { startPushGoalMonitor };
+module.exports = { startPushGoalMonitor, sendToUsers, checkSmartNotifications };
