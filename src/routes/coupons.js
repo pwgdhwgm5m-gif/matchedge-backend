@@ -104,7 +104,7 @@ async function settlePending(userId) {
         if(claimed){
           const wins=coupon.selections.filter(s=>s.result==='won').length;
           if(coupon.status==='won') await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,totalCoinsWon:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE}});
-          else if(coupon.status==='lost') await User.findByIdAndUpdate(userId,{$inc:{wrongPicks:coupon.selections.filter(s=>s.result==='lost').length}});
+          else if(coupon.status==='lost') {}
           else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
         }
       }
