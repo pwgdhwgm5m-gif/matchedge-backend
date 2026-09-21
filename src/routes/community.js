@@ -161,6 +161,10 @@ router.get('/fixture/:fixtureId/consensus',async(req,res)=>{
  res.json({fixtureId,totalUsers:ids.length,selections:Object.values(rows).map(x=>{const t=marketTotals[x.market]||{};return {...x,communityPercent:t.community?Math.round(x.community/t.community*100):0,expertPercent:t.experts?Math.round(x.experts/t.experts*100):0,communityMarketTotal:t.community||0,expertMarketTotal:t.experts||0}})});
 });
 
+router.get('/feed/arena',async(req,res)=>{
+ const picks=await CommunityPick.find({}).sort({createdAt:-1}).limit(40).lean(),ids=[...new Set(picks.map(p=>String(p.userId)))],users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
+ res.json({items:picks.map(p=>{const u=byId.get(String(p.userId));return {id:p._id,fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt,user:u?publicUser(u):null}}).filter(x=>x.user)});
+});
 router.get('/feed/following',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
  const ids=me.following||[];if(!ids.length)return res.json({items:[]});
