@@ -70,7 +70,7 @@ router.get('/', async (req, res) => {
   const uniqueSm = new Map(allSmFixtures.map(f => [String(f.sportmonksId), f]));
   const sportmonksMatches = sportmonks.toResultMatches([...uniqueSm.values()]);
   let legacyMatches = legacyResult?.ok
-    ? (legacyResult.data?.events || []).map(sportsDb.transformEvent).filter(m => sportsDb.isWhitelistedLeague(m.leagueId))
+    ? (legacyResult.data?.events || []).map(sportsDb.transformEvent).filter(m => sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId, m.league))
     : [];
 
   // Only fill fixtures absent from SportsMonks. Do not let legacy score/HT
