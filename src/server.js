@@ -134,6 +134,12 @@ app.listen(config.port, async () => {
     }, delay);
   };
   scheduleCouponMidnightCleanup();
+  // Verified community picks settle independently from coupons. Analyst accuracy,
+  // streak and tier source fields are rebuilt only from settled Verified Picks.
+  const settleVerifiedPicks=async()=>{try{const svc=require('./services/communityPickSettlementService');const result=await svc.settlePending();if(result.settled)console.log('[verified-picks/auto-settle]',JSON.stringify(result))}catch(error){console.warn('[verified-picks/auto-settle]',error.message)}};
+  setTimeout(settleVerifiedPicks, 60000);
+  setInterval(settleVerifiedPicks, 10 * 60 * 1000);
+
   // Prediction ledger settlement also trains persistent Elo/attack/defence ratings.
   const settlePredictions = async () => {
     try {
