@@ -236,7 +236,8 @@ async function reportCard(fixtureId){
  const marketMap={home:'home',draw:'draw',away:'away',over25:'over25',under25:'over25',bttsYes:'btts',bttsNo:'btts'};
  const rows=perf.rows||[],pick=snapshot?.strongestPick||null,metric=pick?marketMap[pick.key]:null;
  const all=metric?rows.find(x=>x.league==='all'&&x.market===metric):null,league=metric&&snapshot?rows.find(x=>x.league===snapshot.league&&x.market===metric):null;
- return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
+ const hit=snapshot?.status==='settled'?strongestPickHit(snapshot):null;
+ return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
 module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, VERSION };
