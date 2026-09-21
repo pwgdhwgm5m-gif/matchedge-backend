@@ -6,6 +6,8 @@ const MiniLeague=require('../models/MiniLeague');
 const {requireAuth}=require('../middleware/authMiddleware');
 const {rankForXp,dailyState,ensureWallet}=require('../services/gamificationService');
 const sportmonks=require('../services/sportmonksService');
+const sportsDb=require('../services/sportsDbService');
+const footballDataOrg=require('../services/footballDataOrgService');
 const router=express.Router();
 router.use(requireAuth);
 
@@ -180,7 +182,7 @@ router.post('/verified-picks',async(req,res)=>{
  let fixture=null;
  const direct=await sportmonks.request('/fixtures/'+encodeURIComponent(fixtureId),{include:'participants'}).catch(()=>({ok:false}));
  if(direct.ok&&direct.data?.data)fixture=sportmonks.transformFixture(direct.data.data);
- if(!fixture){const supplied=b.kickoff?new Date(b.kickoff):null;if(supplied&&!Number.isNaN(supplied.getTime())){const day=supplied.toISOString().slice(0,10),r=await sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]}));fixture=(r.fixtures||[]).find(x=>String(x.sportmonksId||x.fixtureId)===fixtureId)}}
+ if(!fixture){const supplied=b.kickoff?new Date(b.kickoff):null;if(supplied&&!Number.isNaN(supplied.getTime())){const day=supplied.toISOString().slice(0,10);const [sm,raw,fd]=await Promise.all([sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]})),sportsDb.getMatchesByDate(day).catch(()=>({ok:false})),footballDataOrg.getMatchesByDate(day).catch(()=>({ok:false,matches:[]}))]);const norm=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim(),pair=x=>{const h=norm(homeTeam),a=norm(awayTeam),mh=norm(x?.homeTeam),ma=norm(x?.awayTeam);return h&&a&&mh&&ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))};let rows=sm.ok?(sm.fixtures||[]):[];fixture=rows.find(x=>String(x.sportmonksId||x.fixtureId)===fixtureId)||rows.find(pair);if(!fixture){rows=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];if(fd.ok)rows=footballDataOrg.mergeVerifiedScores(rows,fd.matches);fixture=rows.find(x=>String(x.fixtureId)===fixtureId)||rows.find(pair)}}}
  if(!fixture||!fixture.kickoff)return res.status(409).json({error:'Fixture kickoff could not be verified. Pick was not locked.'});
  const kickoff=new Date(fixture.kickoff);if(Number.isNaN(kickoff.getTime())||kickoff.getTime()<=Date.now()||fixture.isLive||fixture.statusShort==='FT')return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
  const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,market,verified:true}).lean();if(conflicting)return res.status(409).json({error:'A verified pick for this market is already locked.'});
