@@ -10,15 +10,14 @@ async function bootstrapAdmin() {
   const targetName = config.adminUsername;
   if (password.length < 12) throw new Error('Admin password must be at least 12 characters.');
   const existing = await User.findOne({username: targetName});
-  const hash = await hashPassword(password);
   if (existing) {
-    // The reserved ADMIN_USERNAME is explicitly provisioned by the operator via Render's
-    // bootstrap secret. Promote that exact account only; never promote arbitrary users.
+    // Once the reserved account exists, never overwrite its user-chosen password on restart.
+    // Bootstrap is provisioning-only; role repair is safe, password rotation belongs to auth flows.
     existing.role = 'admin';
-    existing.passwordHash = hash;
     existing.emailVerified = true;
     await existing.save();
   } else {
+    const hash = await hashPassword(password);
     const previousAdmin = await User.findOne({role:'admin'}).sort({createdAt:1});
     if (previousAdmin) {
       previousAdmin.username = targetName;
