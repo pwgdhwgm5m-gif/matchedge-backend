@@ -42,9 +42,6 @@ router.post('/register', async (req, res) => {
   if (!/^\S+@\S+\.\S+$/.test(email)) {
     return res.status(400).json({ error: 'Gecerli bir e-posta adresi gir.' });
   }
-  if (username.toLowerCase() === config.adminUsername) {
-    return res.status(409).json({ error: 'Bu kullanici adi kullanilamiyor.' });
-  }
 
   try {
     const existing = await User.findOne({
