@@ -166,6 +166,7 @@ router.get('/feed/following',async(req,res)=>{
  const picks=await CommunityPick.find({userId:{$in:ids}}).sort({createdAt:-1}).limit(60).lean(),users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
  res.json({items:picks.map(p=>{const u=byId.get(String(p.userId));return {id:p._id,fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt,user:u?publicUser(u):null}})});
 });
+router.get('/verified-picks/:fixtureId/mine',async(req,res)=>{const picks=await CommunityPick.find({userId:req.user.userId,fixtureId:String(req.params.fixtureId)}).lean();res.json({picks:picks.map(p=>({key:p.key,market:p.market,label:p.label,result:p.result,createdAt:p.createdAt}))})});
 router.post('/verified-picks',async(req,res)=>{
  const b=req.body||{},fixtureId=String(b.fixtureId||''),key=String(b.key||''),market=String(b.market||'').slice(0,40),label=String(b.label||'').slice(0,60),homeTeam=String(b.homeTeam||'').slice(0,80),awayTeam=String(b.awayTeam||'').slice(0,80),league=String(b.league||'').slice(0,80),kickoff=b.kickoff?new Date(b.kickoff):null;
  if(!fixtureId||!key||!market||!label||!homeTeam||!awayTeam)return res.status(400).json({error:'Missing pick data.'});
