@@ -3,6 +3,7 @@ const cors = require('cors');
 const config = require('./config/config');
 const { connectDB } = require('./db');
 const { bootstrapAdmin } = require('./services/adminBootstrapService');
+const User = require('./models/User');
 
 const matchesRoute = require('./routes/matches');
 const analysisRoute = require('./routes/analysis');
@@ -88,6 +89,14 @@ app.use((err, req, res, next) => {
 app.listen(config.port, async () => {
   console.log(`SoccerEdge Pro backend ${config.port} portunda calisiyor (${config.nodeEnv})`);
   await connectDB();
+  // One-time owner-requested cleanup: release the email still attached to an
+  // obsolete normal-login account. AdminXYZ/passkey credentials are separate.
+  try {
+    const cleanup = await User.deleteMany({ email: 'edaboaretto@gmail.com' });
+    console.log('[one-time-email-cleanup] removed:', cleanup.deletedCount);
+  } catch (error) {
+    console.error('[one-time-email-cleanup] failed:', error.message);
+  }
   try {
     await bootstrapAdmin();
   } catch (error) {
