@@ -24,7 +24,7 @@ async function settlePending(){
  let settled=0;const touched=new Set();
  for(const g of groups.values()){const m=await canonicalResult(g.date,g.p);if(!m)continue;let corners=null;if(g.picks.some(p=>String(p.key).startsWith('corners'))){try{const st=await sportsDb.getEventStatsFormatted(g.p.fixtureId);if(st.available&&st.stats?.corners)corners=Number(st.stats.corners.home||0)+Number(st.stats.corners.away||0)}catch(_){} if(corners==null&&m?.statistics?.corners){const ch=Number(m.statistics.corners.home),ca=Number(m.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}}
   const h=Number(m.homeScore),a=Number(m.awayScore),hh=m.halftimeHome==null?null:Number(m.halftimeHome),ha=m.halftimeAway==null?null:Number(m.halftimeAway);
-  for(const p of g.picks){p.result=grade(p.key,h,a,corners,hh,ha);p.settledAt=new Date();await p.save();settled++;touched.add(String(p.userId))}
+  for(const p of g.picks){const result=grade(p.key,h,a,corners,hh,ha);const needsCorners=String(p.key||'').startsWith('corners'),needsHalftime=['fhHome','fhDraw','fhAway','shHome','shDraw','shAway','mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'].includes(p.key);if((needsCorners&&corners==null)||(needsHalftime&&(hh==null||ha==null)))continue;p.result=result;p.settledAt=new Date();await p.save();settled++;touched.add(String(p.userId))}
  }
  for(const id of touched)await rebuildUserStats(id);if(settled){try{require('./pushGoalService').checkSmartNotifications().catch(()=>{})}catch(_){}}return {settled,users:touched.size}
 }
