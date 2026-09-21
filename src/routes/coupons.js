@@ -103,7 +103,7 @@ async function settlePending(userId) {
         const claimed=await Coupon.findOneAndUpdate({_id:coupon._id,rewardedAt:null},{$set:{rewardedAt:new Date()}},{new:true});
         if(claimed){
           const wins=coupon.selections.filter(s=>s.result==='won').length;
-          if(coupon.status==='won') await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,totalCoinsWon:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,correctPicks:wins}});
+          if(coupon.status==='won') await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,totalCoinsWon:coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE}});
           else if(coupon.status==='lost') await User.findByIdAndUpdate(userId,{$inc:{wrongPicks:coupon.selections.filter(s=>s.result==='lost').length}});
           else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
         }
@@ -134,9 +134,8 @@ async function settlePending(userId) {
         const wins=coupon.legs.filter(l=>l.selection.result==='won').length;
         if(coupon.status==='won'){
           const payout=coupon.potentialPayout||coupon.stakeCoins||COUPON_STAKE,xp=20+wins*5+(wins>=5?25:0);
-          const updated=await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:payout,totalCoinsWon:payout,xp,correctPicks:wins,currentStreak:1}},{new:true});
-          if(updated&&updated.currentStreak>updated.bestStreak){updated.bestStreak=updated.currentStreak;await updated.save()}
-        }else if(coupon.status==='lost')await User.findByIdAndUpdate(userId,{$inc:{wrongPicks:coupon.legs.filter(l=>l.selection.result==='lost').length},$set:{currentStreak:0}});
+          const updated=await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:payout,totalCoinsWon:payout,xp}},{new:true});
+        }else if(coupon.status==='lost'){}
         else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
       }
     }
