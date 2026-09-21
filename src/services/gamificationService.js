@@ -24,7 +24,7 @@ function gameMultiplier(selection){
  return MARKET_MULTIPLIERS[selection?.key]||1.5;
 }
 function calculatePayout(selections=[],stake=COUPON_STAKE){
- const legs=selections.slice(0,8);let multiplier=1;
+ const legs=selections.slice(0,3);let multiplier=1;
  for(const leg of legs)multiplier*=gameMultiplier(leg);
  multiplier=Math.min(50,Math.max(1.15,Number(multiplier.toFixed(2))));
  return {multiplier,payout:Math.floor(stake*multiplier),legMultipliers:legs.map(gameMultiplier)};
