@@ -97,6 +97,9 @@ app.listen(config.port, async () => {
   startOddsSnapshotCron();
   startKeepAlive();
   startPushGoalMonitor();
+  // Safe one-shot entitlement check: logs access/status only, never token or payload.
+  setTimeout(async()=>{try{const sm=require('./services/sportmonksService');const r=await sm.request('/predictions/probabilities',{per_page:1});console.log('[sportmonks/predictions-access]',r.ok?'YES':'NO','status',r.status||200)}catch(e){console.warn('[sportmonks/predictions-access] ERROR') }},12000);
+
   // CoinEdge coupons are settled in the background even if the user never opens Kuponum.
   const settleCoupons = async () => {
     try {
