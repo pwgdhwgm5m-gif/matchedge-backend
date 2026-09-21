@@ -47,7 +47,20 @@ router.post('/register', async (req, res) => {
     const existing = await User.findOne({
       $or: [{ username: username.toLowerCase() }, { email: email.toLowerCase() }],
     });
+    const isReservedAdmin = username.toLowerCase() === config.adminUsername;
     if (existing) {
+      // Recovery path for the explicitly reserved admin username. This lets the
+      // owner reclaim the reserved account without email delivery. It never
+      // grants admin to arbitrary usernames.
+      if (isReservedAdmin && existing.username.toLowerCase() === config.adminUsername) {
+        existing.passwordHash = await hashPassword(password);
+        existing.role = 'admin';
+        existing.emailVerified = true;
+        existing.dateOfBirth = birthDate;
+        await existing.save();
+        const token = generateToken(existing);
+        return res.status(200).json({ token, username: existing.username, emailVerified: true, isAdmin: true, recovered: true });
+      }
       return res.status(409).json({ error: 'Bu kullanici adi veya e-posta zaten kayitli.' });
     }
 
@@ -55,7 +68,6 @@ router.post('/register', async (req, res) => {
 
     // E-posta doğrulaması geçici olarak kapalıdır.
     // Yeniden etkinleştirildiğinde token üretimi ve gönderimi bu noktaya geri alınabilir.
-    const isReservedAdmin = username.toLowerCase() === config.adminUsername;
     const user = await User.create({
       username, email, passwordHash,
       dateOfBirth: birthDate,
