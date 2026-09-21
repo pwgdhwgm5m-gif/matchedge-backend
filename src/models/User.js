@@ -70,6 +70,12 @@ const userSchema = new mongoose.Schema({
   chatModerationWarnings: { type: Number, default: 0, min: 0 },
   lastChatWarningAt: { type: Date, default: null },
   blockedChatUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+
+  // Social graph: mutual friends plus explicit incoming/outgoing requests.
+  // Kept on User so Arena, chat and analyst profiles share one identity.
+  friends: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  incomingFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  outgoingFriendRequests: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   createdAt: {
     type: Date,
     default: Date.now,
