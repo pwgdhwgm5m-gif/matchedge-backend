@@ -231,6 +231,12 @@ async function performance() {
     rows
   };
 }
+function v4MarkerHit(p,v){if(!v?.key)return null;return strongestPickHit({...p,strongestPick:{key:v.key}})}
+async function v4CrossCheckPerformance(){
+ const rows=await Prediction.find({status:'settled','v4Validation.kind':'fixture-cross-check'}).select('league actual v4Validation').lean();const groups={};
+ for(const p of rows){for(const v of (p.v4Validation||[]).filter(x=>x?.kind==='fixture-cross-check')){const hit=v4MarkerHit(p,v);if(hit===null)continue;const a=v.agreement||'unavailable',k=a+'::'+(v.market||'unknown'),g=groups[k]||(groups[k]={agreement:a,market:v.market||'unknown',count:0,wins:0});g.count++;if(hit)g.wins++}}
+ return Object.values(groups).map(g=>({...g,losses:g.count-g.wins,hitRatePercent:g.count?+(100*g.wins/g.count).toFixed(1):null,readiness:g.count<30?'collecting':g.count<100?'early-signal':'decision-ready'}));
+}
 async function reportCard(fixtureId){
  const [perf,snapshot]=await Promise.all([performance(),Prediction.findOne({fixtureId:String(fixtureId),modelVersion:VERSION}).lean()]);
  const marketMap={home:'home',draw:'draw',away:'away',over25:'over25',under25:'over25',bttsYes:'btts',bttsNo:'btts'};
@@ -240,4 +246,4 @@ async function reportCard(fixtureId){
  return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
-module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, VERSION };
