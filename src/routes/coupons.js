@@ -92,7 +92,6 @@ async function settlePending(userId) {
       for(const selection of coupon.selections){
         if(selection.result!=='pending')continue;
         selection.result=settleSelection(selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
-        await CommunityPick.updateOne({userId,fixtureId:coupon.fixtureId,key:selection.key},{$set:{result:selection.result,settledAt:new Date()}});
       }
       const legacyResults=coupon.selections.map(s=>s.result);
       coupon.status=legacyResults.some(x=>x==='lost')?'lost':legacyResults.some(x=>x==='pending')?'pending':legacyResults.some(x=>x==='won')?'won':'void';
@@ -124,7 +123,6 @@ async function settlePending(userId) {
       }
       leg.selection.result=settleSelection(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
       leg.finalScore={home:match.homeScore,away:match.awayScore};
-      await CommunityPick.updateOne({userId,fixtureId:leg.fixtureId,key:leg.selection.key},{$set:{result:leg.selection.result,settledAt:new Date()}});
     }
     const results=coupon.legs.map(l=>l.selection.result);
     coupon.status=results.some(x=>x==='lost')?'lost':results.some(x=>x==='pending')?'pending':results.some(x=>x==='won')?'won':'void';
