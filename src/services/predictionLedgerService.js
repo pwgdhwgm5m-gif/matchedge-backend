@@ -1,6 +1,7 @@
 const Prediction = require('../models/PredictionSnapshot');
 const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
+const sportmonks = require('./sportmonksService');
 const VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
@@ -51,38 +52,45 @@ function outcomes(m) {
   return { home: h > a ? 1 : 0, draw: h === a ? 1 : 0, away: a > h ? 1 : 0,
     over25: h + a > 2 ? 1 : 0, btts: h > 0 && a > 0 ? 1 : 0, homeScore: h, awayScore: a };
 }
+function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
+function ledgerTeamPairMatch(m,p){const h=normTeam(p.homeTeam),a=normTeam(p.awayTeam),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
+function ledgerFinal(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s)||[5,8,9].includes(Number(m.stateId)))&&m.homeScore!=null&&m.awayScore!=null}
 async function settlePending() {
   const pending = await Prediction.find({ status: 'pending', kickoff: { $lt: new Date() } })
     .sort({ kickoff: 1 }).limit(150).lean();
   const day = (date, offset) => new Date(date.getTime() + offset * 86400000).toISOString().slice(0,10);
   const days = [...new Set(pending.flatMap(p => [-1,0,1].map(n => day(p.kickoff,n))))];
-  const found = new Map();
-  let settled = 0;
+  const providerRows=[];
   for (const date of days) {
-    const [raw, verified] = await Promise.all([
-      sportsDb.getMatchesByDate(date), footballDataOrg.getMatchesByDate(date)]);
-    let matches = raw.ok ? (raw.data?.events || []).map(sportsDb.transformEvent) : [];
-    if (verified.ok) matches = footballDataOrg.mergeVerifiedScores(matches, verified.matches);
-    const byId = new Map(matches.filter(m => m.statusShort === 'FT').map(m => [String(m.fixtureId), m]));
-    for (const [id, match] of byId) found.set(id, match);
+    const [raw,verified,sm]=await Promise.all([
+      sportsDb.getMatchesByDate(date).catch(()=>({ok:false})),
+      footballDataOrg.getMatchesByDate(date).catch(()=>({ok:false,matches:[]})),
+      sportmonks.getFixturesByDate(date).catch(()=>({ok:false,fixtures:[]}))
+    ]);
+    let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
+    if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);
+    providerRows.push(...fallback.filter(ledgerFinal));
+    if(sm.ok)providerRows.push(...(sm.fixtures||[]).filter(ledgerFinal));
   }
+  let settled = 0;
   for (const p of pending) {
-      const match = found.get(p.fixtureId);
-      const actual = match && outcomes(match);
-      if (!actual) continue;
-      const result = await Prediction.updateOne(
-        { _id: p._id, status: 'pending' },
-        { $set: { status: 'settled', actual, settledAt: new Date() } });
-      if(result.modifiedCount){
-        settled += result.modifiedCount;
-        try{
-          const powerRating=require('./powerRatingService');
-          await powerRating.persistFromMatch({league:p.league||'',season:'',fixtureId:p.fixtureId,kickoff:p.kickoff,
-            home:{id:match.homeId||p.homeTeamId,name:p.homeTeam},away:{id:match.awayId||p.awayTeamId,name:p.awayTeam},
-            homeGoals:actual.homeScore,awayGoals:actual.awayScore});
-        }catch(e){console.warn('[power-rating/settle]',p.fixtureId,e.message);}
-      }
+    const match=providerRows.find(m=>String(m.sportmonksId||m.fixtureId||m.id)===String(p.fixtureId))
+      ||providerRows.find(m=>ledgerTeamPairMatch(m,p));
+    const actual = match && outcomes(match);
+    if (!actual) continue;
+    const result = await Prediction.updateOne(
+      { _id: p._id, status: 'pending' },
+      { $set: { status: 'settled', actual, settledAt: new Date() } });
+    if(result.modifiedCount){
+      settled += result.modifiedCount;
+      try{
+        const powerRating=require('./powerRatingService');
+        await powerRating.persistFromMatch({league:p.league||'',season:'',fixtureId:p.fixtureId,kickoff:p.kickoff,
+          home:{id:match.homeTeamId||match.homeId||p.homeTeamId,name:p.homeTeam},away:{id:match.awayTeamId||match.awayId||p.awayTeamId,name:p.awayTeam},
+          homeGoals:actual.homeScore,awayGoals:actual.awayScore});
+      }catch(e){console.warn('[power-rating/settle]',p.fixtureId,e.message);}
     }
+  }
   return settled;
 }
 async function sportmonksBacktest() {
