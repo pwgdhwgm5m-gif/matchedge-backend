@@ -209,10 +209,6 @@ router.post('/', async (req, res) => {
     try{
       coupon=await Coupon.create({userId:req.user.userId,legs:safeLegs,stakeCoins:stake,payoutMultiplier:payout.multiplier,potentialPayout:payout.payout});
     }catch(error){await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:stake,totalCoinsSpent:-stake}});throw error}
-    await Promise.all(safeLegs.map(leg=>CommunityPick.updateOne(
-      {userId:req.user.userId,fixtureId:leg.fixtureId,key:leg.selection.key},
-      {$set:{homeTeam:leg.homeTeam,awayTeam:leg.awayTeam,league:leg.league,kickoff:leg.kickoff,market:leg.selection.market,label:leg.selection.label,result:'pending',settledAt:null}},{upsert:true}
-    )));
     res.status(201).json({coupon,balance:user.edgeCoins});
   }catch(error){console.error('[coupons/create]',error.message);res.status(500).json({error:'Kupon oluşturulamadı.'})}
 });
