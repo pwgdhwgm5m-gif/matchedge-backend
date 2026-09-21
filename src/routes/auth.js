@@ -58,9 +58,11 @@ router.post('/register', async (req, res) => {
 
     // E-posta doğrulaması geçici olarak kapalıdır.
     // Yeniden etkinleştirildiğinde token üretimi ve gönderimi bu noktaya geri alınabilir.
+    const isReservedAdmin = username.toLowerCase() === config.adminUsername;
     const user = await User.create({
       username, email, passwordHash,
       dateOfBirth: birthDate,
+      role: isReservedAdmin ? 'admin' : 'user',
       emailVerified: true,
       verificationTokenHash: null,
       verificationExpires: null,
