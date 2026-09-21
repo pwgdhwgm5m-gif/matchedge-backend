@@ -17,7 +17,7 @@ function ensureWallet(user){
  if((user.walletVersion||0)<1){user.edgeCoins=100;user.walletVersion=1;return true}
  return false;
 }
-const MARKET_MULTIPLIERS={home:1.8,draw:2.8,away:2.1,over25:1.7,under25:1.8,bttsYes:1.7,bttsNo:1.9,cornersOver85:1.8,cornersUnder85:1.8,fhHome:2.2,fhDraw:2.6,fhAway:2.4,shHome:2.1,shDraw:2.5,shAway:2.3,mostGoalsFirst:2.2,mostGoalsEqual:2.8,mostGoalsSecond:1.9};
+const MARKET_MULTIPLIERS={home:1.8,draw:2.8,away:2.1,over25:1.7,under25:1.8,bttsYes:1.7,bttsNo:1.9,cornersOver85:1.8,cornersUnder85:1.8,cornersOver95:1.8,cornersUnder95:1.8,fhHome:2.2,fhDraw:2.6,fhAway:2.4,shHome:2.1,shDraw:2.5,shAway:2.3,mostGoalsFirst:2.2,mostGoalsEqual:2.8,mostGoalsSecond:1.9};
 function gameMultiplier(selection){
  const p=Number(selection?.probability);
  if(Number.isFinite(p)&&p>=5&&p<=95)return Math.max(1.15,Math.min(4,Number((100/p).toFixed(2))));
