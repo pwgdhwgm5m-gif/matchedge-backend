@@ -185,6 +185,7 @@ router.post('/verified-picks',async(req,res)=>{
  const kickoff=new Date(fixture.kickoff);if(Number.isNaN(kickoff.getTime())||kickoff.getTime()<=Date.now()||fixture.isLive||fixture.statusShort==='FT')return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
  const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,market,verified:true}).lean();if(conflicting)return res.status(409).json({error:'A verified pick for this market is already locked.'});
  const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam:fixture.homeTeam||homeTeam,awayTeam:fixture.awayTeam||awayTeam,league,kickoff,result:'pending',verified:true,lockedAt:new Date(),source:String(b.source)==='match-room'?'match-room':'analysis'});
+ try{require('../services/pushGoalService').checkSmartNotifications().catch(()=>{})}catch(_){}
  res.status(201).json({pick,locked:true});
 });
 
