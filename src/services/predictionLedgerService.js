@@ -74,8 +74,13 @@ async function settlePending() {
   }
   let settled = 0;
   for (const p of pending) {
-    const match=providerRows.find(m=>String(m.sportmonksId||m.fixtureId||m.id)===String(p.fixtureId))
+    let match=providerRows.find(m=>String(m.sportmonksId||m.fixtureId||m.id)===String(p.fixtureId))
       ||providerRows.find(m=>ledgerTeamPairMatch(m,p));
+    if(!match&&p.fixtureId){
+      const direct=await sportsDb.getEventById(p.fixtureId).catch(()=>({ok:false}));
+      const event=direct.ok?(direct.data?.events||[])[0]:null;
+      if(event){const exact=sportsDb.transformEvent(event);if(ledgerFinal(exact))match=exact;}
+    }
     const actual = match && outcomes(match);
     if (!actual) continue;
     const result = await Prediction.updateOne(
