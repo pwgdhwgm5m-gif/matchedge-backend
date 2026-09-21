@@ -5,6 +5,7 @@ const Coupon=require('../models/Coupon');
 const MiniLeague=require('../models/MiniLeague');
 const {requireAuth}=require('../middleware/authMiddleware');
 const {rankForXp,dailyState,ensureWallet}=require('../services/gamificationService');
+const sportmonks=require('../services/sportmonksService');
 const router=express.Router();
 router.use(requireAuth);
 
@@ -155,9 +156,9 @@ router.delete('/follow/:userId',async(req,res)=>{
 router.get('/fixture/:fixtureId/consensus',async(req,res)=>{
  const fixtureId=String(req.params.fixtureId),picks=await CommunityPick.find({fixtureId}).lean();
  const ids=[...new Set(picks.map(p=>String(p.userId)))],users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
- const rows={};for(const p of picks){const k=p.key||p.label;rows[k]??={key:k,label:p.label,market:p.market,community:0,experts:0};rows[k].community++;const u=byId.get(String(p.userId));if(u&&['expert','elite'].includes(analystTier(u).key))rows[k].experts++}
- const communityTotal=picks.length,expertTotal=picks.filter(p=>{const u=byId.get(String(p.userId));return u&&['expert','elite'].includes(analystTier(u).key)}).length;
- res.json({fixtureId,totalUsers:ids.length,selections:Object.values(rows).map(x=>({...x,communityPercent:communityTotal?Math.round(x.community/communityTotal*100):0,expertPercent:expertTotal?Math.round(x.experts/expertTotal*100):0}))});
+ const rows={},marketTotals={};
+ for(const p of picks){const market=String(p.market||'Other'),k=p.key||p.label,u=byId.get(String(p.userId)),expert=!!u&&['expert','elite'].includes(analystTier(u).key);marketTotals[market]??={community:0,experts:0};marketTotals[market].community++;if(expert)marketTotals[market].experts++;rows[k]??={key:k,label:p.label,market,community:0,experts:0};rows[k].community++;if(expert)rows[k].experts++}
+ res.json({fixtureId,totalUsers:ids.length,selections:Object.values(rows).map(x=>{const t=marketTotals[x.market]||{};return {...x,communityPercent:t.community?Math.round(x.community/t.community*100):0,expertPercent:t.experts?Math.round(x.experts/t.experts*100):0,communityMarketTotal:t.community||0,expertMarketTotal:t.experts||0}})});
 });
 
 router.get('/feed/following',async(req,res)=>{
@@ -168,12 +169,17 @@ router.get('/feed/following',async(req,res)=>{
 });
 router.get('/verified-picks/:fixtureId/mine',async(req,res)=>{const picks=await CommunityPick.find({userId:req.user.userId,fixtureId:String(req.params.fixtureId)}).lean();res.json({picks:picks.map(p=>({key:p.key,market:p.market,label:p.label,result:p.result,createdAt:p.createdAt}))})});
 router.post('/verified-picks',async(req,res)=>{
- const b=req.body||{},fixtureId=String(b.fixtureId||''),key=String(b.key||''),market=String(b.market||'').slice(0,40),label=String(b.label||'').slice(0,60),homeTeam=String(b.homeTeam||'').slice(0,80),awayTeam=String(b.awayTeam||'').slice(0,80),league=String(b.league||'').slice(0,80),kickoff=b.kickoff?new Date(b.kickoff):null;
+ const b=req.body||{},fixtureId=String(b.fixtureId||''),key=String(b.key||''),market=String(b.market||'').slice(0,40),label=String(b.label||'').slice(0,60),homeTeam=String(b.homeTeam||'').slice(0,80),awayTeam=String(b.awayTeam||'').slice(0,80),league=String(b.league||'').slice(0,80);
  if(!fixtureId||!key||!market||!label||!homeTeam||!awayTeam)return res.status(400).json({error:'Missing pick data.'});
- if(kickoff&&!Number.isNaN(kickoff.getTime())&&kickoff.getTime()<=Date.now())return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
  const existing=await CommunityPick.findOne({userId:req.user.userId,fixtureId,key}).lean();if(existing)return res.json({pick:existing,locked:true});
+ let fixture=null;
+ const direct=await sportmonks.request('/fixtures/'+encodeURIComponent(fixtureId),{include:'participants'}).catch(()=>({ok:false}));
+ if(direct.ok&&direct.data?.data)fixture=sportmonks.transformFixture(direct.data.data);
+ if(!fixture){const supplied=b.kickoff?new Date(b.kickoff):null;if(supplied&&!Number.isNaN(supplied.getTime())){const day=supplied.toISOString().slice(0,10),r=await sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]}));fixture=(r.fixtures||[]).find(x=>String(x.sportmonksId||x.fixtureId)===fixtureId)}}
+ if(!fixture||!fixture.kickoff)return res.status(409).json({error:'Fixture kickoff could not be verified. Pick was not locked.'});
+ const kickoff=new Date(fixture.kickoff);if(Number.isNaN(kickoff.getTime())||kickoff.getTime()<=Date.now()||fixture.isLive||fixture.statusShort==='FT')return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
  const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,market}).lean();if(conflicting)return res.status(409).json({error:'A verified pick for this market is already locked.'});
- const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam,awayTeam,league,kickoff,result:'pending'});
+ const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam:fixture.homeTeam||homeTeam,awayTeam:fixture.awayTeam||awayTeam,league,kickoff,result:'pending'});
  res.status(201).json({pick,locked:true});
 });
 
