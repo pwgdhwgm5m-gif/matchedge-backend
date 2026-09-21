@@ -52,14 +52,14 @@ router.get('/leaderboard',async(req,res)=>{
 });
 router.get('/fixture/:fixtureId',async(req,res)=>{
  const fixtureId=String(req.params.fixtureId);
- const rows=await CommunityPick.aggregate([{$match:{fixtureId}},{$group:{_id:{key:'$key',label:'$label',market:'$market'},count:{$sum:1}}},{$sort:{count:-1}}]);
- const totalUsers=await CommunityPick.distinct('userId',{fixtureId}),totalVotes=rows.reduce((n,r)=>n+r.count,0);
+ const rows=await CommunityPick.aggregate([{$match:{fixtureId,verified:true}},{$group:{_id:{key:'$key',label:'$label',market:'$market'},count:{$sum:1}}},{$sort:{count:-1}}]);
+ const totalUsers=await CommunityPick.distinct('userId',{fixtureId,verified:true}),totalVotes=rows.reduce((n,r)=>n+r.count,0);
  res.json({fixtureId,totalUsers:totalUsers.length,totalVotes,selections:rows.map(r=>({key:r._id.key,label:r._id.label,market:r._id.market,count:r.count,percent:totalVotes?Math.round((r.count/totalVotes)*100):0}))});
 });
 
 function weekStart(){const d=new Date();d.setUTCHours(0,0,0,0);const day=d.getUTCDay()||7;d.setUTCDate(d.getUTCDate()-day+1);return d}
 router.get('/edge-dna',async(req,res)=>{
- const picks=await CommunityPick.find({userId:req.user.userId,result:{$in:['won','lost']}}).lean();
+ const picks=await CommunityPick.find({userId:req.user.userId,verified:true,result:{$in:['won','lost']}}).lean();
  const group=(keyFn)=>{const m={};for(const p of picks){const k=keyFn(p)||'Diğer';m[k]??={name:k,won:0,total:0};m[k].total++;if(p.result==='won')m[k].won++}return Object.values(m).map(x=>({...x,accuracy:Math.round(x.won/x.total*100)})).sort((a,b)=>b.accuracy-a.accuracy||b.total-a.total)};
  const market=group(p=>p.market),league=group(p=>p.league);
  const snapshots=require('../models/PredictionSnapshot');const settled=await snapshots.find({status:'settled'}).sort({settledAt:-1}).limit(500).lean();
@@ -110,7 +110,8 @@ function groupedPerformance(picks,key){
 }
 router.get('/users/search',async(req,res)=>{
  const q=String(req.query.q||'').trim().toLowerCase().slice(0,30);if(q.length<2)return res.json({users:[]});
- const me=await User.findById(req.user.userId).lean();const users=await User.find({username:{$regex:'^'+q,$options:'i'},_id:{$ne:req.user.userId}}).limit(20).lean();
+ const safeQ=q.replace(/[.*+?^${}()|[\]\\]/g,'\\const q=String(req.query.q||'').trim().toLowerCase().slice(0,30);if(q.length<2)return res.json({users:[]});');
+ const me=await User.findById(req.user.userId).lean();const users=await User.find({username:{$regex:'^'+safeQ,$options:'i'},_id:{$ne:req.user.userId}}).limit(20).lean();
  res.json({users:users.map(u=>({...publicUser(u),relationship:relation(me,u)}))});
 });
 router.get('/friends',async(req,res)=>{
@@ -121,7 +122,7 @@ router.get('/friends',async(req,res)=>{
 router.get('/profile/:username',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean(),user=await User.findOne({username:String(req.params.username||'').toLowerCase()}).lean();
  if(!me||!user)return res.status(404).json({error:'Profile not found.'});
- const picks=await CommunityPick.find({userId:user._id,result:{$in:['won','lost','pending']}}).sort({createdAt:-1}).limit(250).lean();
+ const picks=await CommunityPick.find({userId:user._id,verified:true,result:{$in:['won','lost','pending']}}).sort({createdAt:-1}).limit(250).lean();
  const settled=picks.filter(p=>p.result==='won'||p.result==='lost'),recent=picks.slice(0,20).map(p=>({fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt}));
  const bestMarkets=groupedPerformance(settled,'market').slice(0,3),bestLeagues=groupedPerformance(settled,'league').slice(0,3);
  const badges=[...bestMarkets.filter(x=>x.total>=10&&x.accuracy>=60).map(x=>({type:'market',name:x.name+' Expert'})),...bestLeagues.filter(x=>x.total>=10&&x.accuracy>=60).map(x=>({type:'league',name:x.name+' Specialist'}))].slice(0,4);
@@ -154,7 +155,7 @@ router.delete('/follow/:userId',async(req,res)=>{
  res.json({following:false});
 });
 router.get('/fixture/:fixtureId/consensus',async(req,res)=>{
- const fixtureId=String(req.params.fixtureId),picks=await CommunityPick.find({fixtureId}).lean();
+ const fixtureId=String(req.params.fixtureId),picks=await CommunityPick.find({fixtureId,verified:true}).lean();
  const ids=[...new Set(picks.map(p=>String(p.userId)))],users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
  const rows={},marketTotals={};
  for(const p of picks){const market=String(p.market||'Other'),k=p.key||p.label,u=byId.get(String(p.userId)),expert=!!u&&['expert','elite'].includes(analystTier(u).key);marketTotals[market]??={community:0,experts:0};marketTotals[market].community++;if(expert)marketTotals[market].experts++;rows[k]??={key:k,label:p.label,market,community:0,experts:0};rows[k].community++;if(expert)rows[k].experts++}
@@ -162,28 +163,28 @@ router.get('/fixture/:fixtureId/consensus',async(req,res)=>{
 });
 
 router.get('/feed/arena',async(req,res)=>{
- const picks=await CommunityPick.find({}).sort({createdAt:-1}).limit(40).lean(),ids=[...new Set(picks.map(p=>String(p.userId)))],users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
+ const picks=await CommunityPick.find({verified:true}).sort({createdAt:-1}).limit(40).lean(),ids=[...new Set(picks.map(p=>String(p.userId)))],users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
  res.json({items:picks.map(p=>{const u=byId.get(String(p.userId));return {id:p._id,fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt,user:u?publicUser(u):null}}).filter(x=>x.user)});
 });
 router.get('/feed/following',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
  const ids=me.following||[];if(!ids.length)return res.json({items:[]});
- const picks=await CommunityPick.find({userId:{$in:ids}}).sort({createdAt:-1}).limit(60).lean(),users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
+ const picks=await CommunityPick.find({userId:{$in:ids},verified:true}).sort({createdAt:-1}).limit(60).lean(),users=await User.find({_id:{$in:ids}}).lean(),byId=new Map(users.map(u=>[String(u._id),u]));
  res.json({items:picks.map(p=>{const u=byId.get(String(p.userId));return {id:p._id,fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt,user:u?publicUser(u):null}})});
 });
-router.get('/verified-picks/:fixtureId/mine',async(req,res)=>{const picks=await CommunityPick.find({userId:req.user.userId,fixtureId:String(req.params.fixtureId)}).lean();res.json({picks:picks.map(p=>({key:p.key,market:p.market,label:p.label,result:p.result,createdAt:p.createdAt}))})});
+router.get('/verified-picks/:fixtureId/mine',async(req,res)=>{const picks=await CommunityPick.find({userId:req.user.userId,fixtureId:String(req.params.fixtureId),verified:true}).lean();res.json({picks:picks.map(p=>({key:p.key,market:p.market,label:p.label,result:p.result,createdAt:p.createdAt}))})});
 router.post('/verified-picks',async(req,res)=>{
  const b=req.body||{},fixtureId=String(b.fixtureId||''),key=String(b.key||''),market=String(b.market||'').slice(0,40),label=String(b.label||'').slice(0,60),homeTeam=String(b.homeTeam||'').slice(0,80),awayTeam=String(b.awayTeam||'').slice(0,80),league=String(b.league||'').slice(0,80);
  if(!fixtureId||!key||!market||!label||!homeTeam||!awayTeam)return res.status(400).json({error:'Missing pick data.'});
- const existing=await CommunityPick.findOne({userId:req.user.userId,fixtureId,key}).lean();if(existing)return res.json({pick:existing,locked:true});
+ const existing=await CommunityPick.findOne({userId:req.user.userId,fixtureId,key,verified:true}).lean();if(existing)return res.json({pick:existing,locked:true});
  let fixture=null;
  const direct=await sportmonks.request('/fixtures/'+encodeURIComponent(fixtureId),{include:'participants'}).catch(()=>({ok:false}));
  if(direct.ok&&direct.data?.data)fixture=sportmonks.transformFixture(direct.data.data);
  if(!fixture){const supplied=b.kickoff?new Date(b.kickoff):null;if(supplied&&!Number.isNaN(supplied.getTime())){const day=supplied.toISOString().slice(0,10),r=await sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]}));fixture=(r.fixtures||[]).find(x=>String(x.sportmonksId||x.fixtureId)===fixtureId)}}
  if(!fixture||!fixture.kickoff)return res.status(409).json({error:'Fixture kickoff could not be verified. Pick was not locked.'});
  const kickoff=new Date(fixture.kickoff);if(Number.isNaN(kickoff.getTime())||kickoff.getTime()<=Date.now()||fixture.isLive||fixture.statusShort==='FT')return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
- const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,market}).lean();if(conflicting)return res.status(409).json({error:'A verified pick for this market is already locked.'});
- const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam:fixture.homeTeam||homeTeam,awayTeam:fixture.awayTeam||awayTeam,league,kickoff,result:'pending'});
+ const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,market,verified:true}).lean();if(conflicting)return res.status(409).json({error:'A verified pick for this market is already locked.'});
+ const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam:fixture.homeTeam||homeTeam,awayTeam:fixture.awayTeam||awayTeam,league,kickoff,result:'pending',verified:true,lockedAt:new Date(),source:String(b.source)==='match-room'?'match-room':'analysis'});
  res.status(201).json({pick,locked:true});
 });
 
