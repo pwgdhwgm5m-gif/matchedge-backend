@@ -110,7 +110,7 @@ function groupedPerformance(picks,key){
 }
 router.get('/users/search',async(req,res)=>{
  const q=String(req.query.q||'').trim().toLowerCase().slice(0,30);if(q.length<2)return res.json({users:[]});
- const safeQ=q.replace(/[.*+?^${}()|[\]\\]/g,'\\const q=String(req.query.q||'').trim().toLowerCase().slice(0,30);if(q.length<2)return res.json({users:[]});');
+ const safeQ=q.replace(/[.*+?^$()|[\]{}\\]/g,'\\$&');
  const me=await User.findById(req.user.userId).lean();const users=await User.find({username:{$regex:'^'+safeQ,$options:'i'},_id:{$ne:req.user.userId}}).limit(20).lean();
  res.json({users:users.map(u=>({...publicUser(u),relationship:relation(me,u)}))});
 });
