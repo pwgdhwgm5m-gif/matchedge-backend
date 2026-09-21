@@ -26,6 +26,6 @@ async function settlePending(){
   const h=Number(m.homeScore),a=Number(m.awayScore),hh=m.halftimeHome==null?null:Number(m.halftimeHome),ha=m.halftimeAway==null?null:Number(m.halftimeAway);
   for(const p of g.picks){p.result=grade(p.key,h,a,corners,hh,ha);p.settledAt=new Date();await p.save();settled++;touched.add(String(p.userId))}
  }
- for(const id of touched)await rebuildUserStats(id);return {settled,users:touched.size}
+ for(const id of touched)await rebuildUserStats(id);if(settled){try{require('./pushGoalService').checkSmartNotifications().catch(()=>{})}catch(_){}}return {settled,users:touched.size}
 }
 module.exports={settlePending,rebuildUserStats,rebuildAllAnalystStats,grade};
