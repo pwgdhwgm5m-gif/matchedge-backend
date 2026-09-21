@@ -106,6 +106,24 @@ function isWhitelistedLeague(leagueId) {
   return WHITELISTED_LEAGUE_IDS.has(String(leagueId));
 }
 
+// Guard against provider rows whose competition id and displayed league name
+// disagree. A mismatched row must never be relabelled as a trusted competition.
+const STRICT_LEAGUE_NAMES = {
+  '4482': ['fa cup','english fa cup','the fa cup'],
+  '4483': ['copa del rey'],
+  '4484': ['coupe de france'],
+  '4485': ['dfb-pokal','dfb pokal'],
+  '4506': ['coppa italia'],
+  '4510': ['taça de portugal','taca de portugal','portuguese cup'],
+  '4960': ['turkish cup','türkiye kupası','turkiye kupasi']
+};
+function isLeagueIdentityConsistent(leagueId, leagueName) {
+  const expected = STRICT_LEAGUE_NAMES[String(leagueId)];
+  if (!expected) return true;
+  const actual = String(leagueName || '').trim().toLowerCase();
+  return expected.some(name => actual === name || actual.includes(name));
+}
+
 async function fetchT(url, timeoutMs) {
   const ms = timeoutMs || 10000;
   const controller = new AbortController();
@@ -350,8 +368,8 @@ function transformLiveEvent(e) {
     awayTeam: e.strAwayTeam || '',
     homeBadge: e.strHomeTeamBadge || null,
     awayBadge: e.strAwayTeamBadge || null,
-    homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined ? parseInt(e.intHomeScore, 10) : 0,
-    awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined ? parseInt(e.intAwayScore, 10) : 0,
+    homeScore: e.intHomeScore !== null && e.intHomeScore !== undefined && e.intHomeScore !== '' ? parseInt(e.intHomeScore, 10) : null,
+    awayScore: e.intAwayScore !== null && e.intAwayScore !== undefined && e.intAwayScore !== '' ? parseInt(e.intAwayScore, 10) : null,
     halftimeHome: null,
     halftimeAway: null,
   };
@@ -849,6 +867,7 @@ module.exports = {
   getLeagueStandingsFormatted,
   getCurrentSeasonString,
   isWhitelistedLeague,
+  isLeagueIdentityConsistent,
   WHITELISTED_LEAGUE_IDS,
   LEAGUE_ID_MAP,
 };
