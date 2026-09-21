@@ -8,9 +8,17 @@ const {rankForXp,dailyState,ensureWallet}=require('../services/gamificationServi
 const router=express.Router();
 router.use(requireAuth);
 
+function analystTier(user){
+ const total=(user.correctPicks||0)+(user.wrongPicks||0),accuracy=total?Math.round((user.correctPicks/total)*100):0;
+ if(total>=150&&accuracy>=65)return {key:'elite',name:'Elite',color:'#f2c94c'};
+ if(total>=75&&accuracy>=60)return {key:'expert',name:'Expert',color:'#9d7cf0'};
+ if(total>=30&&accuracy>=55)return {key:'analyst',name:'Analyst',color:'#35c878'};
+ if(total>=10)return {key:'scout',name:'Scout',color:'#4da3ff'};
+ return {key:'rookie',name:'Rookie',color:'#9aa4b8'};
+}
 function publicUser(user,position=null){
  const total=(user.correctPicks||0)+(user.wrongPicks||0),rank=rankForXp(user.xp||0);
- return {username:user.username,xp:user.xp||0,edgeCoins:user.edgeCoins||0,correctPicks:user.correctPicks||0,wrongPicks:user.wrongPicks||0,accuracy:total?Math.round((user.correctPicks/total)*100):0,currentStreak:user.currentStreak||0,bestStreak:user.bestStreak||0,totalCoinsWon:user.totalCoinsWon||0,totalCoinsSpent:user.totalCoinsSpent||0,netCoins:(user.totalCoinsWon||0)-(user.totalCoinsSpent||0),rank,position,daily:dailyState(user)};
+ return {id:user._id,username:user.username,xp:user.xp||0,edgeCoins:user.edgeCoins||0,correctPicks:user.correctPicks||0,wrongPicks:user.wrongPicks||0,totalPicks:total,accuracy:total?Math.round((user.correctPicks/total)*100):0,currentStreak:user.currentStreak||0,bestStreak:user.bestStreak||0,totalCoinsWon:user.totalCoinsWon||0,totalCoinsSpent:user.totalCoinsSpent||0,netCoins:(user.totalCoinsWon||0)-(user.totalCoinsSpent||0),rank,analystTier:analystTier(user),friendsCount:(user.friends||[]).length,position,daily:dailyState(user)};
 }
 async function getWalletUser(id){
  const user=await User.findById(id);if(!user)return null;
@@ -86,5 +94,49 @@ router.get('/mini-leagues',async(req,res)=>{
  const leagues=await MiniLeague.find({members:req.user.userId}).lean(),out=[];
  for(const l of leagues){const users=await User.find({_id:{$in:l.members}}).sort({xp:-1,correctPicks:-1}).lean();out.push({...l,members:users.map((u,i)=>({...publicUser(u,i+1),id:undefined}))})}
  res.json({leagues:out});
+});
+// Social analyst profiles ----------------------------------------------------
+function relation(me,other){
+ const oid=String(other._id),mid=String(me._id);
+ if((me.friends||[]).some(x=>String(x)===oid))return 'friends';
+ if((me.outgoingFriendRequests||[]).some(x=>String(x)===oid))return 'requested';
+ if((me.incomingFriendRequests||[]).some(x=>String(x)===oid))return 'incoming';
+ return mid===oid?'self':'none';
+}
+function groupedPerformance(picks,key){
+ const map={};for(const p of picks){const k=String(p[key]||'Other');map[k]??={name:k,won:0,total:0};map[k].total++;if(p.result==='won')map[k].won++}
+ return Object.values(map).filter(x=>x.total>=3).map(x=>({...x,accuracy:Math.round(x.won/x.total*100)})).sort((a,b)=>b.accuracy-a.accuracy||b.total-a.total);
+}
+router.get('/users/search',async(req,res)=>{
+ const q=String(req.query.q||'').trim().toLowerCase().slice(0,30);if(q.length<2)return res.json({users:[]});
+ const me=await User.findById(req.user.userId).lean();const users=await User.find({username:{$regex:'^'+q,$options:'i'},_id:{$ne:req.user.userId}}).limit(20).lean();
+ res.json({users:users.map(u=>({...publicUser(u),relationship:relation(me,u)}))});
+});
+router.get('/friends',async(req,res)=>{
+ const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
+ const [friends,incoming]=await Promise.all([User.find({_id:{$in:me.friends||[]}}).lean(),User.find({_id:{$in:me.incomingFriendRequests||[]}}).lean()]);
+ res.json({friends:friends.map(u=>publicUser(u)),requests:incoming.map(u=>publicUser(u))});
+});
+router.get('/profile/:username',async(req,res)=>{
+ const me=await User.findById(req.user.userId).lean(),user=await User.findOne({username:String(req.params.username||'').toLowerCase()}).lean();
+ if(!me||!user)return res.status(404).json({error:'Profile not found.'});
+ const picks=await CommunityPick.find({userId:user._id,result:{$in:['won','lost','pending']}}).sort({createdAt:-1}).limit(250).lean();
+ const settled=picks.filter(p=>p.result==='won'||p.result==='lost'),recent=picks.slice(0,20).map(p=>({fixtureId:p.fixtureId,homeTeam:p.homeTeam,awayTeam:p.awayTeam,league:p.league,market:p.market,label:p.label,result:p.result,kickoff:p.kickoff,createdAt:p.createdAt}));
+ res.json({profile:publicUser(user),relationship:relation(me,user),bestMarkets:groupedPerformance(settled,'market').slice(0,3),bestLeagues:groupedPerformance(settled,'league').slice(0,3),recent});
+});
+router.post('/friends/:userId/request',async(req,res)=>{
+ const mongoose=require('mongoose');if(!mongoose.Types.ObjectId.isValid(req.params.userId)||String(req.params.userId)===String(req.user.userId))return res.status(400).json({error:'Invalid user.'});
+ const [me,other]=await Promise.all([User.findById(req.user.userId),User.findById(req.params.userId)]);if(!me||!other)return res.status(404).json({error:'User not found.'});
+ if((me.friends||[]).some(x=>String(x)===String(other._id)))return res.json({relationship:'friends'});
+ await Promise.all([User.updateOne({_id:me._id},{$addToSet:{outgoingFriendRequests:other._id}}),User.updateOne({_id:other._id},{$addToSet:{incomingFriendRequests:me._id}})]);res.json({relationship:'requested'});
+});
+router.post('/friends/:userId/accept',async(req,res)=>{
+ const mongoose=require('mongoose');if(!mongoose.Types.ObjectId.isValid(req.params.userId))return res.status(400).json({error:'Invalid user.'});
+ const me=await User.findById(req.user.userId);if(!me||(me.incomingFriendRequests||[]).some(x=>String(x)===String(req.params.userId))===false)return res.status(409).json({error:'Friend request not found.'});
+ await Promise.all([User.updateOne({_id:me._id},{$addToSet:{friends:req.params.userId},$pull:{incomingFriendRequests:req.params.userId}}),User.updateOne({_id:req.params.userId},{$addToSet:{friends:me._id},$pull:{outgoingFriendRequests:me._id}})]);res.json({relationship:'friends'});
+});
+router.delete('/friends/:userId',async(req,res)=>{
+ const mongoose=require('mongoose');if(!mongoose.Types.ObjectId.isValid(req.params.userId))return res.status(400).json({error:'Invalid user.'});
+ await Promise.all([User.updateOne({_id:req.user.userId},{$pull:{friends:req.params.userId,incomingFriendRequests:req.params.userId,outgoingFriendRequests:req.params.userId}}),User.updateOne({_id:req.params.userId},{$pull:{friends:req.user.userId,incomingFriendRequests:req.user.userId,outgoingFriendRequests:req.user.userId}})]);res.json({relationship:'none'});
 });
 module.exports=router;
