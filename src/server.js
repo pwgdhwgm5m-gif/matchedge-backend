@@ -11,6 +11,7 @@ const oddsHistoryRoute = require('./routes/oddsHistory');
 const resultsRoute = require('./routes/results');
 const marketOddsRoute = require('./routes/marketOdds');
 const authRoute = require('./routes/auth');
+const adminPasskeyRoute = require('./routes/adminPasskey');
 const notesRoute = require('./routes/notes');
 const favoritesRoute = require('./routes/favorites');
 const adminRoute = require('./routes/admin');
@@ -46,6 +47,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/auth', authRoute);
+app.use('/api/admin-passkey', adminPasskeyRoute);
 app.use('/api/notes', notesRoute);
 app.use('/api/favorites', favoritesRoute);
 app.use('/api/admin', adminRoute);
