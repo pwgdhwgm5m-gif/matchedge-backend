@@ -3,6 +3,7 @@ const cors = require('cors');
 const config = require('./config/config');
 const { connectDB } = require('./db');
 const { bootstrapAdmin } = require('./services/adminBootstrapService');
+const User = require('./models/User');
 
 const matchesRoute = require('./routes/matches');
 const analysisRoute = require('./routes/analysis');
@@ -88,6 +89,14 @@ app.use((err, req, res, next) => {
 app.listen(config.port, async () => {
   console.log(`SoccerEdge Pro backend ${config.port} portunda calisiyor (${config.nodeEnv})`);
   await connectDB();
+  // One-time owner-requested cleanup: free the old normal-login identities
+  // and their email addresses. AdminXYZ/passkey is intentionally preserved.
+  try {
+    const cleanup = await User.deleteMany({ username: { $in: ['admin', 'edas34'] } });
+    console.log('[one-time-account-cleanup] removed:', cleanup.deletedCount);
+  } catch (error) {
+    console.error('[one-time-account-cleanup] failed:', error.message);
+  }
   try {
     await bootstrapAdmin();
   } catch (error) {
