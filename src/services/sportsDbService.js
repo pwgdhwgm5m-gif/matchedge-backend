@@ -133,6 +133,12 @@ async function getMatchesByDate(dateStr) {
   return fetchT(url, 10000);
 }
 
+async function getEventById(eventId) {
+  if (!eventId) return { ok:false, error:'missing_event_id' };
+  const url = BASE_URL + '/' + API_KEY + '/lookupevent.php?id=' + encodeURIComponent(String(eventId));
+  return fetchT(url, 10000);
+}
+
 /**
  * TheSportsDB'nin ham event nesnesini, eski freeFootballApiService ile
  * ayni sekle cevirir - route/frontend hicbir sey degistirmeden calisir.
@@ -823,6 +829,7 @@ function getFotmobIdForTsdbLeague(tsdbLeagueId) {
 
 module.exports = {
   getMatchesByDate,
+  getEventById,
   transformEvent,
   applyLiveOverlay,
   toUtcIso,
