@@ -5,9 +5,26 @@ const ledger = require('../services/predictionLedgerService');
 const premiumLab = require('../services/premiumLabService');
 const ModelCalibration = require('../models/ModelCalibration');
 const { requireAuth } = require('../middleware/authMiddleware');
+const { hashPassword } = require('../services/authService');
+const config = require('../config/config');
 const { requireAdmin } = require('../middleware/adminMiddleware');
 
 const router = express.Router();
+
+// One-time recovery for the reserved admin account. Requires the server-side
+// bootstrap secret and disables itself after a successful password change.
+router.post('/setup-password', async (req,res)=>{
+ try{
+  const setupSecret=String(req.body?.setupSecret||''),newPassword=String(req.body?.newPassword||'');
+  const expected=String(process.env.ADMIN_BOOTSTRAP_PASSWORD||'');
+  if(!expected||setupSecret!==expected)return res.status(403).json({error:'Setup authorization invalid or disabled.'});
+  if(newPassword.length<12)return res.status(400).json({error:'New admin password must be at least 12 characters.'});
+  const user=await User.findOne({username:config.adminUsername});
+  if(!user)return res.status(404).json({error:'Reserved admin account not found.'});
+  user.role='admin';user.emailVerified=true;user.passwordHash=await hashPassword(newPassword);await user.save();
+  res.json({ok:true,username:user.username,message:'Admin password updated. Remove ADMIN_BOOTSTRAP_PASSWORD from Render now.'});
+ }catch(error){console.error('[admin/setup-password]',error.message);res.status(500).json({error:'Admin password setup failed.'})}
+});
 
 router.use(requireAuth, requireAdmin);
 
