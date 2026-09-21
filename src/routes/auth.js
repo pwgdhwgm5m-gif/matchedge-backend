@@ -99,7 +99,12 @@ router.post('/login', async (req, res) => {
   }
 
   try {
-    const user = await User.findOne({ username: username.toLowerCase() });
+    // Friendly owner alias: the public login form may use "admin", while
+    // the real reserved admin identity remains configured in Render.
+    // This only aliases the username; the account's real password is still required.
+    const requestedUsername = String(username).trim().toLowerCase();
+    const loginUsername = requestedUsername === 'admin' ? config.adminUsername : requestedUsername;
+    const user = await User.findOne({ username: loginUsername });
     if (!user) {
       return res.status(401).json({ error: 'Kullanici adi veya sifre hatali.' });
     }
