@@ -197,7 +197,8 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res) => {
   const { legs, stakeCoins } = req.body;
-  const rawLegs = Array.isArray(legs) ? legs.slice(0,8) : [];
+  if(Array.isArray(legs)&&legs.length>3) return res.status(400).json({error:'Bir kuponda en fazla 3 maç seçilebilir.',code:'MAX_3_LEGS'});
+  const rawLegs = Array.isArray(legs) ? legs.slice(0,3) : [];
   const safeLegs = rawLegs.map(leg => {
     const s=leg?.selection||{};
     if(!leg?.fixtureId||!leg?.homeTeam||!leg?.awayTeam||!ALLOWED_KEYS.has(s.key)) return null;
