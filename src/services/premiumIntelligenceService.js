@@ -40,7 +40,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     { key: 'mostGoalsFirst', market: 'EN GOLLÜ YARI', label: 'İlk Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.first || 0) },
     { key: 'mostGoalsEqual', market: 'EN GOLLÜ YARI', label: 'Eşit', probability: Number(halfMarkets?.mostGoalsHalf?.equal || 0) },
     { key: 'mostGoalsSecond', market: 'EN GOLLÜ YARI', label: 'İkinci Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.second || 0) },
-  ].filter(item => Number.isFinite(item.probability) && item.probability > 0 && item.probability < 100)
+  ].filter(item => Number.isFinite(item.probability) && item.probability >= 0 && item.probability <= 100)
     .map(item => {
       const ev=sportmonksMarketEvidence||{};
       let evidence=null;
