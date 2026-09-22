@@ -126,4 +126,4 @@ async function setLocationConsent({ userId, req, clientTimezone, consent }) {
   return { consent: true, location };
 }
 
-module.exports = { recordLoginEvent, setLocationConsent };
+module.exports = { recordLoginEvent, setLocationConsent, clientIp, resolveApproximateLocation };
