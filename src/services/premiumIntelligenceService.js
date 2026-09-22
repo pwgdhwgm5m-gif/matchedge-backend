@@ -181,7 +181,8 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     allMarkets: candidates,
     topPredictions: diversified,
     best: (health >= 45 ? diversified[0] || null : null),
-    valuePicks: eligible,\n    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, requiresFreshOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'], modelHealthGate:healthGate, modelHealthReadiness:modelHealth?.readiness||'unavailable' },
+    valuePicks: eligible,
+    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, requiresFreshOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'], modelHealthGate:healthGate, modelHealthReadiness:modelHealth?.readiness||'unavailable' },
   };
 }
 
