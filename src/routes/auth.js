@@ -8,7 +8,7 @@ const {
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const { requireAuth } = require('../middleware/authMiddleware');
 const config = require('../config/config');
-const { recordLoginEvent, setLocationConsent } = require('../services/loginAuditService');
+const { recordLoginEvent, setLocationConsent, clientIp, resolveApproximateLocation } = require('../services/loginAuditService');
 
 const VERIFICATION_VALID_HOURS = 24;
 const RESET_VALID_MINUTES = 60;
@@ -135,6 +135,15 @@ router.post('/login', async (req, res) => {
 /**
  * GET /api/auth/me
  */
+router.get('/locale', async (req,res)=>{
+  try{
+    const countryCode=String(req.headers['cf-ipcountry']||'').toUpperCase();
+    const location=countryCode ? {countryCode} : await resolveApproximateLocation(clientIp(req),'','');
+    const cc=String(location?.countryCode||countryCode||'').toUpperCase();
+    return res.json({countryCode:cc,language:cc==='TR'?'tr':'en'});
+  }catch(_){return res.json({countryCode:'',language:'en'});}
+});
+
 router.get('/me', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.userId);
   if (!user) return res.status(404).json({ error: 'Kullanici bulunamadi.' });
