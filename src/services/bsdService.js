@@ -323,4 +323,68 @@ async function getHalftimeScoreForMatch(homeTeam, awayTeam, kickoffIso) {
   return result;
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch };
+
+function eventToAnalysisFixture(e) {
+  const homeId = pickField(e, ['home_team_id','home.id','home_team.id']);
+  const awayId = pickField(e, ['away_team_id','away.id','away_team.id']);
+  const homeScore = toScoreNumber(pickField(e, ['home_score','score.home','scores.fulltime.home']));
+  const awayScore = toScoreNumber(pickField(e, ['away_score','score.away','scores.fulltime.away']));
+  const ht = extractHalftimeScore(e);
+  return {
+    fixture: { id:getEventId(e), date:getKickoff(e) },
+    teams: {
+      home:{ id:homeId, name:getHomeTeamName(e) },
+      away:{ id:awayId, name:getAwayTeamName(e) }
+    },
+    goals:{ home:homeScore, away:awayScore },
+    score:{ halftime:ht ? {home:ht.home,away:ht.away} : {home:null,away:null} }
+  };
+}
+
+async function getTeamFixturesForAnalysis(teamName, count) {
+  if (!API_KEY || !teamName) return {ok:false,error:!API_KEY?'no_api_key':'missing_team'};
+  const n=Math.max(5,Math.min(30,Number(count)||15));
+  // A generous window avoids relying on BSD-specific team ids. The API's
+  // fuzzy team_name filter keeps the response bounded.
+  const to=new Date();
+  const from=new Date(to.getTime()-370*24*60*60*1000);
+  const date=v=>v.toISOString().slice(0,10);
+  const result=await fetchBsd('/events/?team_name='+encodeURIComponent(teamName)+'&status=finished&date_from='+date(from)+'&date_to='+date(to)+'&limit='+Math.max(30,n*2),8000);
+  if(!result.ok) return result;
+  const events=extractList(result.data)
+    .filter(e=>isNameMatch(getHomeTeamName(e),teamName)||isNameMatch(getAwayTeamName(e),teamName))
+    .filter(e=>toScoreNumber(pickField(e,['home_score','score.home','scores.fulltime.home']))!==null && toScoreNumber(pickField(e,['away_score','score.away','scores.fulltime.away']))!==null)
+    .sort((a,b)=>new Date(getKickoff(a)||0)-new Date(getKickoff(b)||0))
+    .slice(-n);
+  return {ok:true,source:'bsd',teamName,data:{response:events.map(eventToAnalysisFixture)}};
+}
+
+async function getPredictionForMatch(homeTeam,awayTeam,kickoffIso) {
+  if(!API_KEY) return {available:false,error:'no_api_key'};
+  const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
+  if(!eventId) return {available:false,error:'event_not_found'};
+  const result=await fetchBsd('/events/'+eventId+'/prediction/',6000);
+  if(!result.ok) return {available:false,error:result.error};
+  const p=result.data||{};
+  return {available:true,eventId,source:'bsd',markets:p.markets||null,recommendations:p.recommendations||null,model:p.model||null};
+}
+
+async function getConsensusOddsForMatch(homeTeam,awayTeam,kickoffIso) {
+  if(!API_KEY) return {available:false,error:'no_api_key'};
+  const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
+  if(!eventId) return {available:false,error:'event_not_found'};
+  const result=await fetchBsd('/events/'+eventId+'/odds/',6000);
+  if(!result.ok) return {available:false,error:result.error};
+  return {available:true,eventId,source:'bsd-consensus',data:result.data};
+}
+
+async function getStatsForMatch(homeTeam,awayTeam,kickoffIso) {
+  if(!API_KEY) return {available:false,error:'no_api_key'};
+  const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
+  if(!eventId) return {available:false,error:'event_not_found'};
+  const result=await fetchBsd('/events/'+eventId+'/stats/',6000);
+  if(!result.ok) return {available:false,error:result.error};
+  return {available:true,eventId,source:'bsd',data:result.data};
+}
+
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch };
