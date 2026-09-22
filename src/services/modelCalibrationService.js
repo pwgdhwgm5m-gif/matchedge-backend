@@ -2,6 +2,7 @@ const Prediction = require('../models/PredictionSnapshot');
 const ModelCalibration = require('../models/ModelCalibration');
 
 const MARKETS = ['home','draw','away','over25','btts'];
+const CALIBRATION_VERSION = 'cal-v2-chronological';
 const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig)/i;
 let cached = new Map();
 let cacheUntil = 0;
@@ -12,6 +13,12 @@ function shift(p, offset) {
 }
 function brier(rows, offset = 0) {
   return rows.reduce((sum, row) => sum + (shift(row.p, offset) - row.y) ** 2, 0) / rows.length;
+}
+function logLoss(rows, offset = 0) {
+  return rows.reduce((sum,row)=>{
+    const q=clamp(shift(row.p,offset),.001,.999);
+    return sum-(row.y*Math.log(q)+(1-row.y)*Math.log(1-q));
+  },0)/rows.length;
 }
 function fit(rows, minTrain = 40, minValidation = 20) {
   const cutoff = Math.floor(rows.length * .75);
@@ -24,8 +31,9 @@ function fit(rows, minTrain = 40, minValidation = 20) {
   const corrected = clamp((actual + 24 * mean) / (train.length + 24), .01, .99);
   const offset = clamp(Math.log(corrected / (1-corrected)) - Math.log(mean / (1-mean)), -.35, .35);
   const baseline = brier(validation), adjusted = brier(validation, offset);
-  return { offset, baseline, adjusted, trainCount: train.length, validationCount: validation.length,
-    active: Math.abs(offset) >= .015 && adjusted + .0005 < baseline };
+  const baselineLL=logLoss(validation), adjustedLL=logLoss(validation,offset);
+  return { offset, baseline, adjusted, baselineLL, adjustedLL, trainCount: train.length, validationCount: validation.length,
+    active: Math.abs(offset) >= .015 && adjusted + .0005 < baseline && adjustedLL <= baselineLL + .001 };
 }
 async function retrain() {
   const since = new Date(Date.now() - 365 * 86400000);
@@ -55,19 +63,19 @@ async function retrain() {
     const result = fit(rows, league === 'all' ? 60 : 40, 20);
     if (!result) continue;
     await ModelCalibration.updateOne({key}, {$set:{
-      key, league, market, logitOffset: result.offset, active: result.active,
+      key, league, market, calibrationVersion:CALIBRATION_VERSION, logitOffset: result.offset, active: result.active,
       trainCount: result.trainCount, validationCount: result.validationCount,
-      baselineBrier: result.baseline, adjustedBrier: result.adjusted, trainedAt:new Date(),
+      baselineBrier: result.baseline, adjustedBrier: result.adjusted, baselineLogLoss:result.baselineLL, adjustedLogLoss:result.adjustedLL, trainedAt:new Date(),
     }}, {upsert:true});
     if (result.active) active++;
   }
   cacheUntil = 0;
-  return { league:'Turkish Super Lig', observations:targetSnapshots.length, evaluated:groups.size, active };
+  return { calibrationVersion:CALIBRATION_VERSION, league:'Turkish Super Lig', observations:targetSnapshots.length, evaluated:groups.size, active };
 }
 async function offsets() {
   if (Date.now() < cacheUntil) return cached;
   try {
-    const rows = await ModelCalibration.find({active:true, trainedAt:{$gte:new Date(Date.now()-30*86400000)}}).select('key logitOffset').lean();
+    const rows = await ModelCalibration.find({active:true, calibrationVersion:CALIBRATION_VERSION, trainedAt:{$gte:new Date(Date.now()-30*86400000)}}).select('key logitOffset').lean();
     cached = new Map(rows.map(row => [row.key, row.logitOffset]));
     cacheUntil = Date.now() + 15*60000;
   } catch (error) {
@@ -104,6 +112,7 @@ async function apply({league, match, goals}) {
       bttsPercent: +(100*adjusted.btts).toFixed(1),
     },
     applied,
+    calibrationVersion:CALIBRATION_VERSION,
   };
 }
-module.exports = { fit, shift, retrain, apply };
+module.exports = { fit, shift, retrain, apply, CALIBRATION_VERSION };
