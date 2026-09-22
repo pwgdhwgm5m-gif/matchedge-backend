@@ -201,7 +201,10 @@ function extractMatchMarketOdds(oddsResponse,homeTeamName,awayTeamName){
  for(const b of match.bookmakers){const h2h=b.markets?.find(x=>x.key==='h2h'),tot=b.markets?.find(x=>x.key==='totals');
   const h2hOdds=h2h?{home:h2h.outcomes.find(o=>teamNamesMatch(o.name,homeTeamName))?.price,draw:h2h.outcomes.find(o=>normalizeTeamName(o.name)==='draw')?.price,away:h2h.outcomes.find(o=>teamNamesMatch(o.name,awayTeamName))?.price}:null;
   const line25=(tot?.outcomes||[]).filter(o=>Number(o.point)===2.5),totals=line25.length?{over25:line25.find(o=>/^over$/i.test(o.name))?.price,under25:line25.find(o=>/^under$/i.test(o.name))?.price}:null;
-  books.push({bookmaker:b.title||b.key,h2h:h2hOdds,totals});
+  const updatedAt=b.last_update||h2h?.last_update||tot?.last_update||null;
+  const ageMs=updatedAt?Date.now()-new Date(updatedAt).getTime():null;
+  const fresh=Number.isFinite(ageMs)&&ageMs>=0&&ageMs<=15*60*1000;
+  books.push({bookmaker:b.title||b.key,h2h:h2hOdds,totals,updatedAt,ageSeconds:Number.isFinite(ageMs)?Math.round(ageMs/1000):null,fresh});
  }
  const best=(path)=>{const vals=books.map(b=>({bookmaker:b.bookmaker,price:path(b)})).filter(x=>Number(x.price)>1);return vals.sort((a,b)=>b.price-a.price)[0]||null};
  return{bookmakers:books.length,best:{home:best(b=>b.h2h?.home),draw:best(b=>b.h2h?.draw),away:best(b=>b.h2h?.away),over25:best(b=>b.totals?.over25),under25:best(b=>b.totals?.under25)},btts:null};
