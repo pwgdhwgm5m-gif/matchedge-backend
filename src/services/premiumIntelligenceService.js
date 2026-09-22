@@ -130,7 +130,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     // it does not multiply probabilities or manufacture a larger edge.
     const uncertaintyBuffer=+(2+(1-item.evidenceReliability)*4).toFixed(1);
     item.valueThresholdPoints=uncertaintyBuffer;
-    item.isBettingValue=Boolean(px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
+    const excludedFromTopPicks = item.key === 'shOver05';\n    item.isBettingValue=Boolean(!excludedFromTopPicks && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);\n    item.topPickExclusion = excludedFromTopPicks ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : null;
     item.valueScore=item.isBettingValue
       ? +(item.expectedValuePercent*.45 + item.edgePoints*.35 + item.evidenceReliability*20).toFixed(2)
       : null;
@@ -153,7 +153,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     allMarkets: candidates,
     topPredictions: diversified,
     best: (health >= 45 ? diversified[0] || null : null),
-    valuePicks: candidates.filter(item => item.isValue),
+    valuePicks: eligible,\n    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'] },
   };
 }
 
