@@ -385,10 +385,23 @@ function eventToResultMatch(e) {
 
 async function getResultMatchesForDate(dateStr) {
   if(!API_KEY)return {ok:false,error:'no_api_key',matches:[]};
-  const result=await fetchBsdCached('/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=500',5*60,8000);
-  if(!result.ok)return {ok:false,error:result.error,matches:[]};
-  const matches=extractList(result.data).map(eventToResultMatch).filter(m=>m.homeTeam&&m.awayTeam);
-  return {ok:true,source:'bsd',matches};
+  const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=500';
+  const [daily,faCup]=await Promise.all([
+    fetchBsdCached(base,5*60,8000),
+    // BSD competition 39 = English FA Cup. Query it explicitly because the
+    // generic daily feed can omit qualifying/replay fixtures.
+    fetchBsdCached(base+'&league_id=39',5*60,8000)
+  ]);
+  if(!daily.ok && !faCup.ok)return {ok:false,error:daily.error||faCup.error,matches:[]};
+  const rows=[...(daily.ok?extractList(daily.data):[]),...(faCup.ok?extractList(faCup.data):[])];
+  const seen=new Set();
+  const matches=rows.map(eventToResultMatch).filter(m=>{
+    if(!m.homeTeam||!m.awayTeam)return false;
+    const key=m.bsdEventId||[normalizeTeamName(m.homeTeam),normalizeTeamName(m.awayTeam),dateStr].join('|');
+    if(seen.has(key))return false;
+    seen.add(key); return true;
+  });
+  return {ok:true,source:'bsd',matches,faCupExplicit:faCup.ok};
 }
 
 function eventToAnalysisFixture(e) {
