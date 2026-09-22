@@ -3,7 +3,7 @@ const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
 const sportmonks = require('./sportmonksService');
 const VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
-const SELECTION_VERSION = 'top-picks-value-v2';
+const SELECTION_VERSION = 'top-picks-analysis-value-v3';
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
   const m = a.modelOnlyProbabilities || {};
@@ -42,6 +42,12 @@ async function capture(a, fixture) {
         home: percent(a.rawModelProbabilities.homeWinProbability), draw: percent(a.rawModelProbabilities.drawProbability),
         away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),
         btts: percent(a.rawMarketProbabilities?.bttsPercent),
+        fhHomeScores: percent(a.rawHalfMarkets?.firstHalf?.homeScores),
+        fhAwayScores: percent(a.rawHalfMarkets?.firstHalf?.awayScores),
+        fhOver05: percent(a.rawHalfMarkets?.firstHalf?.over05),
+        shHomeScores: percent(a.rawHalfMarkets?.secondHalf?.homeScores),
+        shAwayScores: percent(a.rawHalfMarkets?.secondHalf?.awayScores),
+        shOver05: percent(a.rawHalfMarkets?.secondHalf?.over05),
       } : values,
       // Paired prospective baseline captured at the exact same time/fixture as V3.
       // This avoids comparing different fixture populations across model versions.
