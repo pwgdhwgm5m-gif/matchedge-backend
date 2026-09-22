@@ -24,112 +24,38 @@ const quickBound = (promise, fallback, ms = 2500) => Promise.race([
  * canli gorunebiliyordu). V2 basarisiz olursa eski yontem yedek olarak devrede.
  */
 router.get('/', async (req, res) => {
-  // BSD is the canonical live source outside the six subscribed SportMonks
-  // leagues. Fetch it in parallel so lower-league/cup clocks are not lost.
-  const bsdLivePromise = quickBound(
-    cache.getOrFetch('bsd:live:canonical', 20, () => bsdService.getLiveFootballEvents()),
-    {ok:false,error:'bsd_live_timeout'}
-  );
-  const liveResult = await quickBound(
-    cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
-    { ok:false, error:'live_lookup_timeout' }
-  );
-
-  if (liveResult.ok) {
-    const rawLive = liveResult.data?.livescore || [];
-    let simplified = rawLive
-      .filter(e => String(e.strSport || '').toLowerCase() === 'soccer')
-      .map(sportsDb.transformLiveEvent)
-      .filter(m => sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId, m.league));
-    // After halftime, enrich live matches with the verified HT score from the
-    // event timeline. If the provider cannot verify it, keep null rather than
-    // inventing 0-0.
-    simplified = await sportsDb.attachHalftimeScores(simplified);
-    // Sportmonks is the primary verified enrichment for subscribed leagues.
-    // It never removes a match: when unavailable, the existing providers remain fallback.
-    const smLive = await cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay());
-    if (smLive.ok) {
-      simplified.forEach(m => {
-        const sm = sportmonks.findMatch(smLive.fixtures, m.homeTeam, m.awayTeam);
-        if (!sm) return;
-        if (sm.homeScore != null && sm.awayScore != null) {
-          m.homeScore = sm.homeScore; m.awayScore = sm.awayScore; m.scoreSource = 'sportmonks';
-        }
-        if (sm.halftimeHome != null && sm.halftimeAway != null) {
-          m.halftimeHome = sm.halftimeHome; m.halftimeAway = sm.halftimeAway; m.halftimeSource = 'sportmonks';
-        }
-        m.sportmonksId = sm.sportmonksId;
-      });
+  // Build one live feed instead of returning early from TheSportsDB. SportMonks
+  // owns the six subscribed leagues; BSD supplies live rows outside them.
+  const [tsdbLive,smLive,bsdLive]=await Promise.all([
+    quickBound(cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),{ok:false,error:'live_lookup_timeout'}),
+    quickBound(cache.getOrFetch('sportmonks:inplay',30,()=>sportmonks.getInplay()),{ok:false,error:'sportmonks_timeout'}),
+    quickBound(cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),{ok:false,error:'bsd_live_timeout'})
+  ]);
+  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+  const key=m=>norm(m.homeTeam)+'|'+norm(m.awayTeam);
+  const map=new Map();
+  if(tsdbLive.ok){
+    for(const e of (tsdbLive.data?.livescore||[])){
+      if(String(e.strSport||'').toLowerCase()!=='soccer')continue;
+      const m=sportsDb.transformLiveEvent(e);
+      if(m?.isLive)map.set(key(m),m);
     }
-    await Promise.all(simplified.map(async m => {
-      if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
-        const date=(m.kickoff||new Date().toISOString()).slice(0,10);
-        const fd=await cache.getOrFetch('fdorg-ht:'+date, 60, () => footballDataOrg.getMatchesByDate(date));
-        if (fd.ok) {
-          const merged=footballDataOrg.mergeVerifiedScores([m],fd.matches);
-          if (merged[0].halftimeHome != null && merged[0].halftimeAway != null) {
-            m.halftimeHome=merged[0].halftimeHome; m.halftimeAway=merged[0].halftimeAway; m.halftimeSource='football-data.org';
-          }
-        }
-        if (m.halftimeHome == null || m.halftimeAway == null) {
-          const ht=await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
-          if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource=ht.source; }
-        }
-      }
-    }));
-    const bsdLive=await bsdLivePromise;
-    if(bsdLive.ok){
-      const registry=await bsdService.getLeagueRegistry().catch(()=>({ok:false,map:{}}));
-      const rows=bsdService.extractList ? bsdService.extractList(bsdLive.data) : (bsdLive.data?.results||bsdLive.data?.data||[]);
-      const existing=new Set(simplified.map(m=>String(m.homeTeam||'').toLowerCase()+'|'+String(m.awayTeam||'').toLowerCase()));
-      for(const e of rows){
-        const leagueId=String(e?.league_id ?? e?.league?.id ?? e?.competition_id ?? e?.competition?.id ?? '');
-        const leagueName=registry?.ok ? String(registry.map?.[leagueId]?.name||'') : '';
-        const m=bsdService.eventToResultMatch ? bsdService.eventToResultMatch({...e,__soccerEdgeLeagueName:leagueName,__soccerEdgeLeagueId:leagueId}) : null;
-        if(!m?.homeTeam||!m?.awayTeam)continue;
-        m.league=leagueName||m.league; m.leagueId=leagueId||m.leagueId;
-        m.leagueCountry=registry?.ok ? String(registry.map?.[leagueId]?.country||'') : '';
-        m.canonicalProvider='bsd';
-        const k=String(m.homeTeam).toLowerCase()+'|'+String(m.awayTeam).toLowerCase();
-        if(!existing.has(k)){ simplified.push(m); existing.add(k); }
-      }
-    }
-    return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore+bsd' });
   }
-
-  // --- Fallback: eski yontem ---
-  const today = new Date().toISOString().split('T')[0];
-  const result = await cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () =>
-    sportsDb.getMatchesByDate(today)
-  );
-
-  if (!result.ok) {
-    return res.status(502).json({ error: 'Canli veri alinamadi' });
-  }
-
-  const rawEvents = result.data?.events || [];
-  let simplified = rawEvents
-    .map(sportsDb.transformEvent)
-    .filter(m => m.isLive && sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId, m.league));
-  simplified = await sportsDb.attachHalftimeScores(simplified);
-  await Promise.all(simplified.map(async m => {
-    if (m.isLive && m.minute != null && m.minute > 45 && (m.halftimeHome == null || m.halftimeAway == null)) {
-      const date=(m.kickoff||new Date().toISOString()).slice(0,10);
-      const fd=await cache.getOrFetch('fdorg-ht:'+date, 60, () => footballDataOrg.getMatchesByDate(date));
-      if (fd.ok) {
-        const merged=footballDataOrg.mergeVerifiedScores([m],fd.matches);
-        if (merged[0].halftimeHome != null && merged[0].halftimeAway != null) {
-          m.halftimeHome=merged[0].halftimeHome; m.halftimeAway=merged[0].halftimeAway; m.halftimeSource='football-data.org';
-        }
-      }
-      if (m.halftimeHome == null || m.halftimeAway == null) {
-        const ht=await bsdService.getHalftimeScoreForMatch(m.homeTeam,m.awayTeam,m.kickoff);
-        if (ht.available) { m.halftimeHome=ht.home; m.halftimeAway=ht.away; m.halftimeSource=ht.source; }
-      }
+  if(bsdLive.ok){
+    for(const e of bsdService.extractList(bsdLive.data)){
+      const m=bsdService.eventToResultMatch(e);
+      if(m?.isLive)map.set(key(m),{...m,canonicalProvider:'bsd'});
     }
-  }));
-
-  res.json({ matches: simplified, fromCache: result.fromCache, source: 'eventsday-fallback' });
+  }
+  if(smLive.ok){
+    for(const sm of (smLive.fixtures||[])){
+      if(!sm.isLive)continue;
+      const m={fixtureId:String(sm.sportmonksId),sportmonksId:sm.sportmonksId,leagueId:sm.leagueId,league:sm.leagueName,homeTeam:sm.homeTeam,awayTeam:sm.awayTeam,homeScore:sm.homeScore,awayScore:sm.awayScore,halftimeHome:sm.halftimeHome,halftimeAway:sm.halftimeAway,kickoff:sm.kickoff,minute:sm.minute,statusShort:sm.statusShort||'LIVE',isLive:true,canonicalProvider:'sportmonks',dataSource:'sportmonks'};
+      map.set(key(m),m);
+    }
+  }
+  const matches=[...map.values()];
+  return res.json({matches,source:'canonical-live-merged',counts:{thesportsdb:tsdbLive.ok?(tsdbLive.data?.livescore||[]).length:0,sportmonks:smLive.ok?(smLive.fixtures||[]).filter(x=>x.isLive).length:0,bsd:bsdLive.ok?bsdService.extractList(bsdLive.data).length:0}});
 });
 
 /**
