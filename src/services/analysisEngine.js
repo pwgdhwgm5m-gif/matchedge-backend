@@ -266,6 +266,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // with a useful sample are allowed to nudge expected goals; bounds prevent
   // sparse/noisy provider data from dominating the established model.
   let sportmonksHistorical = null;
+  let sportmonksFixtureId = null;
   if (useSportmonksPrimary) {
   try {
     const liveIndex = await Promise.race([
@@ -273,6 +274,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       new Promise(resolve => setTimeout(() => resolve({ok:false}), 2500))
     ]);
     const smMatch = liveIndex.ok ? sportmonks.findMatch(liveIndex.fixtures, homeTeamName, awayTeamName) : null;
+    sportmonksFixtureId = smMatch?.sportmonksId || null;
     if (smMatch?.homeTeamId && smMatch?.awayTeamId) {
       const [hh, ah] = await Promise.all([
         Promise.race([cache.getOrFetch(`sportmonks:history:${smMatch.homeTeamId}`,1800,()=>sportmonks.getTeamFixtureHistory(smMatch.homeTeamId)),new Promise(r=>setTimeout(()=>r({ok:false}),2500))]),
@@ -513,15 +515,26 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
     : null;
-  const primaryMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
+  // In the six paid SportMonks leagues, SportMonks is the primary price source.
+  // The Odds API remains a fail-open secondary source and is never double-counted.
+  let sportmonksOddsBoard = null;
+  if (useSportmonksPrimary) {
+    const smOdds = await Promise.race([
+      cache.getOrFetch(`sportmonks:prematch-odds:${sportmonksFixtureId || fixtureId}`, 300, () => sportmonks.getPreMatchOdds(sportmonksFixtureId || fixtureId)),
+      new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'sportmonks_odds_timeout'}),3500))
+    ]);
+    if (smOdds?.ok) sportmonksOddsBoard = sportmonks.normalizePreMatchOdds(smOdds.data);
+  }
+  const oddsApiMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
+  const primaryMatchOdds = sportmonksOddsBoard?.matchOdds || oddsApiMatchOdds;
   // Full verified price board is kept separate from the probability model.
-  // It is used by the Top Picks value selector (1X2 + O/U 2.5 today);
-  // markets without a real quoted price are never labelled as betting value.
-  const marketOddsBoard = (oddsRaw && homeTeamName && awayTeamName)
+  // SportMonks wins source priority in subscribed leagues; The Odds API fills gaps.
+  const oddsApiMarketBoard = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchMarketOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
+  const marketOddsBoard = sportmonksOddsBoard?.bookmakers?.length ? sportmonksOddsBoard : oddsApiMarketBoard;
   // Extended soccer markets are event-level at The Odds API. Reuse the event
   // already returned by the league odds call, so no extra event-list lookup is
   // needed. The extra request is cached and fails open when a market/plan is
@@ -530,8 +543,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     require('../utils/textNormalize').teamNamesMatch(m.home_team,homeTeamName) &&
     require('../utils/textNormalize').teamNamesMatch(m.away_team,awayTeamName)
   ) : null;
-  let extendedOddsBoard = null;
-  if (oddsEvent?.id && sportKey) {
+  let extendedOddsBoard = sportmonksOddsBoard?.bookmakers?.length ? {bookmakers:sportmonksOddsBoard.bookmakers} : null;
+  if (!extendedOddsBoard && oddsEvent?.id && sportKey) {
     const extended = await Promise.race([
       oddsApi.getEventExtendedOdds(sportKey,oddsEvent.id),
       new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'extended_odds_timeout'}),3500))
@@ -688,7 +701,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     marketOdds: matchOdds,
     marketOddsBoard,
-    marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
+    marketOddsSource: sportmonksOddsBoard?.matchOdds ? 'sportmonks' : (oddsApiMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null)),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
     sourcePolicy: providerPolicy,
