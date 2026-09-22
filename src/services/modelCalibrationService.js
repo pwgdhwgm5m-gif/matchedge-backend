@@ -66,6 +66,10 @@ async function retrain() {
     const league = key.startsWith(prefix) ? key.slice(prefix.length, -(market.length+1)) : key.slice(0, -(market.length+1));
     const result = fit(rows, league === 'all' ? 60 : 40, 20);
     if (!result) continue;
+    // Candidate-only promotion: a newly trained mapping must clear the
+    // chronological holdout gates. A failed candidate is stored inactive and
+    // cannot leak into production through the cache.
+
     await ModelCalibration.updateOne({key}, {$set:{
       key, league, market, modelVersion:MODEL_VERSION, calibrationVersion:CALIBRATION_VERSION, logitOffset: result.offset, active: result.active,
       trainCount: result.trainCount, validationCount: result.validationCount,
