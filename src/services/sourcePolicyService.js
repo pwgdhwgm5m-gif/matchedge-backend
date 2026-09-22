@@ -16,12 +16,12 @@ function policy(ctx={}){
   const core=resolve(ctx);
   return core ? {
     tier:'sportmonks-primary', sportmonks:true, sportmonksLeagueId:core.sportmonksId,
-    primary:'sportmonks', oddsPrimary:'the-odds-api', supplemental:['thesportsdb','football-data'],
-    rule:'SportMonks first for subscribed football data; The Odds API is primary for bookmaker prices; supplement missing fields and deduplicate before blending.'
+    primary:'sportmonks', secondary:'bsd', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
+    rule:'SportMonks first in the six subscribed leagues; BSD is second field-level source; TheSportsDB/Football-Data supplement gaps. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated. Deduplicate correlated evidence before blending.'
   } : {
     tier:'non-sportmonks', sportmonks:false, sportmonksLeagueId:null,
-    primary:'non-sportmonks-provider-chain', oddsPrimary:'the-odds-api', supplemental:['the-odds-api','thesportsdb','football-data'],
-    rule:'Do not query SportMonks outside the six subscribed leagues.'
+    primary:'bsd', secondary:'thesportsdb', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
+    rule:'Outside the six subscribed leagues do not query SportMonks. Use BSD first, then TheSportsDB/Football-Data fallbacks. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated.'
   };
 }
 module.exports={SPORTMONKS_PRIMARY,resolve,policy};
