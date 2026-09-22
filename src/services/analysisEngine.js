@@ -515,47 +515,25 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
     : null;
-  // In the six paid SportMonks leagues, SportMonks is the primary price source.
-  // The Odds API remains a fail-open secondary source and is never double-counted.
-  let sportmonksOddsBoard = null;
-  if (useSportmonksPrimary) {
-    const smOdds = await Promise.race([
-      cache.getOrFetch(`sportmonks:prematch-odds:${sportmonksFixtureId || fixtureId}`, 300, () => sportmonks.getPreMatchOdds(sportmonksFixtureId || fixtureId)),
-      new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'sportmonks_odds_timeout'}),3500))
-    ]);
-    if (smOdds?.ok) sportmonksOddsBoard = sportmonks.normalizePreMatchOdds(smOdds.data);
-  }
-  const oddsApiMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
+  // Bookmaker pricing is independent from the SportMonks league-data subscription.
+  // The Odds API is the primary verified price source for every league it covers.
+  const primaryMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
-  const primaryMatchOdds = sportmonksOddsBoard?.matchOdds || oddsApiMatchOdds;
-  // Full verified price board is kept separate from the probability model.
-  // SportMonks wins source priority in subscribed leagues; The Odds API fills gaps.
-  const oddsApiMarketBoard = (oddsRaw && homeTeamName && awayTeamName)
+  const marketOddsBoard = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchMarketOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
-  const marketOddsBoard = (sportmonksOddsBoard?.bookmakers?.length || oddsApiMarketBoard?.bookmakers?.length) ? {
-    source: useSportmonksPrimary ? 'sportmonks-primary-with-fallback' : 'the-odds-api',
-    bookmakers: [...(sportmonksOddsBoard?.bookmakers || []), ...(oddsApiMarketBoard?.bookmakers || [])]
-  } : null;
-  // Extended soccer markets are event-level at The Odds API. Reuse the event
-  // already returned by the league odds call, so no extra event-list lookup is
-  // needed. The extra request is cached and fails open when a market/plan is
-  // unavailable; it never blocks the core analysis.
   const oddsEvent = Array.isArray(oddsRaw) ? oddsRaw.find(m =>
     require('../utils/textNormalize').teamNamesMatch(m.home_team,homeTeamName) &&
     require('../utils/textNormalize').teamNamesMatch(m.away_team,awayTeamName)
   ) : null;
-  let extendedOddsBoard = sportmonksOddsBoard?.bookmakers?.length ? {bookmakers:[...sportmonksOddsBoard.bookmakers]} : null;
+  let extendedOddsBoard = null;
   if (oddsEvent?.id && sportKey) {
     const extended = await Promise.race([
       oddsApi.getEventExtendedOdds(sportKey,oddsEvent.id),
       new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'extended_odds_timeout'}),3500))
     ]);
-    if (extended?.ok) {
-      const apiExtended=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
-      if(apiExtended?.bookmakers?.length) extendedOddsBoard={bookmakers:[...(extendedOddsBoard?.bookmakers||[]),...apiExtended.bookmakers]};
-    }
+    if (extended?.ok) extendedOddsBoard=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
   }
   // Football-Data is an additive, fail-open fallback. It is used only when
   // the existing odds provider has no match and both team names match exactly
@@ -707,7 +685,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     marketOdds: matchOdds,
     marketOddsBoard,
-    marketOddsSource: sportmonksOddsBoard?.matchOdds ? 'sportmonks' : (oddsApiMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null)),
+    marketOddsSource: primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
     sourcePolicy: providerPolicy,
