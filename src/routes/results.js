@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
     providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}
   }));
 
-  const bsdMatches=(bsdResult?.ok?bsdResult.matches:[]).filter(m=>!sourcePolicy.resolve({leagueName:m.league})).map(m=>({
+  const bsdMatches=(bsdResult?.ok?bsdResult.matches:[]).filter(m=>!sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry})).map(m=>({
     ...m, canonicalProvider:'bsd',
     providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
   }));
