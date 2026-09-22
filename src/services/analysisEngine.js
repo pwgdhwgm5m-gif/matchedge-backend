@@ -495,6 +495,22 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const marketOddsBoard = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchMarketOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
+  // Extended soccer markets are event-level at The Odds API. Reuse the event
+  // already returned by the league odds call, so no extra event-list lookup is
+  // needed. The extra request is cached and fails open when a market/plan is
+  // unavailable; it never blocks the core analysis.
+  const oddsEvent = Array.isArray(oddsRaw) ? oddsRaw.find(m =>
+    require('../utils/textNormalize').teamNamesMatch(m.home_team,homeTeamName) &&
+    require('../utils/textNormalize').teamNamesMatch(m.away_team,awayTeamName)
+  ) : null;
+  let extendedOddsBoard = null;
+  if (oddsEvent?.id && sportKey) {
+    const extended = await Promise.race([
+      oddsApi.getEventExtendedOdds(sportKey,oddsEvent.id),
+      new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'extended_odds_timeout'}),3500))
+    ]);
+    if (extended?.ok) extendedOddsBoard=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
+  }
   // Football-Data is an additive, fail-open fallback. It is used only when
   // the existing odds provider has no match and both team names match exactly
   // after normalization. Any fetch/rate-limit/parse failure returns null.
@@ -597,6 +613,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     evidenceStrength,
     modelAgreementScore: agreementScore,
     marketOddsBoard,
+    extendedOddsBoard,
     modelHealth,
   });
 
