@@ -96,7 +96,17 @@ function settleSelectionWithAvailableData(key,home,away,corners,halftimeHome,hal
 function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
 function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
-async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={}){
+const SPORTMONKS_RESULT_LEAGUES=new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
+function sportmonksResultLeague(league){return SPORTMONKS_RESULT_LEAGUES.has(couponLeagueKey(league))}
+async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff){
+  let bsdId=providerIds.bsd||mappedIds.bsd||null;
+  if(!bsdId) bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>null);
+  let bsd=bsdId?await bsdService.getFinalResultByEventId?.(bsdId).catch(()=>({available:false})):null;
+  if(!bsd?.available) bsd=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>({available:false}));
+  if(!bsd?.available)return null;
+  return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
+}
+async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null){
   // Coupon fixture IDs are TheSportsDB IDs. The premium V2 livescore feed can
   // still hold the authoritative score after a lower-league/cup match drops
   // out of the compact day/event feeds. Check it first and let
@@ -104,6 +114,11 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
   const sportsdbId=providerIds.sportsdb||mappedIds.sportsdb||fixtureId;
+  const useSportmonksFirst=sportmonksResultLeague(league);
+  if(!useSportmonksFirst){
+    const bsdFirst=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
+    if(bsdFirst)return bsdFirst;
+  }
   if(sportsdbId){
     const live=await sportsDb.getLiveScores().catch(()=>({ok:false}));
     if(live.ok){
@@ -141,13 +156,8 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   // Lower-league/cup fixtures are sometimes removed from TheSportsDB compact
   // day/direct feeds after FT. BSD is already our primary non-SportMonks
   // football source, so use its finished event as the final score fallback.
-  let bsdId=providerIds.bsd||mappedIds.bsd||null;
-  if(!bsdId){
-    bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,matchDate+'T19:45:00Z').catch(()=>null);
-  }
-  let bsd=bsdId ? await bsdService.getFinalResultByEventId?.(bsdId).catch(()=>({available:false})) : null;
-  if(!bsd?.available) bsd=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,matchDate+'T12:00:00Z').catch(()=>({available:false}));
-  if(bsd.available)return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
+  const bsdFallback=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
+  if(bsdFallback)return bsdFallback;
   return {source:null,match:null};
 }
 
@@ -162,7 +172,7 @@ async function settlePending(userId) {
     // Migrate/settle legacy one-match coupons created before multi-leg slips.
     if(!coupon.legs?.length){
       if(!coupon.fixtureId || !coupon.matchDate || !(coupon.selections||[]).length) continue;
-      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam);
+      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam,{},coupon.league||'',coupon.kickoff||null);
       const match=resolved.match;
       if(!match)continue;
       let corners=null;
@@ -195,7 +205,7 @@ async function settlePending(userId) {
     for(const leg of coupon.legs){
       if(leg.selection.result!=='pending') continue;
       if(!leg.matchDate) continue;
-      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{});
+      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null);
       const match=resolved.match;
       if(!match){console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam}));continue;}
       let corners=null;
