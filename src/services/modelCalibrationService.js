@@ -161,6 +161,9 @@ async function apply({league, match, goals}) {
     adjusted[market] = offset ? shift(raw[market], offset) : raw[market];
     if (offset) applied.push(market);
   }
+  // 1X2 is one multinomial family: independently learned class offsets are
+  // applied together and renormalized only inside that family. Binary markets
+  // (O/U and BTTS) remain completely independent.
   const sum = adjusted.home + adjusted.draw + adjusted.away;
   return {
     match: {
@@ -174,6 +177,11 @@ async function apply({league, match, goals}) {
     },
     applied,
     calibrationVersion:CALIBRATION_VERSION,
+    diagnostics:{
+      appliedMarkets:[...applied],
+      oneXTwoApplied:applied.filter(x=>['home','draw','away'].includes(x)),
+      binaryApplied:applied.filter(x=>['over25','btts'].includes(x))
+    }
   };
 }
 async function applyHalf({league, half}) {
