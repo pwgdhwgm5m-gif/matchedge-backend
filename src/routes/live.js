@@ -155,6 +155,48 @@ router.get('/:fixtureId', async (req, res) => {
     }
   }
 
+  // A fixture can legitimately be absent from the provider's compact live/day
+  // feeds (especially lower leagues/cups). Resolve the canonical event directly
+  // before declaring it missing.
+  if (!match) {
+    const direct = await quickBound(
+      cache.getOrFetch(`tsdb-event:${fixtureId}`, 60, () => sportsDb.getEventById(fixtureId)),
+      { ok:false, error:'event_lookup_timeout' }
+    );
+    if (direct.ok) {
+      const raw = direct.data?.events?.[0] || direct.data?.event?.[0] || direct.data?.event || null;
+      if (raw && String(raw.idEvent) === String(fixtureId)) {
+        match = sportsDb.transformEvent(raw);
+        fromCacheFlag = direct.fromCache;
+      }
+    }
+  }
+
+  // SportMonks fixture ids are different from TheSportsDB ids. For subscribed
+  // leagues, resolve an in-play fixture by its canonical SportMonks id as a
+  // second direct path rather than relying on team-name matching.
+  if (!match) {
+    const smDirect = await quickBound(
+      cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay()),
+      { ok:false, error:'sportmonks_timeout' }
+    );
+    if (smDirect.ok) {
+      const sm = (smDirect.fixtures || []).find(x => String(x.sportmonksId) === String(fixtureId));
+      if (sm) {
+        match = {
+          fixtureId:String(sm.sportmonksId), sportmonksId:sm.sportmonksId,
+          leagueId:sm.leagueId, league:sm.leagueName,
+          homeTeam:sm.homeTeam, awayTeam:sm.awayTeam,
+          homeScore:sm.homeScore, awayScore:sm.awayScore,
+          halftimeHome:sm.halftimeHome, halftimeAway:sm.halftimeAway,
+          kickoff:sm.kickoff, minute:sm.minute, statusShort:sm.statusShort,
+          isLive:!!sm.isLive, dataSource:'sportmonks'
+        };
+        fromCacheFlag = smDirect.fromCache;
+      }
+    }
+  }
+
   if (!match) {
     return res.status(404).json({ error: 'Mac bulunamadi' });
   }
