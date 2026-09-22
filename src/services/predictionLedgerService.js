@@ -217,11 +217,14 @@ function driftFlags(predictions){
  }
  return flags;
 }
-async function calibrationHealth(){
+let healthCache={at:0,value:null};
+async function calibrationHealth(options={}){
+ if(options.cached&&healthCache.value&&Date.now()-healthCache.at<15*60*1000)return healthCache.value;
  const rows=await Prediction.find({status:'settled',modelVersion:VERSION}).sort({kickoff:1}).select('league probabilities actual kickoff calibrationVersion selectionVersion').lean();
  const buckets=probabilityBuckets(rows),drift=driftFlags(rows);
  const bucketAlerts=buckets.filter(b=>b.n>=20&&Math.abs(b.gapPercent)>=8).map(b=>({market:b.market,range:[b.from,b.to],count:b.n,gapPercent:b.gapPercent,wilson95:b.wilson95,severity:Math.abs(b.gapPercent)>=12?'high':'watch'}));
- return {modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets,drift,bucketAlerts,healthy:drift.every(x=>x.severity!=='high')&&bucketAlerts.every(x=>x.severity!=='high'),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
+ const value={modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets,drift,bucketAlerts,healthy:drift.every(x=>x.severity!=='high')&&bucketAlerts.every(x=>x.severity!=='high'),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
+ healthCache={at:Date.now(),value};return value;
 }
 async function pairedAudit(){
  const rows=await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities comparisonProbabilities actual kickoff').lean();
