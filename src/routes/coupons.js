@@ -141,7 +141,10 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   // Lower-league/cup fixtures are sometimes removed from TheSportsDB compact
   // day/direct feeds after FT. BSD is already our primary non-SportMonks
   // football source, so use its finished event as the final score fallback.
-  const bsdId=providerIds.bsd||mappedIds.bsd||null;
+  let bsdId=providerIds.bsd||mappedIds.bsd||null;
+  if(!bsdId){
+    bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,matchDate+'T19:45:00Z').catch(()=>null);
+  }
   let bsd=bsdId ? await bsdService.getFinalResultByEventId?.(bsdId).catch(()=>({available:false})) : null;
   if(!bsd?.available) bsd=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,matchDate+'T12:00:00Z').catch(()=>({available:false}));
   if(bsd.available)return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
