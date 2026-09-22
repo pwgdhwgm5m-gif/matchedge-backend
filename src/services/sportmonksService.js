@@ -233,7 +233,7 @@ async function getTeamFixtureHistory(teamId, days = 120) {
   const start = new Date(end.getTime() - Math.max(30, days) * 86400000);
   const iso = d => d.toISOString().slice(0,10);
   const result = await request('/fixtures/between/' + iso(start) + '/' + iso(end) + '/' + teamId, {
-    include: 'participants;scores;statistics.type',
+    include: 'participants;scores;periods;statistics.type',
   });
   if (!result.ok) return result;
   const fixtures = (result.data?.data || []).map(transformFixture)
@@ -244,7 +244,7 @@ async function getTeamFixtureHistory(teamId, days = 120) {
 
 function aggregateTeamHistory(fixtures, teamId) {
   const rows = Array.isArray(fixtures) ? fixtures : [];
-  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOnTargetAgainst','shotsAgainst','blockedShotsAgainst','shotsInsideBoxAgainst','bigChancesAgainst','dangerousAttacksAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances'];
+  const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOnTargetAgainst','shotsAgainst','blockedShotsAgainst','shotsInsideBoxAgainst','bigChancesAgainst','dangerousAttacksAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances','firstHalfScored','firstHalfConceded','secondHalfScored','secondHalfConceded'];
   const values = [];
 
   for (const [index, f] of rows.slice(0,14).entries()) {
@@ -266,7 +266,14 @@ function aggregateTeamHistory(fixtures, teamId) {
       blockedShotsAgainst: pickOpp('blockedShots'), shotsInsideBoxAgainst: pickOpp('shotsInsideBox'), bigChancesAgainst: pickOpp('bigChances'),
       dangerousAttacksAgainst: pickOpp('dangerousAttacks'),
       shotsOffTarget: pick('shotsOffTarget'), attacks: pick('attacks'), dangerousAttacks: pick('dangerousAttacks'),
-      blockedShots: pick('blockedShots'), shotsInsideBox: pick('shotsInsideBox'), bigChances: pick('bigChances')
+      blockedShots: pick('blockedShots'), shotsInsideBox: pick('shotsInsideBox'), bigChances: pick('bigChances'),
+      // Half-specific scoring is derived only when the provider supplied a
+      // verified halftime score. Missing HT data stays null and cannot create
+      // artificial first/second-half tendencies.
+      firstHalfScored: f.halftimeHome != null && f.halftimeAway != null ? (loc === 'Home' ? Number(f.halftimeHome) : Number(f.halftimeAway)) : null,
+      firstHalfConceded: f.halftimeHome != null && f.halftimeAway != null ? (loc === 'Home' ? Number(f.halftimeAway) : Number(f.halftimeHome)) : null,
+      secondHalfScored: f.halftimeHome != null && f.halftimeAway != null ? Math.max(0,(loc === 'Home' ? Number(f.homeScore) : Number(f.awayScore))-(loc === 'Home' ? Number(f.halftimeHome) : Number(f.halftimeAway))) : null,
+      secondHalfConceded: f.halftimeHome != null && f.halftimeAway != null ? Math.max(0,(loc === 'Home' ? Number(f.awayScore) : Number(f.homeScore))-(loc === 'Home' ? Number(f.halftimeAway) : Number(f.halftimeHome))) : null
     });
   }
 
