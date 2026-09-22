@@ -261,6 +261,15 @@ router.get('/:fixtureId', async (req, res) => {
     homeScore: match.homeScore,
     awayScore: match.awayScore
   });
+  const matchDominance = liveXg.calculateMatchDominance(homeRawStats, awayRawStats, {
+    possessionHome: possessionObserved?.home,
+    possessionAway: possessionObserved?.away,
+    redCardsHome: redHome,
+    redCardsAway: redAway,
+    minute: match.minute,
+    homeScore: match.homeScore,
+    awayScore: match.awayScore
+  });
 
   res.json({
     fixtureId,
@@ -275,6 +284,7 @@ router.get('/:fixtureId', async (req, res) => {
     xgSource,
     momentum,
     goalProximity,
+    matchDominance,
     possession: possessionObserved,
     liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
     stats: {
