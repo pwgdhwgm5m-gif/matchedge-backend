@@ -454,4 +454,20 @@ async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
   return bundle;
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds };
+async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
+  if(!API_KEY)return {available:false,error:'no_api_key'};
+  const dateKey=(kickoffIso||'').slice(0,10)||new Date().toISOString().slice(0,10);
+  const day=await getFootballEventsForDate(dateKey,homeTeam);
+  if(!day.ok)return {available:false,error:day.error};
+  const event=findMatchingEvent(extractList(day.data),homeTeam,awayTeam,kickoffIso);
+  if(!event)return {available:false,error:'event_not_found'};
+  const home=toScoreNumber(pickField(event,['home_score','score.home','scores.fulltime.home']));
+  const away=toScoreNumber(pickField(event,['away_score','score.away','scores.fulltime.away']));
+  const rawStatus=String(pickField(event,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
+  const finished=/finished|finish|ended|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
+  if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
+  const ht=extractHalftimeScore(event);
+  return {available:true,source:'bsd',eventId:getEventId(event),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
+}
+
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch };
