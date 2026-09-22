@@ -88,7 +88,7 @@ async function getLiveFootballEvents() {
 }
 
 async function getFootballEventsForDate(dateStr, teamName) {
-  let path = '/events/?date_from=' + dateStr + '&date_to=' + dateStr + '&limit=500';
+  let path = '/events/?date_from=' + dateStr + '&date_to=' + dateStr + '&limit=200';
   if (teamName) path += '&team_name=' + encodeURIComponent(teamName);
   return fetchBsd(path, 8000);
 }
@@ -385,7 +385,7 @@ function eventToResultMatch(e) {
 
 async function getResultMatchesForDate(dateStr) {
   if(!API_KEY)return {ok:false,error:'no_api_key',matches:[]};
-  const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=500';
+  const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=200';
   const [daily,faCup]=await Promise.all([
     fetchBsdCached(base,5*60,8000),
     // BSD competition 39 = English FA Cup. Query it explicitly because the
