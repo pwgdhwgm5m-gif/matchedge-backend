@@ -375,7 +375,7 @@ function eventToResultMatch(e) {
     awayTeam:getAwayTeamName(e)||'',
     homeScore, awayScore,
     halftimeHome:ht?.home??null, halftimeAway:ht?.away??null,
-    league:String(pickField(e,['league.name','league_name','competition.name','competition','league'])||''),
+    league:String(pickField(e,['league.name','league_name','competition.name','competition_name','competition','league'])||''),
     leagueId:String(pickField(e,['league.id','league_id','competition.id','competition_id'])||''),
     statusShort:finished?'FT':(live?String(pickField(e,['status_short','state.short_name','status'])||'LIVE').toUpperCase():'NS'),
     isLive:live,
@@ -393,9 +393,11 @@ async function getResultMatchesForDate(dateStr) {
     fetchBsdCached(base+'&league_id=39&status=finished',5*60,8000)
   ]);
   if(!daily.ok && !faCup.ok)return {ok:false,error:daily.error||faCup.error,matches:[]};
-  const rows=[...(daily.ok?extractList(daily.data):[]),...(faCup.ok?extractList(faCup.data):[])];
+  const dailyRows=daily.ok?extractList(daily.data):[];
+  const faCupRows=(faCup.ok?extractList(faCup.data):[]).map(e=>({...e,__soccerEdgeLeagueName:'FA Cup',__soccerEdgeLeagueId:'39'}));
+  const rows=[...dailyRows,...faCupRows];
   const seen=new Set();
-  const matches=rows.map(eventToResultMatch).filter(m=>{
+  const matches=rows.map(e=>{const m=eventToResultMatch(e); if(e.__soccerEdgeLeagueName){m.league=e.__soccerEdgeLeagueName;m.leagueId=e.__soccerEdgeLeagueId;} return m;}).filter(m=>{
     if(!m.homeTeam||!m.awayTeam)return false;
     const key=m.bsdEventId||[normalizeTeamName(m.homeTeam),normalizeTeamName(m.awayTeam),dateStr].join('|');
     if(seen.has(key))return false;
