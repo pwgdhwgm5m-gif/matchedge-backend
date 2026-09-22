@@ -97,6 +97,8 @@ app.listen(config.port, async () => {
   startOddsSnapshotCron();
   startKeepAlive();
   startPushGoalMonitor();
+  // One-shot, credential-safe BSD v2 production smoke test on boot.
+  setTimeout(async()=>{try{const bsd=require('./services/bsdService');const d=await bsd.diagnostic('2026-09-22');console.log('[bsd-v2-diagnostic]',JSON.stringify(d));}catch(e){console.warn('[bsd-v2-diagnostic]',e.message)}},15000);
   // CoinEdge coupons are settled in the background even if the user never opens Kuponum.
   const settleCoupons = async () => {
     try {
