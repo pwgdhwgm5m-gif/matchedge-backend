@@ -89,6 +89,41 @@ async function retrain() {
   cacheUntil = 0;
   return { calibrationVersion:CALIBRATION_VERSION, league:'core-leagues', observations:targetSnapshots.length, evaluated:groups.size, active };
 }
+async function deactivateStaleOrRegressed() {
+  // Re-check active mappings against the latest chronological prospective
+  // sample. If a mapping no longer improves both calibration metrics, fail
+  // closed and let the raw model flow through until a later retrain qualifies.
+  const since = new Date(Date.now() - 365 * 86400000);
+  const snapshots = await Prediction.find({
+    status:'settled', modelVersion:MODEL_VERSION, settledAt:{$gte:since}
+  }).select('league kickoff capturedAt probabilities rawProbabilities actual').sort({kickoff:1}).lean();
+  const activeRows = await ModelCalibration.find({
+    active:true, modelVersion:MODEL_VERSION, calibrationVersion:CALIBRATION_VERSION
+  }).lean();
+  let deactivated=0;
+  for(const row of activeRows){
+    const isHalf=HALF_MARKETS.includes(row.market);
+    const samples=snapshots.filter(s=>
+      s.capturedAt && s.kickoff && s.capturedAt < s.kickoff &&
+      TARGET_LEAGUE.test(String(s.league||'')) &&
+      (row.league==='all' || String(s.league||'')===String(row.league||''))
+    ).map(s=>({
+      p:isHalf?s.rawProbabilities?.[row.market]:(s.rawProbabilities?.[row.market]??s.probabilities?.[row.market]),
+      y:s.actual?.[row.market]
+    })).filter(x=>Number.isFinite(x.p)&&[0,1].includes(x.y)&&x.p>0&&x.p<1);
+    if(samples.length<80)continue;
+    const holdout=samples.slice(Math.floor(samples.length*.75));
+    if(holdout.length<20)continue;
+    const baseline=brier(holdout),adjusted=brier(holdout,row.logitOffset);
+    const baselineLL=logLoss(holdout),adjustedLL=logLoss(holdout,row.logitOffset);
+    if(!(adjusted + .0005 < baseline && adjustedLL <= baselineLL + .001)){
+      await ModelCalibration.updateOne({_id:row._id},{$set:{active:false}});
+      deactivated++;
+    }
+  }
+  if(deactivated)cacheUntil=0;
+  return {checked:activeRows.length,deactivated};
+}
 async function offsets() {
   if (Date.now() < cacheUntil) return cached;
   try {
@@ -149,4 +184,4 @@ async function applyHalf({league, half}) {
   }
   return {half:out,applied,calibrationVersion:CALIBRATION_VERSION};
 }
-module.exports = { fit, shift, retrain, apply, applyHalf, CALIBRATION_VERSION, MODEL_VERSION };
+module.exports = { fit, shift, retrain, deactivateStaleOrRegressed, apply, applyHalf, CALIBRATION_VERSION, MODEL_VERSION };
