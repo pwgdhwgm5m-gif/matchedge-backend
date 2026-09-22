@@ -69,9 +69,10 @@ const board = buildMarketBoard({
 assert.ok(board.allMarkets.some(item => item.key === 'homeOver15'));
 assert.ok(board.allMarkets.some(item => item.key === 'homeScores'));
 assert.ok(board.topPredictions.length >= 1);
-assert.ok(board.topPredictions.every(item => item.verifiedOdds > 1));
-assert.ok(board.topPredictions.every(item => item.expectedValuePercent > 0));
-assert.ok(board.topPredictions.every(item => item.edgePoints >= item.valueThresholdPoints));
+assert.ok(board.topPredictions.length >= 1);
+assert.ok(board.valuePicks.every(item => item.verifiedOdds > 1));
+assert.ok(board.valuePicks.every(item => item.expectedValuePercent > 0));
+assert.ok(board.valuePicks.every(item => item.edgePoints >= item.valueThresholdPoints));
 assert.ok(board.topPredictions.some(item => item.key === 'over25'));
 assert.ok(!board.topPredictions.some(item => item.key === 'shOver05'));
 
@@ -121,11 +122,13 @@ const noValueBoard = buildMarketBoard({
   dataHealth:{score:90}, evidenceStrength:.9,
   marketOddsBoard:{bookmakers:[{bookmaker:'Book A',h2h:{home:2.75,draw:3.05,away:2.75},totals:{over25:1.90,under25:1.90}}]}
 });
-assert.equal(noValueBoard.topPredictions.length,0);
-assert.equal(noValueBoard.best,null);
-assert.equal(noValueBoard.selectionPolicy.noBetWhenEmpty,true);
+assert.ok(noValueBoard.topPredictions.length>0);
+assert.ok(noValueBoard.best);
+assert.equal(noValueBoard.valuePicks.length,0);
+assert.equal(noValueBoard.selectionPolicy.noBetCustomerFacing,false);
+assert.equal(noValueBoard.selectionPolicy.topPicksRequireOdds,false);
 assert.ok(!noValueBoard.allMarkets.find(x=>x.key==='shOver05').isBettingValue);
-console.log('NO BET and high-base-rate guard tests passed');
+console.log('analysis-first Top Picks and value separation tests passed');
 
 
 const dominance = calculateMatchDominance(
@@ -178,9 +181,10 @@ const staleOddsBoard=buildMarketBoard({
  cornerMetrics:{over95Percent:50,under95Percent:50},halfMarkets:halves,dataHealth:{score:90},premium:{},evidenceStrength:.9,modelAgreementScore:90,
  marketOddsBoard:{bookmakers:[{bookmaker:'stale',fresh:false,h2h:{home:1.7,draw:4.5,away:8},totals:{over25:2,under25:1.9}}]}
 });
-assert.equal(staleOddsBoard.topPredictions.length,0);
-assert.equal(staleOddsBoard.selectionPolicy.requiresFreshOdds,true);
-console.log('stale odds gate tests passed');
+assert.ok(staleOddsBoard.topPredictions.length>0);
+assert.equal(staleOddsBoard.valuePicks.length,0);
+assert.equal(staleOddsBoard.selectionPolicy.valueRequiresFreshOdds,true);
+console.log('stale odds value gate tests passed');
 
 const extendedValueBoard=buildMarketBoard({
  modelProbabilities:{homeWinProbability:58,drawProbability:24,awayWinProbability:18},
