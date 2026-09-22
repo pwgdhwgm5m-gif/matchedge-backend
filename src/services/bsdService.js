@@ -97,7 +97,7 @@ async function getLeagueRegistry(){
   for(const l of extractList(r.data)){
     const id=String(pickField(l,['id','league_id'])||'');
     const name=String(pickField(l,['name','league_name','title'])||'').trim();
-    if(id&&name)map[id]={id,name,country:pickField(l,['country','country.name','country_name'])||'',raw:l};
+    if(id&&name)map[id]={id,name,country:pickField(l,['country.name','country_name','country'])||'',raw:l};
   }
   return {ok:true,map};
 }
@@ -441,6 +441,7 @@ async function getResultMatchesForDate(dateStr) {
     if(!league)continue; // never manufacture League/Competition XX labels
     const m=eventToResultMatch({...e,__soccerEdgeLeagueName:league,__soccerEdgeLeagueId:leagueId});
     m.league=league; m.leagueId=leagueId;
+    m.leagueCountry=String(registry?.[leagueId]?.country||'');
     m.homeTeamId=String(pickField(e,['home_team_id','home.id','home_team.id'])||'');
     m.awayTeamId=String(pickField(e,['away_team_id','away.id','away_team.id'])||'');
     m.stage=String(pickField(e,['stage'])||'');
