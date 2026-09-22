@@ -88,7 +88,7 @@ async function getLiveFootballEvents() {
 }
 
 async function getFootballEventsForDate(dateStr, teamName) {
-  let path = '/events/?date_from=' + dateStr + '&date_to=' + dateStr;
+  let path = '/events/?date_from=' + dateStr + '&date_to=' + dateStr + '&limit=500';
   if (teamName) path += '&team_name=' + encodeURIComponent(teamName);
   return fetchBsd(path, 8000);
 }
@@ -162,6 +162,12 @@ function findMatchingEvent(events, homeTeam, awayTeam, kickoffIso) {
   });
   if (awayOnlyMatch.length === 1) return awayOnlyMatch[0];
 
+  // Some providers reverse home/away or append FC/AFC suffixes in cup replays.
+  // Only accept a reversed match when BOTH names match and kickoff is close.
+  const reversed=events.filter(function(e){
+    return isNameMatch(getHomeTeamName(e),awayTeam)&&isNameMatch(getAwayTeamName(e),homeTeam)&&isWithinKickoffTolerance(e,kickoffMs);
+  });
+  if(reversed.length===1)return reversed[0];
   return null;
 }
 
@@ -196,6 +202,16 @@ async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
     if (dayResult.ok) {
       const match = findMatchingEvent(extractList(dayResult.data), homeTeam, awayTeam, kickoffIso);
       if (match) eventId = getEventId(match);
+    }
+  }
+  // team_name can be stricter than our canonical-name matcher. If the
+  // provider-side filter misses an alias (e.g. "Leamington FC"), inspect the
+  // complete day feed and match locally instead.
+  if (!eventId) {
+    const allDay=await getFootballEventsForDate(dateKey);
+    if(allDay.ok){
+      const match=findMatchingEvent(extractList(allDay.data),homeTeam,awayTeam,kickoffIso);
+      if(match)eventId=getEventId(match);
     }
   }
 
@@ -347,8 +363,8 @@ async function getHalftimeScoreForMatch(homeTeam, awayTeam, kickoffIso) {
 function eventToAnalysisFixture(e) {
   const homeId = pickField(e, ['home_team_id','home.id','home_team.id']);
   const awayId = pickField(e, ['away_team_id','away.id','away_team.id']);
-  const homeScore = toScoreNumber(pickField(e, ['home_score','score.home','scores.fulltime.home']));
-  const awayScore = toScoreNumber(pickField(e, ['away_score','score.away','scores.fulltime.away']));
+  const homeScore = toScoreNumber(pickField(e, ['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
+  const awayScore = toScoreNumber(pickField(e, ['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
   const ht = extractHalftimeScore(e);
   return {
     fixture: { id:getEventId(e), date:getKickoff(e) },
@@ -471,7 +487,7 @@ async function getFinalResultByEventId(eventId){
  const home=toScoreNumber(pickField(e,['home_score','score.home','scores.fulltime.home']));
  const away=toScoreNumber(pickField(e,['away_score','score.away','scores.fulltime.away']));
  const rawStatus=String(pickField(e,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
- const finished=/finished|finish|ended|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
+ const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
  if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
  const ht=extractHalftimeScore(e);
  return {available:true,source:'bsd',eventId:String(eventId),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
@@ -481,13 +497,19 @@ async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
   if(!API_KEY)return {available:false,error:'no_api_key'};
   const dateKey=(kickoffIso||'').slice(0,10)||new Date().toISOString().slice(0,10);
   const day=await getFootballEventsForDate(dateKey,homeTeam);
-  if(!day.ok)return {available:false,error:day.error};
-  const event=findMatchingEvent(extractList(day.data),homeTeam,awayTeam,kickoffIso);
+  let event=day.ok?findMatchingEvent(extractList(day.data),homeTeam,awayTeam,kickoffIso):null;
+  // Critical settlement fallback: provider team_name filtering can miss cup
+  // aliases. Search the complete day result feed locally before giving up.
+  if(!event){
+    const allDay=await getFootballEventsForDate(dateKey);
+    if(allDay.ok)event=findMatchingEvent(extractList(allDay.data),homeTeam,awayTeam,kickoffIso);
+    else if(!day.ok)return {available:false,error:day.error||allDay.error};
+  }
   if(!event)return {available:false,error:'event_not_found'};
   const home=toScoreNumber(pickField(event,['home_score','score.home','scores.fulltime.home']));
   const away=toScoreNumber(pickField(event,['away_score','score.away','scores.fulltime.away']));
   const rawStatus=String(pickField(event,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
-  const finished=/finished|finish|ended|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
+  const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
   if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
   const ht=extractHalftimeScore(event);
   return {available:true,source:'bsd',eventId:getEventId(event),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
