@@ -480,6 +480,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     };
   })();
   let halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda, halfEvidence);
+  // Preserve the pre-calibration half probabilities for prospective calibration
+  // training. Never train a calibrator on its own already-calibrated output.
+  const rawHalfMarkets = JSON.parse(JSON.stringify(halfMarkets));
   const calibratedHalf = await modelCalibration.applyHalf({league:leagueName || String(league || ''),half:halfMarkets});
   halfMarkets = calibratedHalf.half;
 
@@ -632,6 +635,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketProbabilities,
     cornerMetrics,
     halfMarkets,
+    rawHalfMarkets,
     firstHalfProximity,
     dataQualityScore,
     strongestSignal,
