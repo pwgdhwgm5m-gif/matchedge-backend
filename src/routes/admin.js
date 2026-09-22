@@ -158,12 +158,19 @@ router.post('/power-rating-rebuild-league', async (req,res)=>{
  }catch(error){console.error('[power-rating-rebuild-league]',error);res.status(500).json({error:'League power rating rebuild başarısız'});}
 });
 
+router.get('/calibration-health', async (req,res)=>{
+  try{
+    const ledger=require('../services/predictionLedgerService');
+    res.json(await ledger.calibrationHealth());
+  }catch(error){console.error('[calibration-health]',error);res.status(500).json({error:'Calibration health alınamadı.'});}
+});
+
 router.get('/model-calibration', async (req, res) => {
   try {
     const rows = await ModelCalibration.find({}).sort({active:-1,trainedAt:-1}).limit(60).lean();
-    res.json({rows:rows.map(row => ({ league:row.league, market:row.market, active:row.active,
+    res.json({rows:rows.map(row => ({ modelVersion:row.modelVersion, calibrationVersion:row.calibrationVersion, league:row.league, market:row.market, active:row.active,
       offset:row.logitOffset, trainCount:row.trainCount, validationCount:row.validationCount,
-      baselineBrier:row.baselineBrier, adjustedBrier:row.adjustedBrier, trainedAt:row.trainedAt }))});
+      baselineBrier:row.baselineBrier, adjustedBrier:row.adjustedBrier, baselineLogLoss:row.baselineLogLoss, adjustedLogLoss:row.adjustedLogLoss, trainedAt:row.trainedAt }))});
   } catch (error) { res.status(500).json({error:'Kalibrasyon verisi alınamadı.'}); }
 });
 module.exports = router;
