@@ -2,6 +2,8 @@ const mongoose = require('mongoose');
 const predictionSchema = new mongoose.Schema({
   fixtureId: { type: String, required: true },
   modelVersion: { type: String, required: true },
+  calibrationVersion: { type: String, default: null },
+  selectionVersion: { type: String, default: null },
   kickoff: { type: Date, required: true, index: true },
   league: { type: String, default: '' },
   homeTeam: { type: String, required: true },
