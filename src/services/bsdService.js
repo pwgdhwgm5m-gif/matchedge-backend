@@ -390,7 +390,7 @@ async function getResultMatchesForDate(dateStr) {
     fetchBsdCached(base,5*60,8000),
     // BSD competition 39 = English FA Cup. Query it explicitly because the
     // generic daily feed can omit qualifying/replay fixtures.
-    fetchBsdCached(base+'&league_id=39',5*60,8000)
+    fetchBsdCached(base+'&league_id=39&status=finished',5*60,8000)
   ]);
   if(!daily.ok && !faCup.ok)return {ok:false,error:daily.error||faCup.error,matches:[]};
   const rows=[...(daily.ok?extractList(daily.data):[]),...(faCup.ok?extractList(faCup.data):[])];
