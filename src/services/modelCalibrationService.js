@@ -1,7 +1,7 @@
 const Prediction = require('../models/PredictionSnapshot');
 const ModelCalibration = require('../models/ModelCalibration');
 
-const MARKETS = ['home','draw','away','over25','btts'];
+const MARKETS = ['home','draw','away','over25','btts','fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
 const CALIBRATION_VERSION = 'cal-v2-chronological';
 const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig)/i;
 let cached = new Map();
