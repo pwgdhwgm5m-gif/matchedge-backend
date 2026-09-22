@@ -219,7 +219,7 @@ function extractMatchMarketOdds(oddsResponse,homeTeamName,awayTeamName){
   books.push({bookmaker:b.title||b.key,h2h:h2hOdds,totals,updatedAt,ageSeconds:Number.isFinite(ageMs)?Math.round(ageMs/1000):null,fresh});
  }
  const best=(path)=>{const vals=books.map(b=>({bookmaker:b.bookmaker,price:path(b)})).filter(x=>Number(x.price)>1);return vals.sort((a,b)=>b.price-a.price)[0]||null};
- return{bookmakers:books.length,best:{home:best(b=>b.h2h?.home),draw:best(b=>b.h2h?.draw),away:best(b=>b.h2h?.away),over25:best(b=>b.totals?.over25),under25:best(b=>b.totals?.under25)},btts:null};
+ return{bookmakers:books,bookmakerCount:books.length,best:{home:best(b=>b.h2h?.home),draw:best(b=>b.h2h?.draw),away:best(b=>b.h2h?.away),over25:best(b=>b.totals?.over25),under25:best(b=>b.totals?.under25)},btts:null};
 }
 
 function extractExtendedMarketOdds(event,homeTeamName,awayTeamName){
