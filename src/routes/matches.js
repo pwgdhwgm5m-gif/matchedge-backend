@@ -15,7 +15,7 @@ router.get('/', async (req, res) => {
   // livescore kaynagiyla "bindiriliyor" (bkz. results.js'deki ayni desen /
   // sportsDbService.applyLiveOverlay). Aksi halde bugunun listesindeki canli
   // bir mac, uzun cache suresi boyunca eski skorla kalabiliyordu.
-  const [result, liveResult, supplemental] = await Promise.all([
+  const [result, liveResult, supplemental, oddsEvents] = await Promise.all([
     cache.getOrFetch(
       `fixtures:${date}`,
       config.cache.ttlStatic,
@@ -40,12 +40,14 @@ router.get('/', async (req, res) => {
 
   // TheSportsDB hata verirse veya whitelist sonrasi liste bos kalirsa,
   // kota harcamayan The Odds API /events verisini fikstur fallback'i olarak kullan.
-  let oddsFallback=null;
+  // The Odds API request is already part of Promise.all above. Reuse that
+  // result instead of making a second request when TheSportsDB is unavailable.
+  // This keeps fixtures available during provider outages and avoids needless
+  // quota use / duplicate upstream calls.
   if (simplified.length===0 && (!result || !result.ok)) {
-    oddsFallback=await cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date));
-    if(oddsFallback?.ok&&Array.isArray(oddsFallback.matches)) simplified=oddsFallback.matches;
+    if(oddsEvents?.ok&&Array.isArray(oddsEvents.matches)) simplified=oddsEvents.matches;
   }
-  if (simplified.length===0 && (!result||!result.ok) && (!oddsFallback||!oddsFallback.ok)) return res.status(502).json({error:'Fikstur verisi alinamadi'});
+  if (simplified.length===0 && (!result||!result.ok) && (!oddsEvents||!oddsEvents.ok)) return res.status(502).json({error:'Fikstur verisi alinamadi'});
 
   if (liveResult.ok) {
     const rawLive = (liveResult.data?.livescore || []).filter(
