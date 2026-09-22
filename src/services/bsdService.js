@@ -360,6 +360,37 @@ async function getHalftimeScoreForMatch(homeTeam, awayTeam, kickoffIso) {
 }
 
 
+function eventToResultMatch(e) {
+  const homeScore=toScoreNumber(pickField(e,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
+  const awayScore=toScoreNumber(pickField(e,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
+  const ht=extractHalftimeScore(e);
+  const rawStatus=String(pickField(e,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
+  const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
+  const live=/live|in.?play|1st|2nd|half.?time|ht/.test(rawStatus) && !finished;
+  return {
+    fixtureId:String(getEventId(e)||''),
+    bsdEventId:String(getEventId(e)||''),
+    date:getKickoff(e),
+    homeTeam:getHomeTeamName(e)||'',
+    awayTeam:getAwayTeamName(e)||'',
+    homeScore, awayScore,
+    halftimeHome:ht?.home??null, halftimeAway:ht?.away??null,
+    league:String(pickField(e,['league.name','league_name','competition.name','competition','league'])||''),
+    leagueId:String(pickField(e,['league.id','league_id','competition.id','competition_id'])||''),
+    statusShort:finished?'FT':(live?String(pickField(e,['status_short','state.short_name','status'])||'LIVE').toUpperCase():'NS'),
+    isLive:live,
+    source:'bsd'
+  };
+}
+
+async function getResultMatchesForDate(dateStr) {
+  if(!API_KEY)return {ok:false,error:'no_api_key',matches:[]};
+  const result=await fetchBsdCached('/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=500',5*60,8000);
+  if(!result.ok)return {ok:false,error:result.error,matches:[]};
+  const matches=extractList(result.data).map(eventToResultMatch).filter(m=>m.homeTeam&&m.awayTeam);
+  return {ok:true,source:'bsd',matches};
+}
+
 function eventToAnalysisFixture(e) {
   const homeId = pickField(e, ['home_team_id','home.id','home_team.id']);
   const awayId = pickField(e, ['away_team_id','away.id','away_team.id']);
@@ -515,4 +546,4 @@ async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
   return {available:true,source:'bsd',eventId:getEventId(event),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId };
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate };
