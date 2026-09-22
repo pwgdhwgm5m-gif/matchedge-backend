@@ -83,8 +83,13 @@ router.get('/', async (req, res) => {
       const rows=bsdService.extractList ? bsdService.extractList(bsdLive.data) : (bsdLive.data?.results||bsdLive.data?.data||[]);
       const existing=new Set(simplified.map(m=>String(m.homeTeam||'').toLowerCase()+'|'+String(m.awayTeam||'').toLowerCase()));
       for(const e of rows){
-        const m=bsdService.eventToResultMatch ? bsdService.eventToResultMatch(e) : null;
+        const leagueId=String(e?.league_id ?? e?.league?.id ?? e?.competition_id ?? e?.competition?.id ?? '');
+        const leagueName=registry?.ok ? String(registry.map?.[leagueId]?.name||'') : '';
+        const m=bsdService.eventToResultMatch ? bsdService.eventToResultMatch({...e,__soccerEdgeLeagueName:leagueName,__soccerEdgeLeagueId:leagueId}) : null;
         if(!m?.homeTeam||!m?.awayTeam)continue;
+        m.league=leagueName||m.league; m.leagueId=leagueId||m.leagueId;
+        m.leagueCountry=registry?.ok ? String(registry.map?.[leagueId]?.country||'') : '';
+        m.canonicalProvider='bsd';
         const k=String(m.homeTeam).toLowerCase()+'|'+String(m.awayTeam).toLowerCase();
         if(!existing.has(k)){ simplified.push(m); existing.add(k); }
       }
