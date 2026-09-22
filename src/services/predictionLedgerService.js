@@ -200,11 +200,21 @@ function probabilityBuckets(predictions){
  const buckets=new Map();
  for(const p of predictions)for(const [market,prob] of Object.entries(p.probabilities||{})){
   const y=p.actual?.[market];if(!Number.isFinite(prob)||![0,1].includes(y))continue;
-  const lo=Math.min(90,Math.floor(prob*10)*10),key=market+':'+lo;
-  if(!buckets.has(key))buckets.set(key,{market,from:lo,to:lo===90?100:lo+10,n:0,pred:0,hits:0});
-  const b=buckets.get(key);b.n++;b.pred+=prob;b.hits+=y;
+  const lo=Math.min(90,Math.floor(prob*10)*10),league=p.league||'Unknown';
+  for(const scope of ['all',league]){
+   const key=scope+':'+market+':'+lo;
+   if(!buckets.has(key))buckets.set(key,{league:scope,market,from:lo,to:lo===90?100:lo+10,n:0,pred:0,hits:0});
+   const b=buckets.get(key);b.n++;b.pred+=prob;b.hits+=y;
+  }
  }
- return [...buckets.values()].map(b=>{const ci=wilson(b.hits,b.n);const predicted=100*b.pred/b.n,observed=100*b.hits/b.n;return {...b,predictedPercent:+predicted.toFixed(1),observedPercent:+observed.toFixed(1),gapPercent:+(predicted-observed).toFixed(1),wilson95:ci,readiness:b.n<20?'collecting':b.n<50?'early-signal':'usable'};});
+ return [...buckets.values()].map(b=>{
+  const ci=wilson(b.hits,b.n),predicted=100*b.pred/b.n,observed=100*b.hits/b.n,gap=predicted-observed;
+  // A bucket becomes decision-usable only with enough observations and when
+  // its predicted rate is statistically compatible with the observed 95% CI.
+  const calibratedInside95=ci.low!=null&&predicted>=ci.low&&predicted<=ci.high;
+  const readiness=b.n<20?'collecting':b.n<50?'early-signal':'usable';
+  return {...b,predictedPercent:+predicted.toFixed(1),observedPercent:+observed.toFixed(1),gapPercent:+gap.toFixed(1),wilson95:ci,calibratedInside95,readiness};
+ });
 }
 function driftFlags(predictions){
  const byMarket={};
@@ -248,7 +258,7 @@ async function calibrationHealth(options={}){
  if(options.cached&&healthCache.value&&Date.now()-healthCache.at<15*60*1000)return healthCache.value;
  const rows=await Prediction.find({status:'settled',modelVersion:VERSION}).sort({kickoff:1}).select('league probabilities actual kickoff calibrationVersion selectionVersion').lean();
  const buckets=probabilityBuckets(rows),drift=driftFlags(rows);
- const bucketAlerts=buckets.filter(b=>b.n>=20&&Math.abs(b.gapPercent)>=8).map(b=>({market:b.market,range:[b.from,b.to],count:b.n,gapPercent:b.gapPercent,wilson95:b.wilson95,severity:Math.abs(b.gapPercent)>=12?'high':'watch'}));
+ const bucketAlerts=buckets.filter(b=>b.n>=20&&Math.abs(b.gapPercent)>=8).map(b=>({league:b.league,market:b.market,range:[b.from,b.to],count:b.n,gapPercent:b.gapPercent,wilson95:b.wilson95,calibratedInside95:b.calibratedInside95,severity:b.n>=50&&!b.calibratedInside95&&Math.abs(b.gapPercent)>=12?'high':'watch'}));
  const value={modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets,drift,bucketAlerts,healthy:drift.every(x=>x.severity!=='high')&&bucketAlerts.every(x=>x.severity!=='high'),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
  healthCache={at:Date.now(),value};return value;
 }
