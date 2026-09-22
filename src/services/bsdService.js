@@ -628,4 +628,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { fetchBsdAll, getLeagueRegistry, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, extractList, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, diagnostic };
