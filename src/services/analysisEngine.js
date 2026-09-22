@@ -469,6 +469,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const primaryMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
+  // Full verified price board is kept separate from the probability model.
+  // It is used by the Top Picks value selector (1X2 + O/U 2.5 today);
+  // markets without a real quoted price are never labelled as betting value.
+  const marketOddsBoard = (oddsRaw && homeTeamName && awayTeamName)
+    ? oddsApi.extractMatchMarketOdds(oddsRaw, homeTeamName, awayTeamName)
+    : null;
   // Football-Data is an additive, fail-open fallback. It is used only when
   // the existing odds provider has no match and both team names match exactly
   // after normalization. Any fetch/rate-limit/parse failure returns null.
@@ -568,6 +574,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     sportmonksMarketEvidence: smMarketEvidence,
     evidenceStrength,
     modelAgreementScore: agreementScore,
+    marketOddsBoard,
   });
 
   return {
@@ -611,6 +618,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       : (h2hResult.status === 'fulfilled' ? h2hResult.value : null),
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     marketOdds: matchOdds,
+    marketOddsBoard,
     marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
