@@ -16,7 +16,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50 }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null }) {
   let health = Number(dataHealth?.score || 0);
   const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
   const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
@@ -93,27 +93,61 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     })
     .sort((a, b) => b.score - a.score || b.probability - a.probability);
 
-  // Top picks should be useful alternatives, not three correlated expressions
-  // of the same underlying signal. Keep one selection per market family first,
-  // then fill remaining slots only if necessary.
-  const diversified=[];
-  const usedMarkets=new Set();
-  for(const item of candidates){
-    if(diversified.length>=3)break;
-    if(usedMarkets.has(item.market))continue;
-    // Require both a meaningful probability edge and minimum evidence support.
-    // Weak-data extremes remain visible in allMarkets but cannot become a top pick.
-    if(item.probability < 54 || item.evidenceReliability < .40)continue;
-    diversified.push(item);usedMarkets.add(item.market);
-  }
-  if(diversified.length<3){
-    for(const item of candidates){
-      if(diversified.length>=3)break;
-      if(diversified.some(x=>x.key===item.key))continue;
-      if(item.probability < 56 || item.evidenceReliability < .50)continue;
-      diversified.push(item);
+  // Betting-value layer. Top Picks are not "the highest probabilities".
+  // They must have a verified bookmaker price, positive expected value and a
+  // meaningful de-vigged edge. High-base-rate markets (for example 2H O0.5)
+  // stay available in analysis but cannot dominate Top Picks merely because
+  // their raw occurrence probability is high.
+  const priceMap = new Map();
+  const books = Array.isArray(marketOddsBoard?.bookmakers) ? marketOddsBoard.bookmakers : [];
+  const registerBook = (bookmaker, family, odds) => {
+    if (!odds) return;
+    const entries = family === '1X2'
+      ? [['home',odds.home],['draw',odds.draw],['away',odds.away]]
+      : [['over25',odds.over25],['under25',odds.under25]];
+    const valid=entries.filter(([,o])=>Number(o)>1);
+    if(valid.length!==entries.length)return;
+    const overround=valid.reduce((sum,[,o])=>sum+1/Number(o),0);
+    if(!(overround>0))return;
+    for(const [key,odd] of valid){
+      const deVig=(1/Number(odd))/overround*100;
+      const current=priceMap.get(key);
+      // Best executable price is used for EV; its own bookmaker market is used
+      // for de-vig so we never construct a synthetic "best-odds book".
+      if(!current || Number(odd)>current.odds) priceMap.set(key,{bookmaker,odds:Number(odd),deVigProbability:deVig,overround});
     }
+  };
+  for(const b of books){registerBook(b.bookmaker,'1X2',b.h2h);registerBook(b.bookmaker,'TOTALS',b.totals);}
+
+  for(const item of candidates){
+    const px=priceMap.get(item.key);
+    item.verifiedOdds=px?.odds??null;
+    item.bookmaker=px?.bookmaker??null;
+    item.marketImpliedProbability=px?+px.deVigProbability.toFixed(1):null;
+    item.edgePoints=px?+(item.probability-px.deVigProbability).toFixed(1):null;
+    item.expectedValuePercent=px?+((item.probability/100*px.odds-1)*100).toFixed(1):null;
+    // Reliability makes the eligibility threshold stricter on weaker evidence;
+    // it does not multiply probabilities or manufacture a larger edge.
+    const uncertaintyBuffer=+(2+(1-item.evidenceReliability)*4).toFixed(1);
+    item.valueThresholdPoints=uncertaintyBuffer;
+    item.isBettingValue=Boolean(px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
+    item.valueScore=item.isBettingValue
+      ? +(item.expectedValuePercent*.45 + item.edgePoints*.35 + item.evidenceReliability*20).toFixed(2)
+      : null;
   }
+
+  const eligible=candidates.filter(x=>x.isBettingValue)
+    .sort((a,b)=>b.valueScore-a.valueScore || b.edgePoints-a.edgePoints || b.probability-a.probability);
+  const diversified=[];
+  const usedFamilies=new Set();
+  for(const item of eligible){
+    if(diversified.length>=3)break;
+    const family=item.market==='1X2'?'1X2':item.market==='GOL'&&['over25','under25'].includes(item.key)?'TOTALS_25':item.market;
+    if(usedFamilies.has(family))continue;
+    diversified.push(item);usedFamilies.add(family);
+  }
+  if(diversified.length<3){for(const item of eligible){if(diversified.length>=3)break;if(!diversified.some(x=>x.key===item.key))diversified.push(item);}}
+
 
   return {
     allMarkets: candidates,
