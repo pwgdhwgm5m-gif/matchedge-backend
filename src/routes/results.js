@@ -18,6 +18,8 @@ const bsdService = require('../services/bsdService');
  * kotasini doldurdugu icin artik sportsDbService (TheSportsDB) kullaniyor,
  * /api/matches route'uyla ayni kaynak.
  */
+router.get('/bsd-diagnostic', async (req,res)=>{ try { const date=String(req.query.date||new Date().toISOString().slice(0,10)); res.json(await bsdService.diagnostic(date)); } catch(e){ res.status(500).json({ok:false,error:e.message}); } });
+
 router.get('/sportmonks-turkey-diagnostic', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
   const result = await sportmonks.getLeagueFixturesByDate(date, 600);
