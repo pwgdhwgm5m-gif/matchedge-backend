@@ -4,7 +4,8 @@ const ModelCalibration = require('../models/ModelCalibration');
 const MARKETS = ['home','draw','away','over25','btts'];
 const HALF_MARKETS = ['fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
 const ALL_MARKETS = [...MARKETS,...HALF_MARKETS];
-const CALIBRATION_VERSION = 'cal-v2-chronological';
+const CALIBRATION_VERSION = 'cal-v3-model-isolated';
+const MODEL_VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
 const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig)/i;
 let cached = new Map();
 let cacheUntil = 0;
@@ -41,9 +42,9 @@ async function retrain() {
   const since = new Date(Date.now() - 365 * 86400000);
   const snapshots = await Prediction.find({
     status:'settled', settledAt:{$gte:since}, capturedAt:{$lt:new Date()},
-  }).select('league kickoff capturedAt probabilities rawProbabilities actual').sort({ kickoff:1 }).lean();
+  }).select('modelVersion league kickoff capturedAt probabilities rawProbabilities actual').sort({ kickoff:1 }).lean();
   // Adaptive calibration is intentionally restricted to the prospective Süper Lig ledger.
-  const targetSnapshots = snapshots.filter(s => TARGET_LEAGUE.test(String(s.league || '')));
+  const targetSnapshots = snapshots.filter(s => s.modelVersion === MODEL_VERSION && TARGET_LEAGUE.test(String(s.league || '')));
   const groups = new Map();
   for (const s of targetSnapshots) {
     if (!s.kickoff || !s.capturedAt || s.capturedAt >= s.kickoff) continue;
@@ -52,7 +53,7 @@ async function retrain() {
       const y = s.actual?.[market];
       if (!Number.isFinite(p) || ![0,1].includes(y) || p <= 0 || p >= 1) continue;
       for (const league of ['all', s.league || 'Unknown']) {
-        const key = league + ':' + market;
+        const key = MODEL_VERSION + ':' + league + ':' + market;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push({ p, y });
       }
@@ -61,11 +62,12 @@ async function retrain() {
   let active = 0;
   for (const [key, rows] of groups) {
     const market = key.slice(key.lastIndexOf(':')+1);
-    const league = key.slice(0, -(market.length+1));
+    const prefix = MODEL_VERSION + ':';
+    const league = key.startsWith(prefix) ? key.slice(prefix.length, -(market.length+1)) : key.slice(0, -(market.length+1));
     const result = fit(rows, league === 'all' ? 60 : 40, 20);
     if (!result) continue;
     await ModelCalibration.updateOne({key}, {$set:{
-      key, league, market, calibrationVersion:CALIBRATION_VERSION, logitOffset: result.offset, active: result.active,
+      key, league, market, modelVersion:MODEL_VERSION, calibrationVersion:CALIBRATION_VERSION, logitOffset: result.offset, active: result.active,
       trainCount: result.trainCount, validationCount: result.validationCount,
       baselineBrier: result.baseline, adjustedBrier: result.adjusted, baselineLogLoss:result.baselineLL, adjustedLogLoss:result.adjustedLL, trainedAt:new Date(),
     }}, {upsert:true});
@@ -77,7 +79,7 @@ async function retrain() {
 async function offsets() {
   if (Date.now() < cacheUntil) return cached;
   try {
-    const rows = await ModelCalibration.find({active:true, calibrationVersion:CALIBRATION_VERSION, trainedAt:{$gte:new Date(Date.now()-30*86400000)}}).select('key logitOffset').lean();
+    const rows = await ModelCalibration.find({active:true, calibrationVersion:CALIBRATION_VERSION, trainedAt:{$gte:new Date(Date.now()-30*86400000)}}).select('key logitOffset modelVersion').lean();
     cached = new Map(rows.map(row => [row.key, row.logitOffset]));
     cacheUntil = Date.now() + 15*60000;
   } catch (error) {
@@ -88,7 +90,7 @@ async function offsets() {
 }
 async function apply({league, match, goals}) {
   const values = await offsets();
-  const lookup = market => values.get((league || 'Unknown') + ':' + market) ?? values.get('all:' + market) ?? 0;
+  const lookup = market => values.get(MODEL_VERSION+':' +(league || 'Unknown') + ':' + market) ?? values.get(MODEL_VERSION+':all:' + market) ?? 0;
   const raw = {
     home: match.homeWinProbability / 100, draw: match.drawProbability / 100,
     away: match.awayWinProbability / 100, over25: goals.over25GoalsPercent / 100,
@@ -120,7 +122,7 @@ async function apply({league, match, goals}) {
 async function applyHalf({league, half}) {
   if(!half) return {half,applied:[],calibrationVersion:CALIBRATION_VERSION};
   const values=await offsets();
-  const lookup=market=>values.get((league||'Unknown')+':'+market) ?? values.get('all:'+market) ?? 0;
+  const lookup=market=>values.get(MODEL_VERSION+':' +(league||'Unknown')+':'+market) ?? values.get(MODEL_VERSION+':all:'+market) ?? 0;
   const mapping=[
     ['fhHomeScores','firstHalf','homeScores'],['fhAwayScores','firstHalf','awayScores'],['fhOver05','firstHalf','over05'],
     ['shHomeScores','secondHalf','homeScores'],['shAwayScores','secondHalf','awayScores'],['shOver05','secondHalf','over05']
@@ -134,4 +136,4 @@ async function applyHalf({league, half}) {
   }
   return {half:out,applied,calibrationVersion:CALIBRATION_VERSION};
 }
-module.exports = { fit, shift, retrain, apply, applyHalf, CALIBRATION_VERSION };
+module.exports = { fit, shift, retrain, apply, applyHalf, CALIBRATION_VERSION, MODEL_VERSION };
