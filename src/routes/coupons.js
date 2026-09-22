@@ -96,6 +96,21 @@ function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace
 function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
 async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam){
+  // Coupon fixture IDs are TheSportsDB IDs. The premium V2 livescore feed can
+  // still hold the authoritative score after a lower-league/cup match drops
+  // out of the compact day/event feeds. Check it first and let
+  // transformLiveEvent's stale-match guard turn an expired live status into FT.
+  if(fixtureId){
+    const live=await sportsDb.getLiveScores().catch(()=>({ok:false}));
+    if(live.ok){
+      const raw=(live.data?.livescore||[]).find(e=>String(e.idEvent)===String(fixtureId));
+      if(raw){
+        let v2=sportsDb.transformLiveEvent(raw);
+        v2=(await sportsDb.attachHalftimeScores([v2]))[0]||v2;
+        if(finalMatch(v2)) return {source:'sportsdb-v2',match:v2,date:matchDate};
+      }
+    }
+  }
   // Most coupon fixture IDs originate from TheSportsDB. Resolve the exact
   // event first; daily feeds can omit or lag completed matches.
   if(fixtureId){
