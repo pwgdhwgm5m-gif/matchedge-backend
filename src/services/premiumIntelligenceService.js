@@ -113,6 +113,12 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     priceMap.set(noKey,{bookmaker:b.bookmaker,odds:no,deVigProbability:(1/no)/sum,overround:sum,verifiedFresh:true});
    };
    addPair('bttsYes','bttsNo',b.btts);
+   for(const side of ['home','away'])for(const line of ['1.5','2.5','3.5']){
+    const pair=b.teamTotals?.[side]?.[line];
+    const prefix=side==='home'?'homeOver':'awayOver';
+    const underPrefix=side==='home'?'homeUnder':'awayUnder';
+    addPair(prefix+line.replace('.',''),underPrefix+line.replace('.',''),pair);
+   }
    if(b.firstHalfTotal05)addPair('fhOver05','fhUnder05',b.firstHalfTotal05);
    if(b.firstHalfTeam05?.home)addPair('fhHomeScores','fhHomeNoScore',b.firstHalfTeam05.home);
    if(b.firstHalfTeam05?.away)addPair('fhAwayScores','fhAwayNoScore',b.firstHalfTeam05.away);
@@ -178,7 +184,11 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   // Customer-facing Top Picks / For You focus on the three core actionable
   // pre-match families requested for this surface: match winner, BTTS Yes and
   // Over 2.5. Other markets remain available in full Match Analysis.
-  const coreTopPickKeys=new Set(['home','away','bttsYes','over25']);
+  // Price-aware major-market pool. Team-total lines are eligible because a
+  // harder line can be economically stronger than an obvious short-priced
+  // high-probability line. They still need the same football evidence floor;
+  // price alone can never rescue a weak signal.
+  const coreTopPickKeys=new Set(['home','away','bttsYes','over25','homeOver15','homeOver25','homeOver35','awayOver15','awayOver25','awayOver35']);
   const topEligible=candidates.filter(x=>
     coreTopPickKeys.has(x.key) &&
     !x.topPickExclusion &&
@@ -192,8 +202,14 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     const hasFreshPrice=item.oddsFresh===true && Number(item.verifiedOdds)>1;
     const positiveEv=hasFreshPrice?Math.max(0,Number(item.expectedValuePercent)||0):0;
     const positiveEdge=hasFreshPrice?Math.max(0,Number(item.edgePoints)||0):0;
-    const priceBonus=Math.min(12,positiveEv)*.35 + Math.min(10,positiveEdge)*.25;
-    return {...item,topPickScore:+(Number(item.score||0)+priceBonus).toFixed(2)};
+    // When a verified price exists, penalize negative/ordinary pricing and
+    // reward genuine de-vig edge/EV. This prevents an easy 1.5 line from
+    // dominating solely because its occurrence probability is high.
+    const negativeEv=hasFreshPrice?Math.max(0,-Number(item.expectedValuePercent||0)):0;
+    const priceAdjustment=hasFreshPrice
+      ? Math.min(18,positiveEv)*.45 + Math.min(12,positiveEdge)*.30 - Math.min(12,negativeEv)*.35
+      : 0;
+    return {...item,topPickScore:+(Number(item.score||0)+priceAdjustment).toFixed(2)};
   }).sort((a,b)=>{
     return b.topPickScore-a.topPickScore || b.score-a.score || b.probability-a.probability;
   });
@@ -219,7 +235,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       mode:'analysis-first-with-verified-value-overlay',
       topPicksRequireOdds:false,
       topPicksUseFreshOddsWhenAvailable:true,
-      topPicksPriceSignal:'positive-ev-and-devig-edge-bonus',
+      topPicksPriceSignal:'price-adjusted-model-support-with-devig-edge-and-ev',
       topPicksMinimumProbability:50,
       topPicksMinimumEvidenceReliability:.45,
       topPicksMinimumDataHealth:45,
@@ -228,7 +244,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       valueRequiresPositiveExpectedValue:true,
       valueUsesUncertaintyAdjustedEdge:true,
       noBetCustomerFacing:false,
-      includedTopPickMarkets:['home','away','bttsYes','over25'],
+      includedTopPickMarkets:['home','away','bttsYes','over25','homeOver15','homeOver25','homeOver35','awayOver15','awayOver25','awayOver35'],
       excludedMarkets:['draw','under25','bttsNo','shOver05'],
       modelHealthGate:healthGate,
       modelHealthReadiness:modelHealth?.readiness||'unavailable'
