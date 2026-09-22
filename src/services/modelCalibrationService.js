@@ -1,7 +1,9 @@
 const Prediction = require('../models/PredictionSnapshot');
 const ModelCalibration = require('../models/ModelCalibration');
 
-const MARKETS = ['home','draw','away','over25','btts','fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
+const MARKETS = ['home','draw','away','over25','btts'];
+const HALF_MARKETS = ['fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
+const ALL_MARKETS = [...MARKETS,...HALF_MARKETS];
 const CALIBRATION_VERSION = 'cal-v2-chronological';
 const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig)/i;
 let cached = new Map();
@@ -45,7 +47,7 @@ async function retrain() {
   const groups = new Map();
   for (const s of targetSnapshots) {
     if (!s.kickoff || !s.capturedAt || s.capturedAt >= s.kickoff) continue;
-    for (const market of MARKETS) {
+    for (const market of ALL_MARKETS) {
       const p = s.rawProbabilities?.[market] ?? s.probabilities?.[market];
       const y = s.actual?.[market];
       if (!Number.isFinite(p) || ![0,1].includes(y) || p <= 0 || p >= 1) continue;
@@ -115,4 +117,21 @@ async function apply({league, match, goals}) {
     calibrationVersion:CALIBRATION_VERSION,
   };
 }
-module.exports = { fit, shift, retrain, apply, CALIBRATION_VERSION };
+async function applyHalf({league, half}) {
+  if(!half) return {half,applied:[],calibrationVersion:CALIBRATION_VERSION};
+  const values=await offsets();
+  const lookup=market=>values.get((league||'Unknown')+':'+market) ?? values.get('all:'+market) ?? 0;
+  const mapping=[
+    ['fhHomeScores','firstHalf','homeScores'],['fhAwayScores','firstHalf','awayScores'],['fhOver05','firstHalf','over05'],
+    ['shHomeScores','secondHalf','homeScores'],['shAwayScores','secondHalf','awayScores'],['shOver05','secondHalf','over05']
+  ];
+  const out={...half,firstHalf:{...half.firstHalf},secondHalf:{...half.secondHalf}};
+  const applied=[];
+  for(const [market,period,key] of mapping){
+    const p=Number(out?.[period]?.[key])/100,offset=lookup(market);
+    if(!Number.isFinite(p)||!offset)continue;
+    out[period][key]=+(100*shift(p,offset)).toFixed(1);applied.push(market);
+  }
+  return {half:out,applied,calibrationVersion:CALIBRATION_VERSION};
+}
+module.exports = { fit, shift, retrain, apply, applyHalf, CALIBRATION_VERSION };
