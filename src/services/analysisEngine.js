@@ -603,6 +603,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     rawModelProbabilities: rawMatchProbabilities,
     rawMarketProbabilities,
     calibrationApplied: calibrated.applied,
+    calibrationVersion: calibrated.calibrationVersion || modelCalibration.CALIBRATION_VERSION,
       confidenceShrinkage: { evidenceStrength:+evidenceStrength.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample, dataHealthScore },
     marketImpliedProbabilities,
     marketProbabilities,
