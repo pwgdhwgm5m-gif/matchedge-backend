@@ -383,6 +383,19 @@ function eventToResultMatch(e) {
   };
 }
 
+const BSD_LEAGUE_NAMES = {
+  '34':'Brazilian Serie B',
+  '39':'FA Cup',
+  '80':'Colombian Primera A',
+  '85':'Argentinian Primera Division'
+};
+function bsdCompetitionName(e){
+  const explicit=String(pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','league.title','tournament.name','tournament_name'])||'').trim();
+  if(explicit && !/^(league|competition|unknown|other)$/i.test(explicit)) return explicit;
+  const id=String(pickField(e,['league.id','league_id','competition.id','competition_id'])||'');
+  return BSD_LEAGUE_NAMES[id]||'';
+}
+
 async function getResultMatchesForDate(dateStr) {
   if(!API_KEY)return {ok:false,error:'no_api_key',matches:[]};
   const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=200';
@@ -396,7 +409,7 @@ async function getResultMatchesForDate(dateStr) {
   const dailyRows=(daily.ok?extractList(daily.data):[]).map(e=>{
     // BSD v2 may expose country separately while competition metadata is sparse.
     // Never turn a country or a missing competition into the generic "League" bucket.
-    const competition=String(pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','league.title','tournament.name','tournament_name'])||'').trim();
+    const competition=bsdCompetitionName(e);
     return competition ? {...e,__soccerEdgeLeagueName:competition} : e;
   });
   const faCupRows=(faCup.ok?extractList(faCup.data):[]).map(e=>({...e,__soccerEdgeLeagueName:'FA Cup',__soccerEdgeLeagueId:'39'}));
