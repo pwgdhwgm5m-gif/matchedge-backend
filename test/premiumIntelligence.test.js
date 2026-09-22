@@ -110,3 +110,18 @@ assert.ok(valueBoard.topPredictions.some(x=>x.key==='home'||x.key==='over25'));
 assert.ok(!valueBoard.topPredictions.some(x=>x.key==='shOver05'));
 assert.equal(valueBoard.allMarkets.find(x=>x.key==='shOver05').verifiedOdds,null);
 console.log('betting-value Top Picks tests passed');
+
+
+const noValueBoard = buildMarketBoard({
+  modelProbabilities:{homeWinProbability:34,drawProbability:33,awayWinProbability:33},
+  goalMarkets:{over25GoalsPercent:50,bttsPercent:50,totalGoals:{'1.5':{over:60,under:40},'3.5':{over:30,under:70}},teamGoals:{home:{'1.5':{over:30},'2.5':{over:10},'3.5':{over:3}},away:{'1.5':{over:30},'2.5':{over:10},'3.5':{over:3}}},scoring:{home:60,away:60}},
+  halfMarkets:{firstHalf:{home:30,draw:45,away:25,homeScores:40,awayScores:40,over05:60},secondHalf:{home:35,draw:35,away:30,homeScores:55,awayScores:55,over05:91},mostGoalsHalf:{first:30,equal:25,second:45}},
+  cornerMetrics:{over95Percent:50,under95Percent:50},
+  dataHealth:{score:90}, evidenceStrength:.9,
+  marketOddsBoard:{bookmakers:[{bookmaker:'Book A',h2h:{home:2.75,draw:3.05,away:2.75},totals:{over25:1.90,under25:1.90}}]}
+});
+assert.equal(noValueBoard.topPredictions.length,0);
+assert.equal(noValueBoard.best,null);
+assert.equal(noValueBoard.selectionPolicy.noBetWhenEmpty,true);
+assert.ok(!noValueBoard.allMarkets.find(x=>x.key==='shOver05').isBettingValue);
+console.log('NO BET and high-base-rate guard tests passed');
