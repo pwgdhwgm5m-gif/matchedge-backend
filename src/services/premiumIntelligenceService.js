@@ -117,15 +117,16 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       const current=priceMap.get(key);
       // Best executable price is used for EV; its own bookmaker market is used
       // for de-vig so we never construct a synthetic "best-odds book".
-      if(!current || Number(odd)>current.odds) priceMap.set(key,{bookmaker,odds:Number(odd),deVigProbability:deVig,overround});
+      if(!current || Number(odd)>current.odds) priceMap.set(key,{bookmaker,odds:Number(odd),deVigProbability:deVig,overround,verifiedFresh:true});
     }
   };
-  for(const b of books){registerBook(b.bookmaker,'1X2',b.h2h);registerBook(b.bookmaker,'TOTALS',b.totals);}
+  for(const b of books){if(b.fresh!==true)continue;registerBook(b.bookmaker,'1X2',b.h2h);registerBook(b.bookmaker,'TOTALS',b.totals);}
 
   for(const item of candidates){
     const px=priceMap.get(item.key);
     item.verifiedOdds=px?.odds??null;
     item.bookmaker=px?.bookmaker??null;
+    item.oddsFresh=px?.verifiedFresh===true;
     item.marketImpliedProbability=px?+px.deVigProbability.toFixed(1):null;
     item.edgePoints=px?+(item.probability-px.deVigProbability).toFixed(1):null;
     item.expectedValuePercent=px?+((item.probability/100*px.odds-1)*100).toFixed(1):null;
@@ -156,7 +157,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     allMarkets: candidates,
     topPredictions: diversified,
     best: (health >= 45 ? diversified[0] || null : null),
-    valuePicks: eligible,\n    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'], modelHealthGate:healthGate, modelHealthReadiness:modelHealth?.readiness||'unavailable' },
+    valuePicks: eligible,\n    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, requiresFreshOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'], modelHealthGate:healthGate, modelHealthReadiness:modelHealth?.readiness||'unavailable' },
   };
 }
 
