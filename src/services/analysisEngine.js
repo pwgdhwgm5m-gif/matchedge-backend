@@ -317,6 +317,30 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
   } catch (_) {}
 
+  // Final lambda regularization.
+  // The upstream layers (form, defence weakness, motivation, Elo, xG/chance quality)
+  // are useful individually, but multiplying them can compound the same signal and
+  // create implausible goal rates on sparse samples. Anchor the final rate to a
+  // robust matchup prior built from the team's scoring rate and the opponent's
+  // concession rate. This is shrinkage, not a hard-coded score prediction.
+  const regularizeLambda = (lambda, ownForm, oppForm, leagueGoalBase) => {
+    const ownSample=Number(ownForm?.played||0),oppSample=Number(oppForm?.played||0);
+    if(!ownSample||!oppSample||!Number.isFinite(lambda)) return lambda;
+    const ownRate=robustRate(Number(ownForm.avgGoalsFor),ownSample,leagueGoalBase);
+    const oppRate=robustRate(Number(oppForm.avgGoalsAgainst),oppSample,leagueGoalBase);
+    const prior=Math.sqrt(Math.max(.05,ownRate)*Math.max(.05,oppRate));
+    const evidence=Math.min(1,Math.min(ownSample,oppSample)/8);
+    // Sparse samples stay close to the observable matchup prior; with eight or
+    // more relevant venue matches the richer model is allowed substantially more room.
+    const modelWeight=.30+.45*evidence;
+    const blended=prior*(1-modelWeight)+lambda*modelWeight;
+    // A final robust envelope prevents compounded modifiers from overwhelming
+    // the underlying scoring/conceding evidence while retaining genuine mismatches.
+    return +Math.max(prior*.65,Math.min(prior*1.65,blended)).toFixed(2);
+  };
+  homeLambda=regularizeLambda(homeLambda,homeForm,awayForm,leagueHomeGoals);
+  awayLambda=regularizeLambda(awayLambda,awayForm,homeForm,leagueAwayGoals);
+
   // League/time-aware Dixon-Coles layer. Recent completed matches carry more weight;
   // sparse samples stay close to conservative defaults.
   const leagueDc=poisson.estimateLeagueParameters(eloPool,{halfLifeDays:240});
