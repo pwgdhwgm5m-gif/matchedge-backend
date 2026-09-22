@@ -77,6 +77,31 @@ async function fetchBsdCached(path, ttlSeconds, timeoutMs) {
   return result;
 }
 
+async function fetchBsdAll(path, ttlSeconds, timeoutMs) {
+  const sep=path.includes('?')?'&':'?'; let offset=0, all=[];
+  while(true){
+    const page=await fetchBsdCached(path+sep+'limit=200&offset='+offset,ttlSeconds,timeoutMs);
+    if(!page.ok)return page;
+    const rows=extractList(page.data); all.push(...rows);
+    const count=Number(page.data?.count||0);
+    if(rows.length<200 || (count && all.length>=count))break;
+    offset+=200;
+  }
+  return {ok:true,data:{count:all.length,results:all}};
+}
+
+async function getLeagueRegistry(){
+  const r=await fetchBsdAll('/leagues/?',6*60*60,10000);
+  if(!r.ok)return r;
+  const map={};
+  for(const l of extractList(r.data)){
+    const id=String(pickField(l,['id','league_id'])||'');
+    const name=String(pickField(l,['name','league_name','title'])||'').trim();
+    if(id&&name)map[id]={id,name,country:pickField(l,['country','country.name','country_name'])||'',raw:l};
+  }
+  return {ok:true,map};
+}
+
 function extractList(data) {
   if (Array.isArray(data)) return data;
   if (!data) return [];
@@ -383,35 +408,32 @@ function eventToResultMatch(e) {
   };
 }
 
-const BSD_LEAGUE_NAMES = {
-  '34':'Brazilian Serie B',
-  '39':'FA Cup',
-  '80':'Colombian Primera A',
-  '85':'Argentinian Primera Division'
-};
-function bsdCompetitionName(e){
-  const explicit=String(pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','league.title','tournament.name','tournament_name'])||'').trim();
-  if(explicit && !/^(league|competition|unknown|other)$/i.test(explicit)) return explicit;
+async function bsdCompetitionName(e, registry){
   const id=String(pickField(e,['league.id','league_id','competition.id','competition_id'])||'');
-  return BSD_LEAGUE_NAMES[id]||'';
+  const canonical=registry?.[id]?.name;
+  if(canonical)return canonical;
+  const explicit=String(pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','league.title','tournament.name','tournament_name'])||'').trim();
+  return /^(league|competition|unknown|other)$/i.test(explicit)?'':explicit;
 }
 
 async function getResultMatchesForDate(dateStr) {
   if(!API_KEY)return {ok:false,error:'no_api_key',matches:[]};
   const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=200';
-  const [daily,faCup]=await Promise.all([
+  const [daily,faCup,leagueRegistry]=await Promise.all([
     fetchBsdCached(base,5*60,8000),
     // BSD competition 39 = English FA Cup. Query it explicitly because the
     // generic daily feed can omit qualifying/replay fixtures.
-    fetchBsdCached(base+'&league_id=39&status=finished',5*60,8000)
+    fetchBsdCached(base+'&league_id=39&status=finished',5*60,8000),
+    getLeagueRegistry()
   ]);
   if(!daily.ok && !faCup.ok)return {ok:false,error:daily.error||faCup.error,matches:[]};
-  const dailyRows=(daily.ok?extractList(daily.data):[]).map(e=>{
+  const dailyRows=[];
+  for(const e of (daily.ok?extractList(daily.data):[])){
     // BSD v2 may expose country separately while competition metadata is sparse.
     // Never turn a country or a missing competition into the generic "League" bucket.
-    const competition=bsdCompetitionName(e);
-    return competition ? {...e,__soccerEdgeLeagueName:competition} : e;
-  });
+    const competition=await bsdCompetitionName(e,leagueRegistry.ok?leagueRegistry.map:{});
+    dailyRows.push(competition ? {...e,__soccerEdgeLeagueName:competition} : e);
+  }
   const faCupRows=(faCup.ok?extractList(faCup.data):[]).map(e=>({...e,__soccerEdgeLeagueName:'FA Cup',__soccerEdgeLeagueId:'39'}));
   const rows=[...dailyRows,...faCupRows];
   const seen=new Set();
@@ -598,4 +620,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, diagnostic };
