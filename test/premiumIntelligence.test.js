@@ -60,11 +60,19 @@ const board = buildMarketBoard({
   cornerMetrics: { over95Percent: 62, under95Percent:38 },
   dataHealth: { score: 80 },
   premium: { status: 'PICK', selection: 'home', bestEdge: null },
+  marketOddsBoard: { bookmakers:[
+    {bookmaker:'Book A',h2h:{home:2.65,draw:3.4,away:3.1},totals:{over25:1.75,under25:2.12}},
+    {bookmaker:'Book B',h2h:{home:2.60,draw:3.5,away:3.0},totals:{over25:1.72,under25:2.15}}
+  ]},
 });
 assert.ok(board.allMarkets.some(item => item.key === 'homeOver15'));
 assert.ok(board.allMarkets.some(item => item.key === 'homeScores'));
-assert.equal(board.topPredictions.length, 3);
+assert.ok(board.topPredictions.length >= 1);
+assert.ok(board.topPredictions.every(item => item.verifiedOdds > 1));
+assert.ok(board.topPredictions.every(item => item.expectedValuePercent > 0));
+assert.ok(board.topPredictions.every(item => item.edgePoints >= item.valueThresholdPoints));
 assert.ok(board.topPredictions.some(item => item.key === 'over25'));
+assert.ok(!board.topPredictions.some(item => item.key === 'shOver05'));
 
 const halves = calculateHalfMarkets(1.8, 0.9);
 assert.ok(halves.firstHalf.home > halves.firstHalf.away);
@@ -85,3 +93,20 @@ assert.ok(highGoalNoCornerData.over85Percent < 80);
 assert.ok(halves.firstHalf.homeScores > halves.firstHalf.awayScores);
 assert.ok(halves.secondHalf.homeScores > halves.secondHalf.awayScores);
 console.log('expanded market probability tests passed');
+
+
+// A 90% high-base-rate market without a verified price must never beat a
+// lower-probability positive-EV market into Top Picks.
+const valueBoard = buildMarketBoard({
+  modelProbabilities:{homeWinProbability:62,drawProbability:23,awayWinProbability:15},
+  goalMarkets:{over25GoalsPercent:64,bttsPercent:58,totalGoals:{'1.5':{over:80,under:20},'3.5':{over:40,under:60}},teamGoals:{home:{'1.5':{over:55},'2.5':{over:25},'3.5':{over:10}},away:{'1.5':{over:25},'2.5':{over:8},'3.5':{over:2}}},scoring:{home:82,away:52}},
+  halfMarkets:{firstHalf:{home:40,draw:40,away:20,homeScores:55,awayScores:30,over05:70},secondHalf:{home:50,draw:30,away:20,homeScores:75,awayScores:45,over05:90},mostGoalsHalf:{first:28,equal:25,second:47}},
+  cornerMetrics:{over95Percent:51,under95Percent:49},
+  dataHealth:{score:85}, evidenceStrength:.85,
+  premium:{status:'PICK',selection:'home'},
+  marketOddsBoard:{bookmakers:[{bookmaker:'Book A',h2h:{home:1.95,draw:3.7,away:5.5},totals:{over25:1.95,under25:1.95}}]}
+});
+assert.ok(valueBoard.topPredictions.some(x=>x.key==='home'||x.key==='over25'));
+assert.ok(!valueBoard.topPredictions.some(x=>x.key==='shOver05'));
+assert.equal(valueBoard.allMarkets.find(x=>x.key==='shOver05').verifiedOdds,null);
+console.log('betting-value Top Picks tests passed');
