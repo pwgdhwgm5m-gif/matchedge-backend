@@ -22,7 +22,7 @@ const CORNER_KEYS = new Set(['cornersOver95','cornersUnder95','cornersOver85','c
 const CORNER_SETTLEMENT_LEAGUES = new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
 function couponLeagueKey(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ü/g,'u').replace(/[^a-z0-9]+/g,' ').trim().replace(/^super lig$/,'turkish super lig')}
 function cornerCouponSupported(league){return CORNER_SETTLEMENT_LEAGUES.has(couponLeagueKey(league))}
-const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver95', 'cornersUnder95', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond']);
+const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver95', 'cornersUnder95', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond', 'homeOver05', 'homeOver15', 'homeOver25', 'homeOver35', 'awayOver05', 'awayOver15', 'awayOver25', 'awayOver35']);
 
 function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   const total = home + away;
@@ -33,6 +33,14 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   if (key === 'under25') return total < 2.5 ? 'won' : 'lost';
   if (key === 'bttsYes') return home > 0 && away > 0 ? 'won' : 'lost';
   if (key === 'bttsNo') return home === 0 || away === 0 ? 'won' : 'lost';
+  if (key === 'homeOver05') return home >= 1 ? 'won' : 'lost';
+  if (key === 'homeOver15') return home >= 2 ? 'won' : 'lost';
+  if (key === 'homeOver25') return home >= 3 ? 'won' : 'lost';
+  if (key === 'homeOver35') return home >= 4 ? 'won' : 'lost';
+  if (key === 'awayOver05') return away >= 1 ? 'won' : 'lost';
+  if (key === 'awayOver15') return away >= 2 ? 'won' : 'lost';
+  if (key === 'awayOver25') return away >= 3 ? 'won' : 'lost';
+  if (key === 'awayOver35') return away >= 4 ? 'won' : 'lost';
   if (key === 'cornersOver95') return corners == null ? 'void' : corners >= 10 ? 'won' : 'lost';
   if (key === 'cornersUnder95') return corners == null ? 'void' : corners <= 9 ? 'won' : 'lost';
   // Legacy 8.5 coupons remain settleable.
