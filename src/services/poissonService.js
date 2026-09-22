@@ -103,22 +103,38 @@ function calculateMatchProbabilities(homeLambda, awayLambda, maxGoals = 10, rho 
   };
 }
 
-/** 2.5 ust/alt, KG var/yok gibi market bazli olasiliklar */
-function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 10, rho = DEFAULT_RHO) {
+/** Market-specific probabilities from one normalized score distribution. */
+function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 12, rho = DEFAULT_RHO) {
   const scoreMatrix = buildScoreMatrix(homeLambda, awayLambda, maxGoals, rho);
-  let over25 = 0, btts = 0;
+  const totalOver = { 0.5:0, 1.5:0, 2.5:0, 3.5:0, 4.5:0 };
+  const homeOver = { 0.5:0, 1.5:0, 2.5:0, 3.5:0 };
+  const awayOver = { 0.5:0, 1.5:0, 2.5:0, 3.5:0 };
+  let btts = 0, homeCleanWin = 0, awayCleanWin = 0;
 
   for (let h = 0; h <= maxGoals; h++) {
     for (let a = 0; a <= maxGoals; a++) {
-      const p = scoreMatrix[h][a];
-      if (h + a > 2.5) over25 += p;
-      if (h > 0 && a > 0) btts += p;
+      const probability = scoreMatrix[h][a];
+      for (const line of Object.keys(totalOver)) if (h + a > Number(line)) totalOver[line] += probability;
+      for (const line of Object.keys(homeOver)) if (h > Number(line)) homeOver[line] += probability;
+      for (const line of Object.keys(awayOver)) if (a > Number(line)) awayOver[line] += probability;
+      if (h > 0 && a > 0) btts += probability;
+      if (h > a && a === 0) homeCleanWin += probability;
+      if (a > h && h === 0) awayCleanWin += probability;
     }
   }
-
+  const pct = value => +(100 * value).toFixed(1);
+  const totalGoals = Object.fromEntries(Object.entries(totalOver).map(([line,value]) => [line,{ over:pct(value), under:pct(1-value) }]));
+  const teamGoals = {
+    home:Object.fromEntries(Object.entries(homeOver).map(([line,value]) => [line,{ over:pct(value), under:pct(1-value) }])),
+    away:Object.fromEntries(Object.entries(awayOver).map(([line,value]) => [line,{ over:pct(value), under:pct(1-value) }])),
+  };
   return {
-    over25GoalsPercent: +(over25 * 100).toFixed(1),
-    bttsPercent: +(btts * 100).toFixed(1),
+    over25GoalsPercent: totalGoals['2.5'].over,
+    bttsPercent: pct(btts),
+    totalGoals,
+    teamGoals,
+    scoring: { home:pct(homeOver['0.5']), away:pct(awayOver['0.5']) },
+    cleanSheetWin: { home:pct(homeCleanWin), away:pct(awayCleanWin) },
   };
 }
 
@@ -135,12 +151,17 @@ function calculateHalfMarkets(homeLambda, awayLambda) {
     }
   }
   const total = firstMore + secondMore + equal || 1;
+  const scoreAtLeastOnce = lambda => +(100 * (1 - Math.exp(-Math.max(0, lambda)))).toFixed(1);
   return {
     firstHalf: {
       home: firstHalf.homeWinProbability, draw: firstHalf.drawProbability, away: firstHalf.awayWinProbability,
+      homeScores: scoreAtLeastOnce(homeLambda * 0.45), awayScores: scoreAtLeastOnce(awayLambda * 0.45),
+      over05: scoreAtLeastOnce(firstTotal),
     },
     secondHalf: {
       home: secondHalf.homeWinProbability, draw: secondHalf.drawProbability, away: secondHalf.awayWinProbability,
+      homeScores: scoreAtLeastOnce(homeLambda * 0.55), awayScores: scoreAtLeastOnce(awayLambda * 0.55),
+      over05: scoreAtLeastOnce(secondTotal),
     },
     mostGoalsHalf: {
       first: +((firstMore / total) * 100).toFixed(1),
@@ -204,12 +225,13 @@ function estimateCornerMetricsFromExpected(homeExpected, awayExpected) {
 }
 
 function estimateCornerMetrics(homeLambda, awayLambda) {
-  const totalGoalExpectation = homeLambda + awayLambda;
-  const leagueAvgGoals = 2.5; // referans lig ortalamasi
-  const baseTotalCorners = 9.5; // ligler arasi tipik toplam korner ortalamasi
-
-  const intensityRatio = totalGoalExpectation / leagueAvgGoals;
-  const expectedTotal = +(baseTotalCorners * intensityRatio).toFixed(1);
+  // No real corner evidence is available here. Keep a conservative league prior
+  // instead of deriving corners linearly from goal lambda; high-scoring mismatches
+  // must never create artificial 95-99% corner probabilities by themselves.
+  const totalGoalExpectation = Math.max(0, Number(homeLambda || 0) + Number(awayLambda || 0));
+  const baseTotalCorners = 9.5;
+  const boundedTempo = clamp(1 + (totalGoalExpectation - 2.6) * 0.035, 0.92, 1.08);
+  const expectedTotal = +(baseTotalCorners * boundedTempo).toFixed(1);
 
   // Muhafazakar alt sinir: beklenen degerin ~2.5 altini "guvenli minimum" sayiyoruz
   const minExpected = Math.max(4, Math.round(expectedTotal - 2.5));
@@ -234,6 +256,7 @@ function estimateCornerMetrics(homeLambda, awayLambda) {
     over85Percent: Math.max(0, Math.min(100, over85Percent)),
     homeShare: +(homeShare * 100).toFixed(1),
     awayShare: +((1 - homeShare) * 100).toFixed(1),
+    source: 'league-prior-bounded-tempo',
   };
 }
 
