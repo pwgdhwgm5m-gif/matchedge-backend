@@ -18,6 +18,7 @@ const bsdService = require('../services/bsdService');
  * kotasini doldurdugu icin artik sportsDbService (TheSportsDB) kullaniyor,
  * /api/matches route'uyla ayni kaynak.
  */
+// BSD v2 production diagnostic; deliberately never returns API credentials.
 router.get('/bsd-diagnostic', async (req,res)=>{ try { const date=String(req.query.date||new Date().toISOString().slice(0,10)); res.json(await bsdService.diagnostic(date)); } catch(e){ res.status(500).json({ok:false,error:e.message}); } });
 
 router.get('/sportmonks-turkey-diagnostic', async (req, res) => {
