@@ -13,6 +13,7 @@ const accuracy = require('./accuracyEngineService');
 const footballDataOdds = require('./footballDataUpcomingOddsService');
 const sportmonks = require('./sportmonksService');
 const sourcePolicy = require('./sourcePolicyService');
+const bsd = require('./bsdService');
 const powerRating = require('./powerRatingService');
 const predictionLedger = require('./predictionLedgerService');
 
@@ -25,6 +26,7 @@ const SUPERLIG_LEAGUE_ID = '71';
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey }) {
   const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
   const useSportmonksPrimary = providerPolicy.sportmonks === true;
+  const useBsdPrimary = providerPolicy.primary === 'bsd';
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
   const mappedTsdbLeagueId = leagueIdNum ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null;
@@ -40,21 +42,27 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   //   oldugu icin muhtemelen bos doner, sistem yine de cokme, notr deger uretir)
   const homeFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
+    : useBsdPrimary
+      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(homeTeamName,15); return br.ok&&br.data?.response?.length ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId) : br); }
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId)
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const awayFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
+    : useBsdPrimary
+      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(awayTeamName,15); return br.ok&&br.data?.response?.length ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId) : br); }
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId)
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const homeFormCacheKey = isSuperLig
     ? `tff-form:${homeTeamName}`
+    : useBsdPrimary ? `bsd-form:${homeTeamName}`
     : isMappedLeague
       ? `tsdb-form:v2:${effectiveTsdbLeagueId}:${homeTeamName}`
       : `form:${home}`;
   const awayFormCacheKey = isSuperLig
     ? `tff-form:${awayTeamName}`
+    : useBsdPrimary ? `bsd-form:${awayTeamName}`
     : isMappedLeague
       ? `tsdb-form:v2:${effectiveTsdbLeagueId}:${awayTeamName}`
       : `form:${away}`;
@@ -623,6 +631,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     return { homeThreat, awayThreat, goalQuality, bttsQuality, cornerQuality, sample, venueSplit:true };
   })();
 
+  // BSD is an independent provider/model signal, never a repeated multiplier.
+  // Capture it as provenance/comparison evidence first; calibration can later
+  // assign weight prospectively after enough settled samples exist.
+  const [bsdPrediction, bsdConsensusOdds] = await Promise.all([
+    Promise.race([bsd.getPredictionForMatch(homeTeamName,awayTeamName,null),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))]),
+    Promise.race([bsd.getConsensusOddsForMatch(homeTeamName,awayTeamName,null),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))])
+  ]);
+
   const modelHealth = await predictionLedger.calibrationHealth({cached:true}).catch(()=>null);
 
   const marketBoard = premiumIntelligence.buildMarketBoard({
@@ -688,6 +704,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOddsSource: primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
+    bsdEvidence: { prediction:bsdPrediction, consensusOdds:bsdConsensusOdds },
     sourcePolicy: providerPolicy,
     modelDiagnostics: {
       lambdas: { homeBase: homeLambdaBase, awayBase: awayLambdaBase, finalHome: homeLambda, finalAway: awayLambda },
@@ -695,6 +712,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       standings: { homeRank: standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats))?.rank ?? null, awayRank: standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats))?.rank ?? null },
       multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
       sportmonks: smMarketEvidence,
+      bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:bsdConsensusOdds?.available===true, role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v3-market-ensemble',
       dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
@@ -706,7 +724,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       probabilityPipeline:['venue-recent-form','opponent-strength','independent-evidence-ensemble','mismatch-preservation','dixon-coles','market-calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
-    dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable'),
+    dataSource: useBsdPrimary ? 'bsd' : (isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable')),
   };
 }
 
