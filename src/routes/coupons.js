@@ -63,6 +63,8 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   if (halftimeHome == null || halftimeAway == null) return 'void';
   const secondHome = home - halftimeHome;
   const secondAway = away - halftimeAway;
+  const firstGoals = halftimeHome + halftimeAway;
+  const secondGoals = secondHome + secondAway;
   if (key === 'fhHome') return halftimeHome > halftimeAway ? 'won' : 'lost';
   if (key === 'fhDraw') return halftimeHome === halftimeAway ? 'won' : 'lost';
   if (key === 'fhAway') return halftimeAway > halftimeHome ? 'won' : 'lost';
@@ -72,8 +74,6 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   if (key === 'shHome') return secondHome > secondAway ? 'won' : 'lost';
   if (key === 'shDraw') return secondHome === secondAway ? 'won' : 'lost';
   if (key === 'shAway') return secondAway > secondHome ? 'won' : 'lost';
-  const firstGoals = halftimeHome + halftimeAway;
-  const secondGoals = secondHome + secondAway;
   if (key === 'shHomeScores') return secondHome >= 1 ? 'won' : 'lost';
   if (key === 'shAwayScores') return secondAway >= 1 ? 'won' : 'lost';
   if (key === 'shOver05') return secondGoals >= 1 ? 'won' : 'lost';
