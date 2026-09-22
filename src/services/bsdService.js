@@ -26,7 +26,7 @@
  *
  * Endpoint/alan adlari, BSD'nin gercek API yanitlariyla (Render loglarindan
  * ve kullanicinin docs sayfasindan paylastigi ornek JSON'lardan) dogrulandi:
- * - GET /events/live/ ve GET /events/?date_from=...&date_to=...&team_name=...
+ * - BSD v2: GET /events/live/ and GET /events/?date_from=...&date_to=...&team_name=...
  *   ("sport" diye bir parametre YOK - BSD zaten sadece futbol API'si; tarih
  *   filtresi "date" degil "date_from"/"date_to")
  * - GET /events/{id}/stats/ -> { xg_estimated, stats: { home: { xg: { actual,
@@ -84,13 +84,13 @@ function extractList(data) {
 }
 
 async function getLiveFootballEvents() {
-  return fetchBsd('/events/live/', 8000);
+  return fetchBsdCached('/events/live/', 20, 8000);
 }
 
 async function getFootballEventsForDate(dateStr, teamName) {
   let path = '/events/?date_from=' + dateStr + '&date_to=' + dateStr + '&limit=200';
   if (teamName) path += '&team_name=' + encodeURIComponent(teamName);
-  return fetchBsd(path, 8000);
+  return fetchBsdCached(path, 60, 8000);
 }
 
 function pickField(obj, candidates) {
@@ -236,7 +236,7 @@ async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
  * bulunamazsa { available: false } donuyor.
  */
 async function getEventXg(bsdEventId) {
-  const statsResult = await fetchBsd('/events/' + bsdEventId + '/stats/', 8000);
+  const statsResult = await fetchBsdCached('/events/' + bsdEventId + '/stats/', 60, 8000);
   if (!statsResult.ok) return { available: false };
 
   const homeXg = pickField(statsResult.data, ['stats.home.xg.actual']);
