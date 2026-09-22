@@ -418,32 +418,38 @@ async function bsdCompetitionName(e, registry){
 
 async function getResultMatchesForDate(dateStr) {
   if(!API_KEY)return {ok:false,error:'no_api_key',matches:[]};
-  const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=200';
-  const [daily,faCup,leagueRegistry]=await Promise.all([
-    fetchBsdCached(base,5*60,8000),
-    // BSD competition 39 = English FA Cup. Query it explicitly because the
-    // generic daily feed can omit qualifying/replay fixtures.
-    fetchBsdCached(base+'&league_id=39&status=finished',5*60,8000),
+  // BSD v2 is canonical outside the six SportMonks leagues. Pull both the
+  // date feed and the explicit finished slice: some cup/replay rows can fall
+  // out of the mixed-status day feed while still being present as finished.
+  const base='/events/?date_from='+dateStr+'&date_to='+dateStr;
+  const [day,finished,leagueRegistry]=await Promise.all([
+    fetchBsdAll(base,5*60,10000),
+    fetchBsdAll(base+'&status=finished',5*60,10000),
     getLeagueRegistry()
   ]);
-  if(!daily.ok && !faCup.ok)return {ok:false,error:daily.error||faCup.error,matches:[]};
-  const dailyRows=[];
-  for(const e of (daily.ok?extractList(daily.data):[])){
-    // BSD v2 may expose country separately while competition metadata is sparse.
-    // Never turn a country or a missing competition into the generic "League" bucket.
-    const competition=await bsdCompetitionName(e,leagueRegistry.ok?leagueRegistry.map:{});
-    dailyRows.push(competition ? {...e,__soccerEdgeLeagueName:competition} : e);
+  if(!day.ok && !finished.ok)return {ok:false,error:day.error||finished.error,matches:[]};
+  const registry=leagueRegistry.ok?leagueRegistry.map:{};
+  const rows=[...(day.ok?extractList(day.data):[]),...(finished.ok?extractList(finished.data):[])];
+  const seen=new Set(), matches=[];
+  for(const e of rows){
+    const id=String(getEventId(e)||'');
+    const key=id||[normalizeTeamName(getHomeTeamName(e)),normalizeTeamName(getAwayTeamName(e)),String(getKickoff(e)||'').slice(0,10)].join('|');
+    if(seen.has(key))continue;
+    seen.add(key);
+    const leagueId=String(pickField(e,['league.id','league_id','competition.id','competition_id'])||'');
+    const league=await bsdCompetitionName(e,registry);
+    if(!league)continue; // never manufacture League/Competition XX labels
+    const m=eventToResultMatch({...e,__soccerEdgeLeagueName:league,__soccerEdgeLeagueId:leagueId});
+    m.league=league; m.leagueId=leagueId;
+    m.homeTeamId=String(pickField(e,['home_team_id','home.id','home_team.id'])||'');
+    m.awayTeamId=String(pickField(e,['away_team_id','away.id','away_team.id'])||'');
+    m.stage=String(pickField(e,['stage'])||'');
+    m.stageName=String(pickField(e,['stage_name'])||'');
+    m.roundLabel=String(pickField(e,['round_label'])||'');
+    m.providerIds={bsd:id};
+    if(m.homeTeam&&m.awayTeam)matches.push(m);
   }
-  const faCupRows=(faCup.ok?extractList(faCup.data):[]).map(e=>({...e,__soccerEdgeLeagueName:'FA Cup',__soccerEdgeLeagueId:'39'}));
-  const rows=[...dailyRows,...faCupRows];
-  const seen=new Set();
-  const matches=rows.map(e=>{const m=eventToResultMatch(e); if(e.__soccerEdgeLeagueName){m.league=e.__soccerEdgeLeagueName;m.leagueId=e.__soccerEdgeLeagueId;} return m;}).filter(m=>{
-    if(!m.homeTeam||!m.awayTeam)return false;
-    const key=m.bsdEventId||[normalizeTeamName(m.homeTeam),normalizeTeamName(m.awayTeam),dateStr].join('|');
-    if(seen.has(key))return false;
-    seen.add(key); return true;
-  });
-  return {ok:true,source:'bsd',matches,faCupExplicit:faCup.ok};
+  return {ok:true,source:'bsd',matches,registryAvailable:leagueRegistry.ok};
 }
 
 function eventToAnalysisFixture(e) {
