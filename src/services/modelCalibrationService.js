@@ -6,7 +6,10 @@ const HALF_MARKETS = ['fhHomeScores','fhAwayScores','fhOver05','shHomeScores','s
 const ALL_MARKETS = [...MARKETS,...HALF_MARKETS];
 const CALIBRATION_VERSION = 'cal-v3-model-isolated';
 const MODEL_VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
-const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig)/i;
+// Self-improvement is restricted to well-covered core leagues. Each league
+// learns its own calibration only after enough prospective settled samples;
+// the shared "all" prior is built from the same trusted league set.
+const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig|premier league|bundesliga|serie a|la liga|primera division|primera división|ligue 1)/i;
 let cached = new Map();
 let cacheUntil = 0;
 const clamp = (x, low, high) => Math.min(high, Math.max(low, x));
@@ -43,13 +46,19 @@ async function retrain() {
   const snapshots = await Prediction.find({
     status:'settled', settledAt:{$gte:since}, capturedAt:{$lt:new Date()},
   }).select('modelVersion league kickoff capturedAt probabilities rawProbabilities actual').sort({ kickoff:1 }).lean();
-  // Adaptive calibration is intentionally restricted to the prospective Süper Lig ledger.
+  // Adaptive calibration learns only from prospective snapshots in the
+  // well-covered core leagues. Sparse/small leagues remain analysis-only and
+  // cannot distort the shared calibration prior.
   const targetSnapshots = snapshots.filter(s => s.modelVersion === MODEL_VERSION && TARGET_LEAGUE.test(String(s.league || '')));
   const groups = new Map();
   for (const s of targetSnapshots) {
     if (!s.kickoff || !s.capturedAt || s.capturedAt >= s.kickoff) continue;
     for (const market of ALL_MARKETS) {
-      const p = s.rawProbabilities?.[market] ?? s.probabilities?.[market];
+      // Half-market calibration requires a true pre-calibration probability.
+      // Older snapshots did not store it, so skip those rows rather than
+      // training on already-calibrated output.
+      const isHalf = HALF_MARKETS.includes(market);
+      const p = isHalf ? s.rawProbabilities?.[market] : (s.rawProbabilities?.[market] ?? s.probabilities?.[market]);
       const y = s.actual?.[market];
       if (!Number.isFinite(p) || ![0,1].includes(y) || p <= 0 || p >= 1) continue;
       for (const league of ['all', s.league || 'Unknown']) {
@@ -78,7 +87,7 @@ async function retrain() {
     if (result.active) active++;
   }
   cacheUntil = 0;
-  return { calibrationVersion:CALIBRATION_VERSION, league:'Turkish Super Lig', observations:targetSnapshots.length, evaluated:groups.size, active };
+  return { calibrationVersion:CALIBRATION_VERSION, league:'core-leagues', observations:targetSnapshots.length, evaluated:groups.size, active };
 }
 async function offsets() {
   if (Date.now() < cacheUntil) return cached;
