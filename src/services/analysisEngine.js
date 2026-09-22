@@ -520,6 +520,19 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const calibratedHalf = await modelCalibration.applyHalf({league:leagueName || String(league || ''),half:halfMarkets});
   halfMarkets = calibratedHalf.half;
 
+  // Rich BSD field-level fallback. In the six SportMonks leagues this fills
+  // fields that the subscribed SportMonks payload does not provide; elsewhere
+  // BSD is the primary rich fixture source. It never overwrites a verified
+  // SportMonks field merely because another provider also has it.
+  const bsdBundle = await Promise.race([
+    bsd.getFixtureDataBundle(homeTeamName,awayTeamName,kickoff),
+    new Promise(resolve=>setTimeout(()=>resolve({available:false,error:'timeout'}),3500))
+  ]);
+  const bsdPrediction = bsdBundle?.prediction
+    ? {available:true,eventId:bsdBundle.eventId,source:'bsd',markets:bsdBundle.prediction.markets||null,recommendations:bsdBundle.prediction.recommendations||null,model:bsdBundle.prediction.model||null}
+    : {available:false,error:bsdBundle?.error||'prediction_unavailable'};
+  const bsdConsensus = bsdBundle?.consensusOdds || null;
+
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
     : null;
@@ -550,8 +563,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? await footballDataOdds.getMatchOdds(homeTeamName, awayTeamName)
     : null;
   const matchOdds = primaryMatchOdds || footballDataMatchOdds;
-  const proportionalMarket = oddsApi.normalizeImpliedProbabilities(matchOdds);
-  const shinMarket = oddsApi.shinImpliedProbabilities(matchOdds);
+  // BSD free odds are a multi-bookmaker consensus, not an executable quote.
+  // Prefer a fresh complete consensus as the broad 1X2 market anchor, while
+  // retaining The Odds API bookmaker rows for Value/EV and displayed prices.
+  const bsdAnchorOdds = bsdConsensus?.fresh && bsdConsensus?.h2h?.home && bsdConsensus?.h2h?.draw && bsdConsensus?.h2h?.away
+    ? bsdConsensus.h2h : null;
+  const marketAnchorOdds = bsdAnchorOdds || matchOdds;
+  const proportionalMarket = oddsApi.normalizeImpliedProbabilities(marketAnchorOdds);
+  const shinMarket = oddsApi.shinImpliedProbabilities(marketAnchorOdds);
   const marketImpliedProbabilities = shinMarket || proportionalMarket;
   const divergence = oddsApi.marketDivergence(matchProbabilities,marketImpliedProbabilities);
   // Large unexplained disagreement lowers model weight rather than being advertised as automatic value.
@@ -631,14 +650,6 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     return { homeThreat, awayThreat, goalQuality, bttsQuality, cornerQuality, sample, venueSplit:true };
   })();
 
-  // BSD is an independent provider/model signal, never a repeated multiplier.
-  // Capture it as provenance/comparison evidence first; calibration can later
-  // assign weight prospectively after enough settled samples exist.
-  const [bsdPrediction, bsdConsensusOdds] = await Promise.all([
-    Promise.race([bsd.getPredictionForMatch(homeTeamName,awayTeamName,kickoff),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))]),
-    Promise.race([bsd.getConsensusOddsForMatch(homeTeamName,awayTeamName,kickoff),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))])
-  ]);
-
   const modelHealth = await predictionLedger.calibrationHealth({cached:true}).catch(()=>null);
 
   const marketBoard = premiumIntelligence.buildMarketBoard({
@@ -702,9 +713,20 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOdds: matchOdds,
     marketOddsBoard,
     marketOddsSource: primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
+    marketAnchorSource: bsdAnchorOdds ? 'bsd-consensus' : (primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null)),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
-    bsdEvidence: { prediction:bsdPrediction, consensusOdds:bsdConsensusOdds },
+    bsdEvidence: {
+      prediction:bsdPrediction,
+      consensusOdds:bsdConsensus,
+      fixtureData:{
+        eventId:bsdBundle?.eventId||null,
+        coverage:bsdBundle?.coverage||null,
+        stats:bsdBundle?.stats||null,
+        lineups:bsdBundle?.lineups||null,
+        h2h:bsdBundle?.h2h||null
+      }
+    },
     sourcePolicy: providerPolicy,
     modelDiagnostics: {
       lambdas: { homeBase: homeLambdaBase, awayBase: awayLambdaBase, finalHome: homeLambda, finalAway: awayLambda },
@@ -712,7 +734,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       standings: { homeRank: standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats))?.rank ?? null, awayRank: standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats))?.rank ?? null },
       multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
       sportmonks: smMarketEvidence,
-      bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:bsdConsensusOdds?.available===true, role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
+      bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v3-market-ensemble',
       dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
@@ -720,7 +742,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
       analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), evidenceFamilies, playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
-      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
+      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), marketAnchorSource:bsdAnchorOdds?'bsd-consensus':(primaryMatchOdds?'the-odds-api':(footballDataMatchOdds?'football-data.co.uk':null)), executableOddsSource:primaryMatchOdds?'the-odds-api':(footballDataMatchOdds?'football-data.co.uk':null), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
       probabilityPipeline:['venue-recent-form','opponent-strength','independent-evidence-ensemble','mismatch-preservation','dixon-coles','market-calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
