@@ -462,6 +462,20 @@ async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
   return bundle;
 }
 
+async function getFinalResultByEventId(eventId){
+ if(!API_KEY||!eventId)return {available:false,error:'missing_event_id'};
+ const result=await fetchBsdCached('/events/'+eventId+'/',60,6000);
+ if(!result.ok)return {available:false,error:result.error};
+ const e=result.data?.data||result.data?.event||result.data;
+ const home=toScoreNumber(pickField(e,['home_score','score.home','scores.fulltime.home']));
+ const away=toScoreNumber(pickField(e,['away_score','score.away','scores.fulltime.away']));
+ const rawStatus=String(pickField(e,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
+ const finished=/finished|finish|ended|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
+ if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
+ const ht=extractHalftimeScore(e);
+ return {available:true,source:'bsd',eventId:String(eventId),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
+}
+
 async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
   if(!API_KEY)return {available:false,error:'no_api_key'};
   const dateKey=(kickoffIso||'').slice(0,10)||new Date().toISOString().slice(0,10);
@@ -478,4 +492,4 @@ async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
   return {available:true,source:'bsd',eventId:getEventId(event),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch };
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId };
