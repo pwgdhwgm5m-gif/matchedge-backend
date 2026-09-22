@@ -106,6 +106,49 @@ function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg, co
   };
 }
 
+
+/**
+ * Match Dominance: possession is displayed separately and is deliberately a
+ * small bounded input here. The score blends independent live signal families
+ * rather than multiplying correlated statistics. Missing fields contribute
+ * zero weight instead of being fabricated.
+ */
+function calculateMatchDominance(homeStats, awayStats, context = {}) {
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const pair=(h,a,weight,parts)=>{
+    h=Number(h);a=Number(a);
+    if(!Number.isFinite(h)||!Number.isFinite(a)||h+a<=0)return;
+    const share=h/(h+a);
+    parts.home += share*weight;
+    parts.away += (1-share)*weight;
+    parts.weight += weight;
+  };
+  const p={home:0,away:0,weight:0};
+  // Chance quality / box pressure lead. Volume-only signals receive less weight.
+  pair(homeStats?.bigChances,awayStats?.bigChances,.24,p);
+  pair(homeStats?.shotsInsideBox,awayStats?.shotsInsideBox,.20,p);
+  pair(homeStats?.shotsOnTarget,awayStats?.shotsOnTarget,.20,p);
+  pair(homeStats?.dangerousAttacks,awayStats?.dangerousAttacks,.14,p);
+  pair(homeStats?.blockedShots,awayStats?.blockedShots,.08,p);
+  pair(homeStats?.corners,awayStats?.corners,.06,p);
+  pair(homeStats?.attacks,awayStats?.attacks,.03,p);
+  const ph=Number(context.possessionHome),pa=Number(context.possessionAway);
+  if(Number.isFinite(ph)&&Number.isFinite(pa)&&ph+pa>0) pair(ph,pa,.05,p);
+  if(!p.weight)return {home:null,away:null,available:false,confidence:0,label:null};
+  let home=p.home/p.weight,away=p.away/p.weight;
+  // Red cards alter the meaning of territorial pressure, but only with a
+  // bounded adjustment; they never override observed attacking evidence.
+  const hr=Math.max(0,Number(context.redCardsHome||0)),ar=Math.max(0,Number(context.redCardsAway||0));
+  if(hr){home*=Math.max(.72,1-.12*hr);away*=1+.06*hr}
+  if(ar){away*=Math.max(.72,1-.12*ar);home*=1+.06*ar}
+  const total=home+away; home=home/total*100; away=100-home;
+  const lead=Math.max(home,away), diff=Math.abs(home-away);
+  const label=diff<8?'balanced':diff<20?'slight':diff<35?'clear':'strong';
+  return {home:+home.toFixed(1),away:+away.toFixed(1),available:true,
+    confidence:Math.round(clamp(p.weight,0,1)*100),label,
+    leader:home>=away?'home':'away',lead:+lead.toFixed(1)};
+}
+
 /**
  * Canli value alert: mac sirasindaki guncel modelin, piyasa oranindan
  * anlamli sapip sapmadigini kontrol eder.
@@ -122,4 +165,4 @@ function checkLiveValueAlert(liveModelProbability, currentMarketOdds, threshold 
   };
 }
 
-module.exports = { estimateLiveXg, calculateMomentum, calculateGoalProximity, checkLiveValueAlert };
+module.exports = { estimateLiveXg, calculateMomentum, calculateGoalProximity, calculateMatchDominance, checkLiveValueAlert };
