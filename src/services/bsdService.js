@@ -174,6 +174,8 @@ function findMatchingEvent(events, homeTeam, awayTeam, kickoffIso) {
  */
 async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
   if (!API_KEY) return null;
+  const mapped=await fixtureIdentity.lookup({date:kickoffIso,home:homeTeam,away:awayTeam,provider:'bsd'}).catch(()=>null);
+  if(mapped?.id)return mapped.id;
 
   const dateKey = (kickoffIso || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
   const cacheKey = `bsd-resolve:${normalizeTeamName(homeTeam)}:${normalizeTeamName(awayTeam)}:${dateKey}`;
@@ -199,6 +201,12 @@ async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
   // Bulunduysa uzun sure (mac kimligi degismez), bulunamadiysa kisa sure
   // (BSD listesine birazdan dusebilir, tekrar denenebilsin) cache'leniyor.
   cache.set(cacheKey, eventId, eventId ? 60 * 60 * 6 : 5 * 60);
+  if(eventId){
+    let providerHome='',providerAway='';
+    const day=await getFootballEventsForDate(dateKey).catch(()=>({ok:false}));
+    if(day.ok){const e=extractList(day.data).find(x=>String(getEventId(x))===String(eventId));if(e){providerHome=getHomeTeamName(e)||'';providerAway=getAwayTeamName(e)||''}}
+    fixtureIdentity.remember({date:kickoffIso,home:homeTeam,away:awayTeam,provider:'bsd',id:eventId,providerHome,providerAway,confidence:providerHome&&providerAway?1:.85}).catch(()=>{});
+  }
   return eventId;
 }
 
