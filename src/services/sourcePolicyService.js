@@ -16,11 +16,22 @@ function policy(ctx={}){
   const core=resolve(ctx);
   return core ? {
     tier:'sportmonks-primary', sportmonks:true, sportmonksLeagueId:core.sportmonksId,
-    primary:'sportmonks', secondary:'bsd', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
-    rule:'SportMonks first in the six subscribed leagues; BSD is second field-level source; TheSportsDB/Football-Data supplement gaps. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated. Deduplicate correlated evidence before blending.'
+    primary:'sportmonks', secondary:'bsd',
+    fieldFallbacks:{
+      xg:['sportmonks','bsd-measured','thesportsdb'],
+      shotmap:['sportmonks','bsd'],
+      momentum:['sportmonks','bsd'],
+      matchStats:['sportmonks','bsd','thesportsdb'],
+      lineups:['sportmonks','bsd'],
+      h2h:['sportmonks','bsd','thesportsdb'],
+      predictions:['socceredge','bsd-comparison'],
+      corners:['sportmonks-history','bsd','local-model']
+    },
+    marketAnchorPrimary:'bsd-consensus', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
+    rule:'SportMonks remains first for subscribed league data. For fields SportMonks does not supply, use BSD before legacy fallbacks. BSD consensus is the preferred broad market anchor; The Odds API remains the executable bookmaker-price source for Value/EV because free BSD consensus is not a bettable bookmaker quote. Deduplicate correlated evidence before blending.'
   } : {
     tier:'non-sportmonks', sportmonks:false, sportmonksLeagueId:null,
-    primary:'bsd', secondary:'thesportsdb', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
+    primary:'bsd', secondary:'thesportsdb', marketAnchorPrimary:'bsd-consensus', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
     rule:'Outside the six subscribed leagues do not query SportMonks. Use BSD first, then TheSportsDB/Football-Data fallbacks. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated.'
   };
 }
