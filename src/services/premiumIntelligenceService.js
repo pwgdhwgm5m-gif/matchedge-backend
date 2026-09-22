@@ -154,7 +154,11 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     // it does not multiply probabilities or manufacture a larger edge.
     const uncertaintyBuffer=+(2+(1-item.evidenceReliability)*4).toFixed(1);
     item.valueThresholdPoints=uncertaintyBuffer;
-    const excludedFromTopPicks = item.key === 'shOver05';\n    const healthMarket=item.key==='bttsYes'||item.key==='bttsNo'?'btts':item.key==='under25'?'over25':item.key;\n    const degraded=healthGate&&(driftMarkets.has(healthMarket)||bucketMarkets.has(healthMarket));\n    item.isBettingValue=Boolean(!excludedFromTopPicks && !degraded && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);\n    item.topPickExclusion = excludedFromTopPicks ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : (degraded ? 'MODEL_HEALTH_GATE' : null);
+    const excludedFromTopPicks = item.key === 'shOver05';
+    const healthMarket=item.key==='bttsYes'||item.key==='bttsNo'?'btts':item.key==='under25'?'over25':item.key;
+    const degraded=healthGate&&(driftMarkets.has(healthMarket)||bucketMarkets.has(healthMarket));
+    item.isBettingValue=Boolean(!excludedFromTopPicks && !degraded && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
+    item.topPickExclusion = excludedFromTopPicks ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : (degraded ? 'MODEL_HEALTH_GATE' : null);
     item.valueScore=item.isBettingValue
       ? +(item.expectedValuePercent*.45 + item.edgePoints*.35 + item.evidenceReliability*20).toFixed(2)
       : null;
