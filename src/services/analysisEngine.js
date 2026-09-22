@@ -12,6 +12,7 @@ const modelCalibration = require('./modelCalibrationService');
 const accuracy = require('./accuracyEngineService');
 const footballDataOdds = require('./footballDataUpcomingOddsService');
 const sportmonks = require('./sportmonksService');
+const sourcePolicy = require('./sourcePolicyService');
 const powerRating = require('./powerRatingService');
 const predictionLedger = require('./predictionLedgerService');
 
@@ -22,6 +23,8 @@ const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 const SUPERLIG_LEAGUE_ID = '71';
 
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey }) {
+  const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
+  const useSportmonksPrimary = providerPolicy.sportmonks === true;
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
   const mappedTsdbLeagueId = leagueIdNum ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null;
@@ -263,6 +266,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // with a useful sample are allowed to nudge expected goals; bounds prevent
   // sparse/noisy provider data from dominating the established model.
   let sportmonksHistorical = null;
+  if (useSportmonksPrimary) {
   try {
     const liveIndex = await Promise.race([
       cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores()),
@@ -317,6 +321,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       }
     }
   } catch (_) {}
+  }
 
   // Final lambda regularization.
   // The upstream layers (form, defence weakness, motivation, Elo, xG/chance quality)
@@ -686,6 +691,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOddsSource: primaryMatchOdds ? 'existing-provider' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
+    sourcePolicy: providerPolicy,
     modelDiagnostics: {
       lambdas: { homeBase: homeLambdaBase, awayBase: awayLambdaBase, finalHome: homeLambda, finalAway: awayLambda },
       form: { home: homeForm, away: awayForm },
