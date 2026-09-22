@@ -44,7 +44,7 @@ router.get('/', async (req, res) => {
   // SportsMonks-first: one subscribed daily feed is the canonical fixture,
   // score and half-time source. Legacy providers are used only when a
   // SportMonks match is unavailable; they never overwrite SportMonks data.
-  const [turkeySmResult, smResult, legacyResult, verifiedResult, supplemental] = await Promise.all([
+  const [turkeySmResult, smResult, legacyResult, verifiedResult, supplemental, bsdResult] = await Promise.all([
     cache.getOrFetch(`sportmonks:tr:600:${date}`, config.cache.ttlLive, () => sportmonks.getLeagueFixturesByDate(date, 600)),
     Promise.race([
       cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
@@ -52,7 +52,8 @@ router.get('/', async (req, res) => {
     ]),
     cache.getOrFetch(`results:${date}`, config.cache.ttlLive, () => sportsDb.getMatchesByDate(date)),
     cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
-    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date))
+    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
+    cache.getOrFetch(`bsd:results:${date}`, 300, () => bsdService.getResultMatchesForDate(date))
   ]);
 
   console.log('[results:sportmonks:turkey]', JSON.stringify({
@@ -79,6 +80,12 @@ router.get('/', async (req, res) => {
   const supplementalMatches = Array.isArray(supplemental)
     ? supplemental : (Array.isArray(supplemental?.matches) ? supplemental.matches : []);
   simplified = cupFixtures.mergeUnique(simplified, supplementalMatches);
+
+  // BSD is the broad result fallback, especially for cups/lower leagues that
+  // are outside the six SportMonks subscriptions. SportMonks rows stay first
+  // and therefore authoritative when the same fixture exists in both feeds.
+  const bsdMatches = bsdResult?.ok && Array.isArray(bsdResult.matches) ? bsdResult.matches : [];
+  simplified = cupFixtures.mergeUnique(simplified, bsdMatches);
 
   // football-data.org is fallback verification only for matches that did not
   // arrive from SportMonks.
@@ -115,7 +122,8 @@ router.get('/', async (req, res) => {
     matches: simplified,
     primarySource: (turkeySmResult?.ok || smResult?.ok) ? 'sportmonks' : 'fallback',
     sportmonksCount: sportmonksMatches.length,
-    fallbackCount: Math.max(0, simplified.length - sportmonksMatches.length)
+    fallbackCount: Math.max(0, simplified.length - sportmonksMatches.length),
+    bsdCount: bsdMatches.length
   });
 });
 module.exports = router;
