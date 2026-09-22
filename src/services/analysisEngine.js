@@ -423,6 +423,16 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const matchProbabilities = shrink3(calibratedMatchProbabilities);
   let marketProbabilities = shrinkBinary(calibratedMarketProbabilities,'over25GoalsPercent');
   marketProbabilities = shrinkBinary(marketProbabilities,'bttsPercent');
+  // New team/total scoring markets use the same evidence-strength guard until
+  // each market has enough settled history for its own learned calibration.
+  const shrinkPercent = p => Number.isFinite(Number(p)) ? +(50 + Math.max(.30,Math.min(1,evidenceStrength))*(Number(p)-50)).toFixed(1) : p;
+  if (marketProbabilities.totalGoals) {
+    marketProbabilities.totalGoals=Object.fromEntries(Object.entries(marketProbabilities.totalGoals).map(([line,v])=>[line,{over:shrinkPercent(v.over),under:shrinkPercent(v.under)}]));
+  }
+  if (marketProbabilities.teamGoals) {
+    marketProbabilities.teamGoals=Object.fromEntries(Object.entries(marketProbabilities.teamGoals).map(([side,lines])=>[side,Object.fromEntries(Object.entries(lines).map(([line,v])=>[line,{over:shrinkPercent(v.over),under:shrinkPercent(v.under)}]))]));
+  }
+  if (marketProbabilities.scoring) marketProbabilities.scoring={home:shrinkPercent(marketProbabilities.scoring.home),away:shrinkPercent(marketProbabilities.scoring.away)};
   const cornerProjection = accuracy.cornerProjection(homeAdvanced, awayAdvanced);
   const smHome = sportmonksHistorical?.home;
   const smAway = sportmonksHistorical?.away;
