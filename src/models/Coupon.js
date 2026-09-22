@@ -11,7 +11,7 @@ const selectionSchema = new mongoose.Schema({
 const legSchema = new mongoose.Schema({
   fixtureId:{type:String,required:true}, homeTeam:{type:String,required:true}, awayTeam:{type:String,required:true},
   league:{type:String,default:''}, kickoff:{type:Date,default:null}, matchDate:{type:String,default:null},
-  selection:{type:selectionSchema,required:true}, finalScore:{home:Number,away:Number}
+  selection:{type:selectionSchema,required:true}, providerIds:{sportsdb:String,sportmonks:String,bsd:String,footballData:String}, finalScore:{home:Number,away:Number}
 },{_id:false});
 
 const couponSchema = new mongoose.Schema({
