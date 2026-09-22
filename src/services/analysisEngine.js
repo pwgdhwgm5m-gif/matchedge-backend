@@ -458,10 +458,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     smExpectedAway = +(baseAway * Math.max(.90, Math.min(1.10, cornerPressure(aa)))).toFixed(2);
   }
   const cornerMetrics = smCornerReady
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', expectedHome:smExpectedHome, expectedAway:smExpectedAway })
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', expectedHome:smExpectedHome, expectedAway:smExpectedAway, lowEvidence:Math.min(smHome.sample,smAway.sample)<8 })
     : cornerProjection
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample })
-    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'league-prior-bounded-tempo', lowEvidence:true });
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample, source:'historical-corners', lowEvidence:Number(cornerProjection.sample||0)<8 })
+    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { sample:0, source: 'league-prior-bounded-tempo', lowEvidence:true });
   const halfEvidence = (() => {
     if (!sportmonksHistorical) return null;
     const H=sportmonksHistorical.home?.averages||{}, A=sportmonksHistorical.away?.averages||{};
