@@ -478,7 +478,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       awaySample:sportmonksHistorical.away?.sample||0
     };
   })();
-  const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda, halfEvidence);
+  let halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda, halfEvidence);
+  const calibratedHalf = await modelCalibration.applyHalf({league:leagueName || String(league || ''),half:halfMarkets});
+  halfMarkets = calibratedHalf.half;
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
@@ -602,7 +604,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     modelOnlyProbabilities: matchProbabilities,
     rawModelProbabilities: rawMatchProbabilities,
     rawMarketProbabilities,
-    calibrationApplied: calibrated.applied,
+    calibrationApplied: [...(calibrated.applied||[]),...(calibratedHalf.applied||[])],
     calibrationVersion: calibrated.calibrationVersion || modelCalibration.CALIBRATION_VERSION,
       confidenceShrinkage: { evidenceStrength:+evidenceStrength.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample, dataHealthScore },
     marketImpliedProbabilities,
