@@ -12,6 +12,18 @@ function resolve({leagueName,sportKey}={}){
   const n=norm(leagueName), sk=String(sportKey||'').trim();
   return SPORTMONKS_PRIMARY.find(x=>x.oddsKey===sk||x.names.some(name=>n===norm(name)))||null;
 }
+function isBsdCoreLeague({leagueName,country}={}){
+  const n=norm(leagueName), c=norm(country);
+  const rules=[
+    {names:['premier league'],countries:['england','united kingdom','uk']},
+    {names:['la liga','laliga'],countries:['spain']},
+    {names:['bundesliga'],countries:['germany']},
+    {names:['serie a'],countries:['italy']},
+    {names:['ligue 1','ligue one'],countries:['france']},
+    {names:['turkish super lig','super lig','süper lig'],countries:['turkey','turkiye']}
+  ];
+  return rules.some(r=>r.names.some(x=>n===norm(x)) && (!c || r.countries.some(x=>c===norm(x))));
+}
 function policy(ctx={}){
   const core=resolve(ctx);
   return core ? {
@@ -35,4 +47,4 @@ function policy(ctx={}){
     rule:'Outside the six subscribed leagues do not query SportMonks. Use BSD first, then TheSportsDB/Football-Data fallbacks. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated.'
   };
 }
-module.exports={SPORTMONKS_PRIMARY,resolve,policy};
+module.exports={SPORTMONKS_PRIMARY,resolve,isBsdCoreLeague,policy};
