@@ -24,6 +24,12 @@ const quickBound = (promise, fallback, ms = 2500) => Promise.race([
  * canli gorunebiliyordu). V2 basarisiz olursa eski yontem yedek olarak devrede.
  */
 router.get('/', async (req, res) => {
+  // BSD is the canonical live source outside the six subscribed SportMonks
+  // leagues. Fetch it in parallel so lower-league/cup clocks are not lost.
+  const bsdLivePromise = quickBound(
+    cache.getOrFetch('bsd:live:canonical', 20, () => bsdService.getLiveFootballEvents()),
+    {ok:false,error:'bsd_live_timeout'}
+  );
   const liveResult = await quickBound(
     cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
     { ok:false, error:'live_lookup_timeout' }
@@ -71,7 +77,19 @@ router.get('/', async (req, res) => {
         }
       }
     }));
-    return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore' });
+    const bsdLive=await bsdLivePromise;
+    if(bsdLive.ok){
+      const registry=await bsdService.getLeagueRegistry().catch(()=>({ok:false,map:{}}));
+      const rows=bsdService.extractList ? bsdService.extractList(bsdLive.data) : (bsdLive.data?.results||bsdLive.data?.data||[]);
+      const existing=new Set(simplified.map(m=>String(m.homeTeam||'').toLowerCase()+'|'+String(m.awayTeam||'').toLowerCase()));
+      for(const e of rows){
+        const m=bsdService.eventToResultMatch ? bsdService.eventToResultMatch(e) : null;
+        if(!m?.homeTeam||!m?.awayTeam)continue;
+        const k=String(m.homeTeam).toLowerCase()+'|'+String(m.awayTeam).toLowerCase();
+        if(!existing.has(k)){ simplified.push(m); existing.add(k); }
+      }
+    }
+    return res.json({ matches: simplified, fromCache: liveResult.fromCache, source: 'livescore+bsd' });
   }
 
   // --- Fallback: eski yontem ---
