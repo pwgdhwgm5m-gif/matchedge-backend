@@ -461,7 +461,24 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     : cornerProjection
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample })
     : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'league-prior-bounded-tempo', lowEvidence:true });
-  const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda);
+  const halfEvidence = (() => {
+    if (!sportmonksHistorical) return null;
+    const H=sportmonksHistorical.home?.averages||{}, A=sportmonksHistorical.away?.averages||{};
+    const avg=(x,y)=>Number.isFinite(x)&&Number.isFinite(y)?(x+y)/2:(Number.isFinite(x)?x:(Number.isFinite(y)?y:null));
+    const homeFirst=avg(H.firstHalfScored,A.firstHalfConceded);
+    const homeSecond=avg(H.secondHalfScored,A.secondHalfConceded);
+    const awayFirst=avg(A.firstHalfScored,H.firstHalfConceded);
+    const awaySecond=avg(A.secondHalfScored,H.secondHalfConceded);
+    if (![homeFirst,homeSecond,awayFirst,awaySecond].some(Number.isFinite)) return null;
+    return {
+      source:'sportmonks-verified-halftime',
+      homeFirstRate:homeFirst, homeSecondRate:homeSecond,
+      awayFirstRate:awayFirst, awaySecondRate:awaySecond,
+      homeSample:sportmonksHistorical.home?.sample||0,
+      awaySample:sportmonksHistorical.away?.sample||0
+    };
+  })();
+  const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda, halfEvidence);
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
