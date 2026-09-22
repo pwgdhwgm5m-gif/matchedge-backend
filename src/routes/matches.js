@@ -2,61 +2,41 @@ const express = require('express');
 const router = express.Router();
 const cache = require('../utils/cache');
 const config = require('../config/config');
-const sportsDb = require('../services/sportsDbService');
-const cupFixtures = require('../services/cupFixtureService');
-const oddsApi = require('../services/oddsApiService');
+const sportmonks = require('../services/sportmonksService');
+const bsdService = require('../services/bsdService');
+const sourcePolicy = require('../services/sourcePolicyService');
 
-/** GET /api/matches?date=2026-09-16 */
-router.get('/', async (req, res) => {
-  const date = req.query.date || new Date().toISOString().split('T')[0];
-
-  // NOT: fikstur listesi (eventsday.php, 15dk cache) ile gercek zamanli
-  // livescore AYNI ANDA cekiliyor - canli maclarin skoru/dakikasi guncel
-  // livescore kaynagiyla "bindiriliyor" (bkz. results.js'deki ayni desen /
-  // sportsDbService.applyLiveOverlay). Aksi halde bugunun listesindeki canli
-  // bir mac, uzun cache suresi boyunca eski skorla kalabiliyordu.
-  const [result, liveResult, supplemental, oddsEvents] = await Promise.all([
-    cache.getOrFetch(
-      `fixtures:${date}`,
-      config.cache.ttlStatic,
-      () => sportsDb.getMatchesByDate(date)
-    ),
-    cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores()),
-    cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
-    cache.getOrFetch(`odds-events:${date}`, config.cache.ttlStatic, () => oddsApi.getFixtureEventsByDate(date)),
+/** GET /api/matches?date=2026-09-16
+ * Canonical ownership: six subscribed leagues => SportMonks; all other
+ * competitions => BSD v2. The fixture identity returned here is the same
+ * identity used by results, analysis evidence resolution and coupon grading.
+ */
+router.get('/', async (req,res)=>{
+  const date=req.query.date||new Date().toISOString().split('T')[0];
+  const [turkeySmResult,smResult,bsdResult]=await Promise.all([
+    cache.getOrFetch(`sportmonks:tr:600:${date}`,config.cache.ttlLive,()=>sportmonks.getLeagueFixturesByDate(date,600)),
+    Promise.race([
+      cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),
+      new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'sportmonks_date_timeout'}),5000))
+    ]),
+    cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date))
   ]);
-
-  const rawEvents = result && result.ok ? (result.data?.events || []) : [];
-  let simplified = rawEvents
-    .map(sportsDb.transformEvent)
-    .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
-
-  // cupFixtureService dizi dondurur; eski kod bunu {ok,matches} sanip
-  // supplemental fiksturleri sessizce atiyordu.
-  const supplementalMatches = Array.isArray(supplemental)
-    ? supplemental
-    : (Array.isArray(supplemental?.matches) ? supplemental.matches : []);
-  simplified = cupFixtures.mergeUnique(simplified, supplementalMatches);
-
-  // TheSportsDB hata verirse veya whitelist sonrasi liste bos kalirsa,
-  // kota harcamayan The Odds API /events verisini fikstur fallback'i olarak kullan.
-  // The Odds API request is already part of Promise.all above. Reuse that
-  // result instead of making a second request when TheSportsDB is unavailable.
-  // This keeps fixtures available during provider outages and avoids needless
-  // quota use / duplicate upstream calls.
-  if (simplified.length===0 && (!result || !result.ok)) {
-    if(oddsEvents?.ok&&Array.isArray(oddsEvents.matches)) simplified=oddsEvents.matches;
+  const smRaw=[...(turkeySmResult?.ok?turkeySmResult.fixtures:[]),...(smResult?.ok?smResult.fixtures:[])];
+  const smUnique=new Map();
+  for(const f of smRaw){
+    if(!sourcePolicy.resolve({leagueName:f.leagueName||f.league||''}))continue;
+    smUnique.set(String(f.sportmonksId||f.fixtureId),f);
   }
-  if (simplified.length===0 && (!result||!result.ok) && (!oddsEvents||!oddsEvents.ok)) return res.status(502).json({error:'Fikstur verisi alinamadi'});
-
-  if (liveResult.ok) {
-    const rawLive = (liveResult.data?.livescore || []).filter(
-      e => String(e.strSport || '').toLowerCase() === 'soccer'
-    );
-    simplified = sportsDb.applyLiveOverlay(simplified, rawLive);
-  }
-
-  res.json({ date, matches: simplified, fromCache: !!result?.fromCache });
+  const sm=sportmonks.toResultMatches([...smUnique.values()]).map(m=>({
+    ...m,canonicalProvider:'sportmonks',
+    providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}
+  }));
+  const bsd=(bsdResult?.ok?bsdResult.matches:[]).filter(m=>!sourcePolicy.resolve({leagueName:m.league})).map(m=>({
+    ...m,canonicalProvider:'bsd',
+    providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
+  }));
+  const matches=[...sm,...bsd].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  if(!matches.length&&!smResult?.ok&&!turkeySmResult?.ok&&!bsdResult?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
+  res.json({date,matches,canonicalPolicy:'sportmonks-6-else-bsd',sportmonksCount:sm.length,bsdCount:bsd.length});
 });
-
-module.exports = router;
+module.exports=router;
