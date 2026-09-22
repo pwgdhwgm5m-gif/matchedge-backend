@@ -457,11 +457,30 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     smExpectedHome = +(baseHome * Math.max(.90, Math.min(1.10, cornerPressure(ha)))).toFixed(2);
     smExpectedAway = +(baseAway * Math.max(.90, Math.min(1.10, cornerPressure(aa)))).toFixed(2);
   }
-  const cornerMetrics = smCornerReady
+  let cornerMetrics = smCornerReady
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', expectedHome:smExpectedHome, expectedAway:smExpectedAway, lowEvidence:Math.min(smHome.sample,smAway.sample)<8 })
     : cornerProjection
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample, source:'historical-corners', lowEvidence:Number(cornerProjection.sample||0)<8 })
     : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { sample:0, source: 'league-prior-bounded-tempo', lowEvidence:true });
+
+  // Corner percentages need their own evidence shrinkage. A Poisson projection
+  // from a league prior is not match-specific evidence and must not look like a
+  // confident 65-70% call. Real historical samples progressively earn back the
+  // model probability; sparse/fallback projections stay close to 50/50.
+  {
+    const n=Math.max(0,Number(cornerMetrics.sample||0));
+    const realHistory=cornerMetrics.source==='sportmonks-history-pressure'||cornerMetrics.source==='historical-corners';
+    const cornerEvidence=realHistory ? Math.max(.18,Math.min(1,n/16)) : .12;
+    const shrinkCorner=p=>Number.isFinite(Number(p))?+(50+cornerEvidence*(Number(p)-50)).toFixed(1):p;
+    const over85=shrinkCorner(cornerMetrics.over85Percent);
+    const over95=shrinkCorner(cornerMetrics.over95Percent);
+    cornerMetrics={...cornerMetrics,
+      rawOver85Percent:cornerMetrics.over85Percent,rawOver95Percent:cornerMetrics.over95Percent,
+      over85Percent:over85,over95Percent:over95,
+      under95Percent:Number.isFinite(over95)?+(100-over95).toFixed(1):cornerMetrics.under95Percent,
+      evidenceReliability:+cornerEvidence.toFixed(3)
+    };
+  }
   const halfEvidence = (() => {
     if (!sportmonksHistorical) return null;
     const H=sportmonksHistorical.home?.averages||{}, A=sportmonksHistorical.away?.averages||{};
