@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/authMiddleware');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const sportmonks = require('../services/sportmonksService');
+const bsdService = require('../services/bsdService');
 const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require('../services/gamificationService');
 
 const router = express.Router();
@@ -118,6 +119,11 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam){
     m=fallback.find(x=>String(x.fixtureId)===String(fixtureId))||fallback.find(x=>teamPairMatch(x,homeTeam,awayTeam));
     if(finalMatch(m))return {source:'fallback',match:m,date};
   }
+  // Lower-league/cup fixtures are sometimes removed from TheSportsDB compact
+  // day/direct feeds after FT. BSD is already our primary non-SportMonks
+  // football source, so use its finished event as the final score fallback.
+  const bsd=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,matchDate+'T12:00:00Z').catch(()=>({available:false}));
+  if(bsd.available)return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
   return {source:null,match:null};
 }
 
