@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { buildPremiumIntelligence, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
 const { calculateHalfMarkets, calculateMarketProbabilities, estimateCornerMetrics } = require('../src/services/poissonService');
+const { calculateMatchDominance } = require('../src/services/liveXgService');
 
 const strong = buildPremiumIntelligence({
   modelProbabilities: { homeWinProbability: 60, drawProbability: 23, awayWinProbability: 17 },
@@ -125,3 +126,22 @@ assert.equal(noValueBoard.best,null);
 assert.equal(noValueBoard.selectionPolicy.noBetWhenEmpty,true);
 assert.ok(!noValueBoard.allMarkets.find(x=>x.key==='shOver05').isBettingValue);
 console.log('NO BET and high-base-rate guard tests passed');
+
+
+const dominance = calculateMatchDominance(
+  {shotsOnTarget:6,bigChances:3,shotsInsideBox:9,dangerousAttacks:42,corners:5,blockedShots:4,attacks:58},
+  {shotsOnTarget:2,bigChances:1,shotsInsideBox:4,dangerousAttacks:30,corners:3,blockedShots:2,attacks:50},
+  {possessionHome:43,possessionAway:57}
+);
+assert.equal(dominance.available,true);
+assert.ok(dominance.home>dominance.away);
+assert.ok(dominance.home>55);
+const possessionOnly = calculateMatchDominance(
+  {shotsOnTarget:null,bigChances:null,shotsInsideBox:null,dangerousAttacks:null,corners:null,blockedShots:null,attacks:null},
+  {shotsOnTarget:null,bigChances:null,shotsInsideBox:null,dangerousAttacks:null,corners:null,blockedShots:null,attacks:null},
+  {possessionHome:70,possessionAway:30}
+);
+assert.equal(possessionOnly.available,true);
+assert.equal(possessionOnly.confidence,5);
+assert.equal(calculateMatchDominance({}, {}, {}).available,false);
+console.log('live match dominance tests passed');
