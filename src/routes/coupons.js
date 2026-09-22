@@ -22,17 +22,31 @@ const CORNER_KEYS = new Set(['cornersOver95','cornersUnder95','cornersOver85','c
 const CORNER_SETTLEMENT_LEAGUES = new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
 function couponLeagueKey(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ü/g,'u').replace(/[^a-z0-9]+/g,' ').trim().replace(/^super lig$/,'turkish super lig')}
 function cornerCouponSupported(league){return CORNER_SETTLEMENT_LEAGUES.has(couponLeagueKey(league))}
-const ALLOWED_KEYS = new Set(['home', 'draw', 'away', 'over25', 'under25', 'bttsYes', 'bttsNo', 'cornersOver95', 'cornersUnder95', 'cornersOver85', 'cornersUnder85', 'fhHome', 'fhDraw', 'fhAway', 'shHome', 'shDraw', 'shAway', 'mostGoalsFirst', 'mostGoalsEqual', 'mostGoalsSecond', 'homeOver05', 'homeOver15', 'homeOver25', 'homeOver35', 'awayOver05', 'awayOver15', 'awayOver25', 'awayOver35']);
+const ALLOWED_KEYS = new Set([
+  'home','draw','away',
+  'over15','over25','under25','over35','under35',
+  'bttsYes','bttsNo',
+  'homeScores','awayScores','homeOver15','homeOver25','homeOver35','awayOver15','awayOver25','awayOver35',
+  'cornersOver95','cornersUnder95','cornersOver85','cornersUnder85',
+  'fhHome','fhDraw','fhAway','fhHomeScores','fhAwayScores','fhOver05',
+  'shHome','shDraw','shAway','shHomeScores','shAwayScores','shOver05',
+  'mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'
+]);
 
 function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   const total = home + away;
   if (key === 'home') return home > away ? 'won' : 'lost';
   if (key === 'draw') return home === away ? 'won' : 'lost';
   if (key === 'away') return away > home ? 'won' : 'lost';
+  if (key === 'over15') return total > 1.5 ? 'won' : 'lost';
   if (key === 'over25') return total > 2.5 ? 'won' : 'lost';
   if (key === 'under25') return total < 2.5 ? 'won' : 'lost';
+  if (key === 'over35') return total > 3.5 ? 'won' : 'lost';
+  if (key === 'under35') return total < 3.5 ? 'won' : 'lost';
   if (key === 'bttsYes') return home > 0 && away > 0 ? 'won' : 'lost';
   if (key === 'bttsNo') return home === 0 || away === 0 ? 'won' : 'lost';
+  if (key === 'homeScores') return home >= 1 ? 'won' : 'lost';
+  if (key === 'awayScores') return away >= 1 ? 'won' : 'lost';
   if (key === 'homeOver05') return home >= 1 ? 'won' : 'lost';
   if (key === 'homeOver15') return home >= 2 ? 'won' : 'lost';
   if (key === 'homeOver25') return home >= 3 ? 'won' : 'lost';
@@ -52,11 +66,17 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   if (key === 'fhHome') return halftimeHome > halftimeAway ? 'won' : 'lost';
   if (key === 'fhDraw') return halftimeHome === halftimeAway ? 'won' : 'lost';
   if (key === 'fhAway') return halftimeAway > halftimeHome ? 'won' : 'lost';
+  if (key === 'fhHomeScores') return halftimeHome >= 1 ? 'won' : 'lost';
+  if (key === 'fhAwayScores') return halftimeAway >= 1 ? 'won' : 'lost';
+  if (key === 'fhOver05') return firstGoals >= 1 ? 'won' : 'lost';
   if (key === 'shHome') return secondHome > secondAway ? 'won' : 'lost';
   if (key === 'shDraw') return secondHome === secondAway ? 'won' : 'lost';
   if (key === 'shAway') return secondAway > secondHome ? 'won' : 'lost';
   const firstGoals = halftimeHome + halftimeAway;
   const secondGoals = secondHome + secondAway;
+  if (key === 'shHomeScores') return secondHome >= 1 ? 'won' : 'lost';
+  if (key === 'shAwayScores') return secondAway >= 1 ? 'won' : 'lost';
+  if (key === 'shOver05') return secondGoals >= 1 ? 'won' : 'lost';
   if (key === 'mostGoalsFirst') return firstGoals > secondGoals ? 'won' : 'lost';
   if (key === 'mostGoalsEqual') return firstGoals === secondGoals ? 'won' : 'lost';
   if (key === 'mostGoalsSecond') return secondGoals > firstGoals ? 'won' : 'lost';
@@ -65,7 +85,7 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
 
 function settleSelectionWithAvailableData(key,home,away,corners,halftimeHome,halftimeAway){
   const needsCorners=String(key||'').startsWith('corners');
-  const needsHalftime=['fhHome','fhDraw','fhAway','shHome','shDraw','shAway','mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'].includes(key);
+  const needsHalftime=['fhHome','fhDraw','fhAway','fhHomeScores','fhAwayScores','fhOver05','shHome','shDraw','shAway','shHomeScores','shAwayScores','shOver05','mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'].includes(key);
   if(needsCorners&&corners==null)return 'pending';
   if(needsHalftime&&(halftimeHome==null||halftimeAway==null))return 'pending';
   return settleSelection(key,home,away,corners,halftimeHome,halftimeAway);
