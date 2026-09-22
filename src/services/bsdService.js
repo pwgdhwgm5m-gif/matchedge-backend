@@ -403,6 +403,7 @@ function eventToResultMatch(e) {
     league:String(e.__soccerEdgeLeagueName||pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','competition','league.title','league','tournament.name','tournament_name'])||''),
     leagueId:String(pickField(e,['league.id','league_id','competition.id','competition_id'])||''),
     statusShort:finished?'FT':(live?String(pickField(e,['status_short','state.short_name','status'])||'LIVE').toUpperCase():'NS'),
+    minute:(()=>{const v=pickField(e,['minute','elapsed','time.elapsed','timer.minute','clock.minute','match_minute']);const n=Number(String(v??'').replace(/[^0-9.]/g,''));return Number.isFinite(n)&&n>0?n:null;})(),
     isLive:live,
     source:'bsd'
   };
