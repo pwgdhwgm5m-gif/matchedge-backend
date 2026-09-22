@@ -182,6 +182,45 @@ function multiclass1x2Metrics(rows){
  }
  return {count:n,rps:n?+(rps/n).toFixed(4):null,multiclassLogLoss:n?+(ll/n).toFixed(4):null};
 }
+function wilson(successes,n,z=1.96){
+ if(!n)return {low:null,high:null};
+ const p=successes/n,zz=z*z,den=1+zz/n;
+ const center=(p+zz/(2*n))/den;
+ const margin=z*Math.sqrt((p*(1-p)+zz/(4*n))/n)/den;
+ return {low:+(100*Math.max(0,center-margin)).toFixed(1),high:+(100*Math.min(1,center+margin)).toFixed(1)};
+}
+function probabilityBuckets(predictions){
+ const buckets=new Map();
+ for(const p of predictions)for(const [market,prob] of Object.entries(p.probabilities||{})){
+  const y=p.actual?.[market];if(!Number.isFinite(prob)||![0,1].includes(y))continue;
+  const lo=Math.min(90,Math.floor(prob*10)*10),key=market+':'+lo;
+  if(!buckets.has(key))buckets.set(key,{market,from:lo,to:lo===90?100:lo+10,n:0,pred:0,hits:0});
+  const b=buckets.get(key);b.n++;b.pred+=prob;b.hits+=y;
+ }
+ return [...buckets.values()].map(b=>{const ci=wilson(b.hits,b.n);const predicted=100*b.pred/b.n,observed=100*b.hits/b.n;return {...b,predictedPercent:+predicted.toFixed(1),observedPercent:+observed.toFixed(1),gapPercent:+(predicted-observed).toFixed(1),wilson95:ci,readiness:b.n<20?'collecting':b.n<50?'early-signal':'usable'};});
+}
+function driftFlags(predictions){
+ const byMarket={};
+ for(const p of predictions)for(const [market,prob] of Object.entries(p.probabilities||{})){
+  const y=p.actual?.[market];if(!Number.isFinite(prob)||![0,1].includes(y))continue;
+  (byMarket[market]||(byMarket[market]=[])).push({p:prob,y,kickoff:p.kickoff});
+ }
+ const flags=[];
+ for(const [market,rows] of Object.entries(byMarket)){
+  if(rows.length<60)continue;rows.sort((a,b)=>new Date(a.kickoff)-new Date(b.kickoff));
+  const recent=rows.slice(-30),baseline=rows.slice(0,-30);if(baseline.length<30)continue;
+  const score=xs=>{let b=0,ll=0,p=0,a=0;for(const r of xs){const q=Math.max(.001,Math.min(.999,r.p));b+=(q-r.y)**2;ll+=-(r.y*Math.log(q)+(1-r.y)*Math.log(1-q));p+=q;a+=r.y}return {brier:b/xs.length,logLoss:ll/xs.length,gap:Math.abs(p-a)/xs.length};};
+  const base=score(baseline),now=score(recent);
+  const brierWorse=base.brier>0?(now.brier-base.brier)/base.brier:0;
+  const gapWorse=now.gap-base.gap;
+  if(brierWorse>=.15||gapWorse>=.07)flags.push({market,recentCount:recent.length,baselineCount:baseline.length,severity:brierWorse>=.25||gapWorse>=.12?'high':'watch',baselineBrier:+base.brier.toFixed(4),recentBrier:+now.brier.toFixed(4),brierWorseningPercent:+(100*brierWorse).toFixed(1),baselineGapPercent:+(100*base.gap).toFixed(1),recentGapPercent:+(100*now.gap).toFixed(1)});
+ }
+ return flags;
+}
+async function calibrationHealth(){
+ const rows=await Prediction.find({status:'settled',modelVersion:VERSION}).sort({kickoff:1}).select('league probabilities actual kickoff calibrationVersion selectionVersion').lean();
+ return {modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets:probabilityBuckets(rows),drift:driftFlags(rows),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
+}
 async function pairedAudit(){
  const rows=await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities comparisonProbabilities actual kickoff').lean();
  const current=metricRows(rows);
@@ -298,4 +337,4 @@ async function reportCard(fixtureId){
  return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
-module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, VERSION, SELECTION_VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, calibrationHealth, VERSION, SELECTION_VERSION };
