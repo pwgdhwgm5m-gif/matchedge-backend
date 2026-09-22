@@ -99,6 +99,13 @@ function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase
 const SPORTMONKS_RESULT_LEAGUES=new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
 function sportmonksResultLeague(league){return SPORTMONKS_RESULT_LEAGUES.has(couponLeagueKey(league))}
 async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff){
+  // Use the exact same BSD v2 finished-results pool that powers the scoreboard.
+  // This prevents a match being visible as FT in Results while remaining pending in a coupon.
+  const pool=await bsdService.getResultMatchesForDate(matchDate).catch(()=>({ok:false,matches:[]}));
+  if(pool.ok){
+    const hit=(pool.matches||[]).find(m=>teamPairMatch(m,homeTeam,awayTeam));
+    if(hit&&finalMatch(hit)) return {source:'bsd-results-pool',match:hit,date:matchDate};
+  }
   let bsdId=providerIds.bsd||mappedIds.bsd||null;
   if(!bsdId) bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>null);
   let bsd=bsdId?await bsdService.getFinalResultByEventId?.(bsdId).catch(()=>({available:false})):null;
