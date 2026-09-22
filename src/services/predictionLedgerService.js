@@ -3,6 +3,7 @@ const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
 const sportmonks = require('./sportmonksService');
 const VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
+const SELECTION_VERSION = 'top-picks-value-v2';
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
   const m = a.modelOnlyProbabilities || {};
@@ -28,7 +29,7 @@ async function capture(a, fixture) {
   const result = await Prediction.updateOne(
     { fixtureId: String(fixture.fixtureId), modelVersion: VERSION },
     { $setOnInsert: {
-      fixtureId: String(fixture.fixtureId), modelVersion: VERSION, kickoff,
+      fixtureId: String(fixture.fixtureId), modelVersion: VERSION, calibrationVersion:a.calibrationVersion||null, selectionVersion:SELECTION_VERSION, kickoff,
       league: fixture.league || '', homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
       homeTeamId: fixture.homeTeamId || fixture.homeId || null, awayTeamId: fixture.awayTeamId || fixture.awayId || null,
       capturedAt: new Date(), homeLambda: a.homeLambda, awayLambda: a.awayLambda,
@@ -161,13 +162,26 @@ async function walkForwardAudit(){
  const predictions=await Prediction.find({status:'settled'}).sort({kickoff:1}).select('modelVersion league probabilities rawProbabilities actual kickoff').lean();
  const byVersion={};
  for(const p of predictions){if(!byVersion[p.modelVersion])byVersion[p.modelVersion]=[];byVersion[p.modelVersion].push(p);}
- const versions=Object.entries(byVersion).map(([version,rows])=>({version,snapshots:rows.length,metrics:metricRows(rows)}));
+ const versions=Object.entries(byVersion).map(([version,rows])=>({version,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),metrics:metricRows(rows)}));
  const bias=[];
  for(const row of metricRows(predictions)){if(row.count<20)continue;const gap=+(row.predictedPercent-row.actualPercent).toFixed(1);if(Math.abs(gap)>=5)bias.push({league:row.league,market:row.market,count:row.count,gapPercent:gap,direction:gap>0?'overprediction':'underprediction',ece:row.ece});}
- return {version:VERSION,totalSnapshots:predictions.length,versions,biasFlags:bias.sort((a,b)=>Math.abs(b.gapPercent)-Math.abs(a.gapPercent))};
+ return {version:VERSION,totalSnapshots:predictions.length,oneXTwo:multiclass1x2Metrics(predictions),versions,biasFlags:bias.sort((a,b)=>Math.abs(b.gapPercent)-Math.abs(a.gapPercent))};
 }
 
 
+function multiclass1x2Metrics(rows){
+ let n=0,rps=0,ll=0;
+ for(const p of rows){
+  const h=Number(p.probabilities?.home),d=Number(p.probabilities?.draw),a=Number(p.probabilities?.away);
+  const y=[p.actual?.home,p.actual?.draw,p.actual?.away];
+  if(![h,d,a].every(Number.isFinite)||y.filter(x=>x===1).length!==1)continue;
+  const sum=h+d+a;if(sum<=0)continue;const q=[h/sum,d/sum,a/sum];
+  const cq=[q[0],q[0]+q[1]],cy=[y[0],y[0]+y[1]];
+  rps+=((cq[0]-cy[0])**2+(cq[1]-cy[1])**2)/2;
+  const idx=y.findIndex(x=>x===1);ll+=-Math.log(Math.max(.001,q[idx]));n++;
+ }
+ return {count:n,rps:n?+(rps/n).toFixed(4):null,multiclassLogLoss:n?+(ll/n).toFixed(4):null};
+}
 async function pairedAudit(){
  const rows=await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities comparisonProbabilities actual kickoff').lean();
  const current=metricRows(rows);
@@ -284,4 +298,4 @@ async function reportCard(fixtureId){
  return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
-module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, VERSION, SELECTION_VERSION };
