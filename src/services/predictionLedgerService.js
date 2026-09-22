@@ -11,6 +11,12 @@ function probabilities(a) {
     home: percent(m.homeWinProbability), draw: percent(m.drawProbability),
     away: percent(m.awayWinProbability), over25: percent(g.over25GoalsPercent),
     btts: percent(g.bttsPercent),
+    fhHomeScores: percent(a.halfMarkets?.firstHalf?.homeScores),
+    fhAwayScores: percent(a.halfMarkets?.firstHalf?.awayScores),
+    fhOver05: percent(a.halfMarkets?.firstHalf?.over05),
+    shHomeScores: percent(a.halfMarkets?.secondHalf?.homeScores),
+    shAwayScores: percent(a.halfMarkets?.secondHalf?.awayScores),
+    shOver05: percent(a.halfMarkets?.secondHalf?.over05),
   };
 }
 async function capture(a, fixture) {
@@ -49,8 +55,15 @@ function outcomes(m) {
   if (m.homeScore == null || m.awayScore == null) return null;
   const h = Number(m.homeScore), a = Number(m.awayScore);
   if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
-  return { home: h > a ? 1 : 0, draw: h === a ? 1 : 0, away: a > h ? 1 : 0,
+  const out={ home: h > a ? 1 : 0, draw: h === a ? 1 : 0, away: a > h ? 1 : 0,
     over25: h + a > 2 ? 1 : 0, btts: h > 0 && a > 0 ? 1 : 0, homeScore: h, awayScore: a };
+  const hh=Number(m.halftimeHome),ha=Number(m.halftimeAway);
+  if(Number.isFinite(hh)&&Number.isFinite(ha)){
+    out.halftimeHome=hh;out.halftimeAway=ha;
+    out.fhHomeScores=hh>0?1:0;out.fhAwayScores=ha>0?1:0;out.fhOver05=hh+ha>0?1:0;
+    out.shHomeScores=h-hh>0?1:0;out.shAwayScores=a-ha>0?1:0;out.shOver05=(h-hh)+(a-ha)>0?1:0;
+  }
+  return out;
 }
 function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
 function ledgerTeamPairMatch(m,p){const h=normTeam(p.homeTeam),a=normTeam(p.awayTeam),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
