@@ -16,11 +16,11 @@ function policy(ctx={}){
   const core=resolve(ctx);
   return core ? {
     tier:'sportmonks-primary', sportmonks:true, sportmonksLeagueId:core.sportmonksId,
-    primary:'sportmonks', supplemental:['the-odds-api','thesportsdb','football-data'],
-    rule:'SportMonks first; supplement only missing fields; normalize/deduplicate before blending.'
+    primary:'sportmonks', oddsPrimary:'the-odds-api', supplemental:['thesportsdb','football-data'],
+    rule:'SportMonks first for subscribed football data; The Odds API is primary for bookmaker prices; supplement missing fields and deduplicate before blending.'
   } : {
     tier:'non-sportmonks', sportmonks:false, sportmonksLeagueId:null,
-    primary:'non-sportmonks-provider-chain', supplemental:['the-odds-api','thesportsdb','football-data'],
+    primary:'non-sportmonks-provider-chain', oddsPrimary:'the-odds-api', supplemental:['the-odds-api','thesportsdb','football-data'],
     rule:'Do not query SportMonks outside the six subscribed leagues.'
   };
 }
