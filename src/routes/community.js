@@ -139,7 +139,9 @@ router.post('/friends/:userId/request',async(req,res)=>{
  const mongoose=require('mongoose');if(!mongoose.Types.ObjectId.isValid(req.params.userId)||String(req.params.userId)===String(req.user.userId))return res.status(400).json({error:'Invalid user.'});
  const [me,other]=await Promise.all([User.findById(req.user.userId),User.findById(req.params.userId)]);if(!me||!other)return res.status(404).json({error:'User not found.'});
  if((me.friends||[]).some(x=>String(x)===String(other._id)))return res.json({relationship:'friends'});
- await Promise.all([User.updateOne({_id:me._id},{$addToSet:{outgoingFriendRequests:other._id}}),User.updateOne({_id:other._id},{$addToSet:{incomingFriendRequests:me._id}})]);res.json({relationship:'requested'});
+ await Promise.all([User.updateOne({_id:me._id},{$addToSet:{outgoingFriendRequests:other._id}}),User.updateOne({_id:other._id},{$addToSet:{incomingFriendRequests:me._id}})]);
+ try{const push=require('../services/pushGoalService');await push.sendToUsers([String(other._id)],{type:'friend-request',eventId:'friend-request:'+String(me._id)+':'+String(other._id),title:'👥 New Friend Request',body:'@'+me.username+' sent you a friend request.',url:'/friends.html'});}catch(e){console.warn('[push/friend-request]',e.message)}
+ res.json({relationship:'requested'});
 });
 router.post('/friends/:userId/accept',async(req,res)=>{
  const mongoose=require('mongoose');if(!mongoose.Types.ObjectId.isValid(req.params.userId))return res.status(400).json({error:'Invalid user.'});
