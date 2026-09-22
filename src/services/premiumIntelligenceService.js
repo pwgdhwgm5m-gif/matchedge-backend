@@ -16,7 +16,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null, modelHealth=null }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null, extendedOddsBoard=null, modelHealth=null }) {
   let health = Number(dataHealth?.score || 0);
   const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
   const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
@@ -102,6 +102,26 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   const driftMarkets=new Set((modelHealth?.drift||[]).filter(x=>x.severity==='high').map(x=>x.market));
   const bucketMarkets=new Set((modelHealth?.bucketAlerts||[]).filter(x=>x.severity==='high').map(x=>x.market));
   const priceMap = new Map();
+  const extendedBooks=extendedOddsBoard?.bookmakers||[];
+  const completePair=(a,b)=>Number(a)>1&&Number(b)>1;
+  for(const b of extendedBooks){
+   if(b.fresh!==true)continue;
+   const addPair=(yesKey,noKey,pair)=>{
+    if(!pair||!completePair(pair.yes??pair.over,pair.no??pair.under))return;
+    const yo=Number(pair.yes??pair.over),no=Number(pair.no??pair.under),sum=1/yo+1/no;
+    priceMap.set(yesKey,{bookmaker:b.bookmaker,odds:yo,deVigProbability:(1/yo)/sum,overround:sum,verifiedFresh:true});
+    priceMap.set(noKey,{bookmaker:b.bookmaker,odds:no,deVigProbability:(1/no)/sum,overround:sum,verifiedFresh:true});
+   };
+   addPair('bttsYes','bttsNo',b.btts);
+   if(b.firstHalfTotal05)addPair('fhOver05','fhUnder05',b.firstHalfTotal05);
+   if(b.firstHalfTeam05?.home)addPair('fhHomeScores','fhHomeNoScore',b.firstHalfTeam05.home);
+   if(b.firstHalfTeam05?.away)addPair('fhAwayScores','fhAwayNoScore',b.firstHalfTeam05.away);
+   const h=b.firstHalf;if(h&&Number(h.home)>1&&Number(h.draw)>1&&Number(h.away)>1){
+    const s=1/Number(h.home)+1/Number(h.draw)+1/Number(h.away);
+    for(const [key,odd] of [['fhHome',h.home],['fhDraw',h.draw],['fhAway',h.away]])priceMap.set(key,{bookmaker:b.bookmaker,odds:Number(odd),deVigProbability:(1/Number(odd))/s,overround:s,verifiedFresh:true});
+   }
+  }
+
   const books = Array.isArray(marketOddsBoard?.bookmakers) ? marketOddsBoard.bookmakers : [];
   const registerBook = (bookmaker, family, odds) => {
     if (!odds) return;
