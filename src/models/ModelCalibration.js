@@ -5,6 +5,7 @@ const schema = new mongoose.Schema({
   market: { type: String, required: true },
   logitOffset: { type: Number, default: 0 },
   calibrationVersion: { type: String, default: 'cal-v1' },
+  modelVersion: { type: String, default: 'legacy' },
   active: { type: Boolean, default: false },
   trainCount: Number,
   validationCount: Number,
