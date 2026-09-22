@@ -185,9 +185,17 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     x.probability>=50 &&
     x.evidenceReliability>=.45 &&
     health>=45
-  ).sort((a,b)=>{
-    const av=a.isBettingValue?1:0, bv=b.isBettingValue?1:0;
-    return bv-av || b.score-a.score || b.probability-a.probability;
+  ).map(item=>{
+    // Top Pick remains model-led, but a verified fresh executable price is
+    // economically relevant. Reward positive EV/edge without allowing odds to
+    // rescue a weak football signal. Missing/stale prices contribute nothing.
+    const hasFreshPrice=item.oddsFresh===true && Number(item.verifiedOdds)>1;
+    const positiveEv=hasFreshPrice?Math.max(0,Number(item.expectedValuePercent)||0):0;
+    const positiveEdge=hasFreshPrice?Math.max(0,Number(item.edgePoints)||0):0;
+    const priceBonus=Math.min(12,positiveEv)*.35 + Math.min(10,positiveEdge)*.25;
+    return {...item,topPickScore:+(Number(item.score||0)+priceBonus).toFixed(2)};
+  }).sort((a,b)=>{
+    return b.topPickScore-a.topPickScore || b.score-a.score || b.probability-a.probability;
   });
   const diversify = pool => {
     const out=[], usedFamilies=new Set();
@@ -210,6 +218,8 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     selectionPolicy: {
       mode:'analysis-first-with-verified-value-overlay',
       topPicksRequireOdds:false,
+      topPicksUseFreshOddsWhenAvailable:true,
+      topPicksPriceSignal:'positive-ev-and-devig-edge-bonus',
       topPicksMinimumProbability:50,
       topPicksMinimumEvidenceReliability:.45,
       topPicksMinimumDataHealth:45,
