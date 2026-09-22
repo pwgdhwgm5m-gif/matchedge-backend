@@ -54,7 +54,7 @@ async function getEventExtendedOdds(sportKey,eventId){
  const cacheKey=`extendedOdds:${sportKey}:${eventId}`;
  const hit=cache.get(cacheKey);if(hit)return {ok:true,data:hit,cached:true};
  const result=await fetchT({method:'GET',url:`${config.oddsApi.baseUrl}/sports/${sportKey}/events/${eventId}/odds`,params:{
-  apiKey:config.oddsApi.key,regions:'eu',markets:'btts,h2h_3_way_h1,totals_h1,team_totals_h1',oddsFormat:'decimal'
+  apiKey:config.oddsApi.key,regions:'eu',markets:'btts,team_totals,alternate_team_totals,h2h_3_way_h1,totals_h1,team_totals_h1',oddsFormat:'decimal'
  }},6000,'The Odds API Extended');
  if(!result.ok){markOddsFailure(result);return result;}
  cache.set(cacheKey,result.data,5*60);
@@ -233,12 +233,24 @@ function extractExtendedMarketOdds(event,homeTeamName,awayTeamName){
   const firstHalf=h1?{home:h1.outcomes?.find(o=>teamNamesMatch(o.name,homeTeamName))?.price,draw:h1.outcomes?.find(o=>normalizeTeamName(o.name)==='draw')?.price,away:h1.outcomes?.find(o=>teamNamesMatch(o.name,awayTeamName))?.price}:null;
   const t1=market('totals_h1'),line05=(t1?.outcomes||[]).filter(o=>Number(o.point)===0.5);
   const firstHalfTotal05=line05.length?{over:line05.find(o=>/^over$/i.test(o.name))?.price,under:line05.find(o=>/^under$/i.test(o.name))?.price}:null;
+  // Full-time team totals: prefer alternate_team_totals because it can expose
+  // 1.5/2.5/3.5 simultaneously; merge featured team_totals when available.
+  const fullTeamLines={home:{},away:{}};
+  for(const tm of [market('alternate_team_totals'),market('team_totals')].filter(Boolean)){
+   for(const o of tm.outcomes||[]){
+    const point=Number(o.point);if(![1.5,2.5,3.5].includes(point))continue;
+    const desc=String(o.description||'');const side=teamNamesMatch(desc,homeTeamName)?'home':teamNamesMatch(desc,awayTeamName)?'away':null;if(!side)continue;
+    const line=String(point);fullTeamLines[side][line]||(fullTeamLines[side][line]={});
+    if(/^over$/i.test(o.name))fullTeamLines[side][line].over=o.price;
+    if(/^under$/i.test(o.name))fullTeamLines[side][line].under=o.price;
+   }
+  }
   const tt=market('team_totals_h1');
   const team05={};
   for(const o of tt?.outcomes||[]){if(Number(o.point)!==0.5)continue;const desc=String(o.description||'');const side=teamNamesMatch(desc,homeTeamName)?'home':teamNamesMatch(desc,awayTeamName)?'away':null;if(side)team05[side]||(team05[side]={});if(/^over$/i.test(o.name))team05[side].over=o.price;if(/^under$/i.test(o.name))team05[side].under=o.price;}
   const times=[b.last_update,...(b.markets||[]).map(x=>x.last_update)].filter(Boolean).map(x=>new Date(x).getTime()).filter(Number.isFinite);
   const latest=times.length?Math.max(...times):null,ageMs=latest?Date.now()-latest:null,fresh=Number.isFinite(ageMs)&&ageMs>=0&&ageMs<=15*60*1000;
-  books.push({bookmaker:b.title||b.key,fresh,updatedAt:latest?new Date(latest).toISOString():null,btts,firstHalf,firstHalfTotal05,firstHalfTeam05:team05});
+  books.push({bookmaker:b.title||b.key,fresh,updatedAt:latest?new Date(latest).toISOString():null,btts,teamTotals:fullTeamLines,firstHalf,firstHalfTotal05,firstHalfTeam05:team05});
  }
  return {bookmakers:books};
 }
