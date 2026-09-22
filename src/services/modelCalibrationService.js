@@ -26,6 +26,12 @@ function logLoss(rows, offset = 0) {
     return sum-(row.y*Math.log(q)+(1-row.y)*Math.log(1-q));
   },0)/rows.length;
 }
+const MARKET_POLICY = Object.freeze({
+  home:{minTrain:50,minValidation:20}, draw:{minTrain:60,minValidation:25}, away:{minTrain:50,minValidation:20},
+  over25:{minTrain:45,minValidation:20}, btts:{minTrain:45,minValidation:20},
+  fhHomeScores:{minTrain:50,minValidation:20}, fhAwayScores:{minTrain:50,minValidation:20}, fhOver05:{minTrain:55,minValidation:20},
+  shHomeScores:{minTrain:50,minValidation:20}, shAwayScores:{minTrain:50,minValidation:20}, shOver05:{minTrain:55,minValidation:20}
+});
 function fit(rows, minTrain = 40, minValidation = 20) {
   const cutoff = Math.floor(rows.length * .75);
   const train = rows.slice(0, cutoff), validation = rows.slice(cutoff);
@@ -73,7 +79,10 @@ async function retrain() {
     const market = key.slice(key.lastIndexOf(':')+1);
     const prefix = MODEL_VERSION + ':';
     const league = key.startsWith(prefix) ? key.slice(prefix.length, -(market.length+1)) : key.slice(0, -(market.length+1));
-    const result = fit(rows, league === 'all' ? 60 : 40, 20);
+    const policy=MARKET_POLICY[market]||{minTrain:50,minValidation:20};
+    // Shared calibration requires more evidence than a league-specific mapping;
+    // each market still qualifies independently.
+    const result = fit(rows, league === 'all' ? Math.max(80,policy.minTrain) : policy.minTrain, policy.minValidation);
     if (!result) continue;
     // Candidate-only promotion: a newly trained mapping must clear the
     // chronological holdout gates. A failed candidate is stored inactive and
@@ -184,4 +193,4 @@ async function applyHalf({league, half}) {
   }
   return {half:out,applied,calibrationVersion:CALIBRATION_VERSION};
 }
-module.exports = { fit, shift, retrain, deactivateStaleOrRegressed, apply, applyHalf, CALIBRATION_VERSION, MODEL_VERSION };
+module.exports = { fit, shift, retrain, deactivateStaleOrRegressed, apply, applyHalf, MARKET_POLICY, CALIBRATION_VERSION, MODEL_VERSION };
