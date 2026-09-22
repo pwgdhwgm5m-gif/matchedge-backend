@@ -375,7 +375,7 @@ function eventToResultMatch(e) {
     awayTeam:getAwayTeamName(e)||'',
     homeScore, awayScore,
     halftimeHome:ht?.home??null, halftimeAway:ht?.away??null,
-    league:String(pickField(e,['league.name','league_name','competition.name','competition_name','competition','league'])||''),
+    league:String(e.__soccerEdgeLeagueName||pickField(e,['league.name','league_name','competition.name','competition_name','competition','league','tournament.name','tournament_name','country.name'])||''),
     leagueId:String(pickField(e,['league.id','league_id','competition.id','competition_id'])||''),
     statusShort:finished?'FT':(live?String(pickField(e,['status_short','state.short_name','status'])||'LIVE').toUpperCase():'NS'),
     isLive:live,
