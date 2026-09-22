@@ -163,7 +163,7 @@ const unhealthyBoard=buildMarketBoard({
  goalMarkets:{over25GoalsPercent:65,bttsPercent:55,totalGoals:{'1.5':{over:80},'3.5':{over:35,under:65}},scoring:{home:82,away:55},teamGoals:{home:{'1.5':{over:60},'2.5':{over:35},'3.5':{over:15}},away:{'1.5':{over:25},'2.5':{over:10},'3.5':{over:4}}}},
  cornerMetrics:{over95Percent:50,under95Percent:50},halfMarkets:halves,dataHealth:{score:85},premium:{},
  evidenceStrength:.8,modelAgreementScore:80,
- marketOddsBoard:{bookmakers:[{bookmaker:'test',h2h:{home:1.6,draw:4.5,away:8},totals:{over25:1.9,under25:2.05}}]},
+ marketOddsBoard:{bookmakers:[{bookmaker:'test',fresh:true,h2h:{home:1.6,draw:4.5,away:8},totals:{over25:1.9,under25:2.05}}]},
  modelHealth:{readiness:'decision-ready',healthy:false,drift:[{market:'home',severity:'high'}],bucketAlerts:[]}
 });
 const gatedHome=unhealthyBoard.allMarkets.find(x=>x.key==='home');
@@ -171,3 +171,13 @@ assert.equal(gatedHome.isBettingValue,false);
 assert.equal(gatedHome.topPickExclusion,'MODEL_HEALTH_GATE');
 assert.equal(unhealthyBoard.selectionPolicy.modelHealthGate,true);
 console.log('model health gate tests passed');
+
+const staleOddsBoard=buildMarketBoard({
+ modelProbabilities:{homeWinProbability:75,drawProbability:15,awayWinProbability:10},
+ goalMarkets:{over25GoalsPercent:70,bttsPercent:55,totalGoals:{'1.5':{over:85},'3.5':{over:40,under:60}},scoring:{home:85,away:50},teamGoals:{home:{'1.5':{over:65},'2.5':{over:40},'3.5':{over:20}},away:{'1.5':{over:20},'2.5':{over:8},'3.5':{over:3}}}},
+ cornerMetrics:{over95Percent:50,under95Percent:50},halfMarkets:halves,dataHealth:{score:90},premium:{},evidenceStrength:.9,modelAgreementScore:90,
+ marketOddsBoard:{bookmakers:[{bookmaker:'stale',fresh:false,h2h:{home:1.7,draw:4.5,away:8},totals:{over25:2,under25:1.9}}]}
+});
+assert.equal(staleOddsBoard.topPredictions.length,0);
+assert.equal(staleOddsBoard.selectionPolicy.requiresFreshOdds,true);
+console.log('stale odds gate tests passed');
