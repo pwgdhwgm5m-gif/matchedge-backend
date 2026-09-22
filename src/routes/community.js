@@ -123,8 +123,8 @@ router.get('/users/search',async(req,res)=>{
 });
 router.get('/friends',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
- const [friends,incoming]=await Promise.all([User.find({_id:{$in:me.friends||[]}}).lean(),User.find({_id:{$in:me.incomingFriendRequests||[]}}).lean()]);
- res.json({friends:friends.map(u=>publicUser(u)),requests:incoming.map(u=>publicUser(u))});
+ const [friends,incoming,outgoing]=await Promise.all([User.find({_id:{$in:me.friends||[]}}).lean(),User.find({_id:{$in:me.incomingFriendRequests||[]}}).lean(),User.find({_id:{$in:me.outgoingFriendRequests||[]}}).lean()]);
+ res.json({friends:friends.map(u=>publicUser(u)),requests:incoming.map(u=>publicUser(u)),sentRequests:outgoing.map(u=>publicUser(u))});
 });
 router.get('/profile/:username',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean(),user=await User.findOne({username:String(req.params.username||'').toLowerCase()}).lean();
