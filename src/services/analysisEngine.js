@@ -323,23 +323,39 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // create implausible goal rates on sparse samples. Anchor the final rate to a
   // robust matchup prior built from the team's scoring rate and the opponent's
   // concession rate. This is shrinkage, not a hard-coded score prediction.
-  const regularizeLambda = (lambda, ownForm, oppForm, leagueGoalBase) => {
+  const ensembleLambda = (structuralLambda, ownForm, oppForm, ownAdvanced, oppAdvanced, leagueGoalBase, strengthEdge=0) => {
     const ownSample=Number(ownForm?.played||0),oppSample=Number(oppForm?.played||0);
-    if(!ownSample||!oppSample||!Number.isFinite(lambda)) return lambda;
+    if(!ownSample||!oppSample||!Number.isFinite(structuralLambda)) return structuralLambda;
+    // Independent evidence families are averaged, never multiplied here.
+    // Venue form is deliberately important early in the season because five/six
+    // matches can represent nearly the whole current campaign.
     const ownRate=robustRate(Number(ownForm.avgGoalsFor),ownSample,leagueGoalBase);
-    const oppRate=robustRate(Number(oppForm.avgGoalsAgainst),oppSample,leagueGoalBase);
-    const prior=Math.sqrt(Math.max(.05,ownRate)*Math.max(.05,oppRate));
-    const evidence=Math.min(1,Math.min(ownSample,oppSample)/8);
-    // Sparse samples stay close to the observable matchup prior; with eight or
-    // more relevant venue matches the richer model is allowed substantially more room.
-    const modelWeight=.30+.45*evidence;
-    const blended=prior*(1-modelWeight)+lambda*modelWeight;
-    // A final robust envelope prevents compounded modifiers from overwhelming
-    // the underlying scoring/conceding evidence while retaining genuine mismatches.
-    return +Math.max(prior*.65,Math.min(prior*1.65,blended)).toFixed(2);
+    const oppConcede=robustRate(Number(oppForm.avgGoalsAgainst),oppSample,leagueGoalBase);
+    const matchupModel=(ownRate+oppConcede)/2;
+    const xgReady=Number(ownAdvanced?.xgSample||0)>=3&&Number(oppAdvanced?.xgSample||0)>=3&&
+      Number.isFinite(ownAdvanced?.avgXgFor)&&Number.isFinite(oppAdvanced?.avgXgAgainst);
+    const xgModel=xgReady?Math.max(.15,Math.min(4.8,(Number(ownAdvanced.avgXgFor)+Number(oppAdvanced.avgXgAgainst))/2)):null;
+    const sample=Math.min(ownSample,oppSample),sampleStrength=Math.min(1,sample/8);
+    const components=[
+      {name:'venue-recent-form',value:matchupModel,weight:.45},
+      {name:'structural-power-context',value:structuralLambda,weight:.35+.10*sampleStrength},
+    ];
+    if(xgModel!=null) components.push({name:'chance-quality-xg',value:xgModel,weight:.20+.10*Math.min(1,Math.min(ownAdvanced.xgSample,oppAdvanced.xgSample)/7)});
+    const totalWeight=components.reduce((s,c)=>s+c.weight,0);
+    let blended=components.reduce((s,c)=>s+c.value*c.weight,0)/totalWeight;
+    // Genuine elite-v-weak mismatches keep a thicker scoring expectation instead
+    // of being blindly pulled back to an average team. The adjustment is bounded
+    // and additive so rank/Elo/form cannot compound exponentially.
+    const mismatch=Math.max(0,Math.min(1,Number(strengthEdge)||0));
+    if(mismatch>.55 && ownRate>leagueGoalBase*1.35 && oppConcede>leagueGoalBase*1.35) {
+      blended += leagueGoalBase * .22 * ((mismatch-.55)/.45);
+    }
+    const prior=matchupModel,evidence=Math.min(1,sample/8);
+    const lower=prior*(.72-.07*evidence), upper=prior*(1.48+.22*mismatch);
+    return +Math.max(lower,Math.min(upper,blended)).toFixed(2);
   };
-  homeLambda=regularizeLambda(homeLambda,homeForm,awayForm,leagueHomeGoals);
-  awayLambda=regularizeLambda(awayLambda,awayForm,homeForm,leagueAwayGoals);
+  homeLambda=ensembleLambda(homeLambda,homeForm,awayForm,homeAdvanced,awayAdvanced,leagueHomeGoals,Math.max(0,strengthGap));
+  awayLambda=ensembleLambda(awayLambda,awayForm,homeForm,awayAdvanced,homeAdvanced,leagueAwayGoals,Math.max(0,-strengthGap));
 
   // League/time-aware Dixon-Coles layer. Recent completed matches carry more weight;
   // sparse samples stay close to conservative defaults.
@@ -434,7 +450,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', expectedHome:smExpectedHome, expectedAway:smExpectedAway })
     : cornerProjection
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample })
-    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'goal-intensity-fallback' });
+    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { source: 'league-prior-bounded-tempo', lowEvidence:true });
   const halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda);
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
@@ -504,6 +520,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const strongestSignal = poisson.findStrongestSignal([
     { label: '2.5 Ust Gol', probability: marketProbabilities.over25GoalsPercent },
     { label: 'KG Var', probability: marketProbabilities.bttsPercent },
+    { label: 'Ev 1.5 Ust Takim Golü', probability: marketProbabilities.teamGoals?.home?.['1.5']?.over || 0 },
+    { label: 'Dep 1.5 Ust Takim Golü', probability: marketProbabilities.teamGoals?.away?.['1.5']?.over || 0 },
+    { label: 'Ev Gol Atar', probability: marketProbabilities.scoring?.home || 0 },
+    { label: 'Dep Gol Atar', probability: marketProbabilities.scoring?.away || 0 },
   ]);
   // Market-specific SportMonks evidence. Keep the probability model intact,
   // but rank each market using the evidence that is actually relevant to it.
@@ -591,14 +611,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
       sportmonks: smMarketEvidence,
       calibrationApplied: calibrated.applied,
-      architecture:'analysis-v2',
+      architecture:'analysis-v3-market-ensemble',
       dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
       powerRating:{ homeElo, awayElo, homeGames:homeEloGames, awayGames:awayEloGames, persistent:Boolean(persistedHomePower||persistedAwayPower), homePersistent:Boolean(persistedHomePower), awayPersistent:Boolean(persistedAwayPower), homeStoredTeamId:persistedHomePower?.teamId||null, awayStoredTeamId:persistedAwayPower?.teamId||null, homeIdentityMatch:persistedHomePower ? (persistedHomePower._identityMatch || (String(persistedHomePower.teamId)===String(homeTeamIdForStats)?'id':'stored')) : null, awayIdentityMatch:persistedAwayPower ? (persistedAwayPower._identityMatch || (String(persistedAwayPower.teamId)===String(awayTeamIdForStats)?'id':'stored')) : null, adjustment:eloAdjustment },
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
       analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), evidenceFamilies, playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
       ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
-      probabilityPipeline:['opponent-strength','robust-form','chance-quality-dedup','dixon-coles','calibration','evidence-shrinkage','market-ensemble'],
+      probabilityPipeline:['venue-recent-form','opponent-strength','independent-evidence-ensemble','mismatch-preservation','dixon-coles','market-calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
     dataSource: isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable'),
