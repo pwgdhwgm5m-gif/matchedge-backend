@@ -175,7 +175,12 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   // analytical selection. Value remains a stricter, independently verified tag.
   const valueEligible=candidates.filter(x=>x.isBettingValue)
     .sort((a,b)=>b.valueScore-a.valueScore || b.edgePoints-a.edgePoints || b.probability-a.probability);
+  // Customer-facing Top Picks / For You focus on the three core actionable
+  // pre-match families requested for this surface: match winner, BTTS Yes and
+  // Over 2.5. Other markets remain available in full Match Analysis.
+  const coreTopPickKeys=new Set(['home','away','bttsYes','over25']);
   const topEligible=candidates.filter(x=>
+    coreTopPickKeys.has(x.key) &&
     !x.topPickExclusion &&
     x.probability>=50 &&
     x.evidenceReliability>=.45 &&
@@ -213,7 +218,8 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       valueRequiresPositiveExpectedValue:true,
       valueUsesUncertaintyAdjustedEdge:true,
       noBetCustomerFacing:false,
-      excludedMarkets:['shOver05'],
+      includedTopPickMarkets:['home','away','bttsYes','over25'],
+      excludedMarkets:['draw','under25','bttsNo','shOver05'],
       modelHealthGate:healthGate,
       modelHealthReadiness:modelHealth?.readiness||'unavailable'
     },
