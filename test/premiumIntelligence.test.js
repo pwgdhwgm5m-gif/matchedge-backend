@@ -157,3 +157,17 @@ const sparseHalves=calculateHalfMarkets(2,1,{homeFirstRate:2,homeSecondRate:.2,a
 assert.ok(sparseHalves.evidence.homeFirstShare<50);
 assert.ok(sparseHalves.evidence.awayFirstShare>40);
 console.log('half-specific evidence tests passed');
+
+const unhealthyBoard=buildMarketBoard({
+ modelProbabilities:{homeWinProbability:72,drawProbability:16,awayWinProbability:12},
+ goalMarkets:{over25GoalsPercent:65,bttsPercent:55,totalGoals:{'1.5':{over:80},'3.5':{over:35,under:65}},scoring:{home:82,away:55},teamGoals:{home:{'1.5':{over:60},'2.5':{over:35},'3.5':{over:15}},away:{'1.5':{over:25},'2.5':{over:10},'3.5':{over:4}}}},
+ cornerMetrics:{over95Percent:50,under95Percent:50},halfMarkets:halves,dataHealth:{score:85},premium:{},
+ evidenceStrength:.8,modelAgreementScore:80,
+ marketOddsBoard:{bookmakers:[{bookmaker:'test',h2h:{home:1.6,draw:4.5,away:8},totals:{over25:1.9,under25:2.05}}]},
+ modelHealth:{readiness:'decision-ready',healthy:false,drift:[{market:'home',severity:'high'}],bucketAlerts:[]}
+});
+const gatedHome=unhealthyBoard.allMarkets.find(x=>x.key==='home');
+assert.equal(gatedHome.isBettingValue,false);
+assert.equal(gatedHome.topPickExclusion,'MODEL_HEALTH_GATE');
+assert.equal(unhealthyBoard.selectionPolicy.modelHealthGate,true);
+console.log('model health gate tests passed');
