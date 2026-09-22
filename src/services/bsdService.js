@@ -65,6 +65,17 @@ async function fetchBsd(path, timeoutMs) {
   }
 }
 
+async function fetchBsdCached(path, ttlSeconds, timeoutMs) {
+  const key='bsd-http:'+path;
+  const hit=cache.get(key);
+  if(hit !== undefined) return {...hit,cached:true};
+  const result=await fetchBsd(path,timeoutMs);
+  // Cache successes normally and failures briefly so one unavailable BSD
+  // endpoint cannot burn the daily allowance through repeated UI refreshes.
+  cache.set(key,result,result.ok ? ttlSeconds : Math.min(60,ttlSeconds));
+  return result;
+}
+
 function extractList(data) {
   if (Array.isArray(data)) return data;
   if (!data) return [];
@@ -349,7 +360,7 @@ async function getTeamFixturesForAnalysis(teamName, count) {
   const to=new Date();
   const from=new Date(to.getTime()-370*24*60*60*1000);
   const date=v=>v.toISOString().slice(0,10);
-  const result=await fetchBsd('/events/?team_name='+encodeURIComponent(teamName)+'&status=finished&date_from='+date(from)+'&date_to='+date(to)+'&limit='+Math.max(30,n*2),8000);
+  const result=await fetchBsdCached('/events/?team_name='+encodeURIComponent(teamName)+'&status=finished&date_from='+date(from)+'&date_to='+date(to)+'&limit='+Math.max(30,n*2),15*60,8000);
   if(!result.ok) return result;
   const events=extractList(result.data)
     .filter(e=>isNameMatch(getHomeTeamName(e),teamName)||isNameMatch(getAwayTeamName(e),teamName))
@@ -363,7 +374,7 @@ async function getPredictionForMatch(homeTeam,awayTeam,kickoffIso) {
   if(!API_KEY) return {available:false,error:'no_api_key'};
   const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
   if(!eventId) return {available:false,error:'event_not_found'};
-  const result=await fetchBsd('/events/'+eventId+'/prediction/',6000);
+  const result=await fetchBsdCached('/events/'+eventId+'/prediction/',15*60,6000);
   if(!result.ok) return {available:false,error:result.error};
   const p=result.data||{};
   return {available:true,eventId,source:'bsd',markets:p.markets||null,recommendations:p.recommendations||null,model:p.model||null};
@@ -373,7 +384,7 @@ async function getConsensusOddsForMatch(homeTeam,awayTeam,kickoffIso) {
   if(!API_KEY) return {available:false,error:'no_api_key'};
   const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
   if(!eventId) return {available:false,error:'event_not_found'};
-  const result=await fetchBsd('/events/'+eventId+'/odds/',6000);
+  const result=await fetchBsdCached('/events/'+eventId+'/odds/',2*60,6000);
   if(!result.ok) return {available:false,error:result.error};
   return {available:true,eventId,source:'bsd-consensus',data:result.data};
 }
@@ -382,7 +393,7 @@ async function getStatsForMatch(homeTeam,awayTeam,kickoffIso) {
   if(!API_KEY) return {available:false,error:'no_api_key'};
   const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
   if(!eventId) return {available:false,error:'event_not_found'};
-  const result=await fetchBsd('/events/'+eventId+'/stats/',6000);
+  const result=await fetchBsdCached('/events/'+eventId+'/stats/',5*60,6000);
   if(!result.ok) return {available:false,error:result.error};
   return {available:true,eventId,source:'bsd',data:result.data};
 }
@@ -417,14 +428,17 @@ async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
   if(!API_KEY) return {available:false,error:'no_api_key'};
   const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
   if(!eventId) return {available:false,error:'event_not_found'};
+  const bundleKey='bsd-bundle:'+eventId;
+  const bundleHit=cache.get(bundleKey);
+  if(bundleHit !== undefined) return {...bundleHit,cached:true};
   const [stats,lineups,h2h,prediction,odds]=await Promise.all([
-    fetchBsd('/events/'+eventId+'/stats/',5000),
-    fetchBsd('/events/'+eventId+'/lineups/',5000),
-    fetchBsd('/events/'+eventId+'/h2h/',5000),
-    fetchBsd('/events/'+eventId+'/prediction/',5000),
-    fetchBsd('/events/'+eventId+'/odds/',5000)
+    fetchBsdCached('/events/'+eventId+'/stats/',5*60,5000),
+    fetchBsdCached('/events/'+eventId+'/lineups/',10*60,5000),
+    fetchBsdCached('/events/'+eventId+'/h2h/',6*60*60,5000),
+    fetchBsdCached('/events/'+eventId+'/prediction/',15*60,5000),
+    fetchBsdCached('/events/'+eventId+'/odds/',2*60,5000)
   ]);
-  return {
+  const bundle={
     available:true,eventId,source:'bsd',
     stats:stats.ok?stats.data:null,
     lineups:lineups.ok?lineups.data:null,
@@ -433,6 +447,11 @@ async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
     consensusOdds:odds.ok?normalizeConsensusOdds(odds.data):null,
     coverage:{stats:stats.ok,lineups:lineups.ok,h2h:h2h.ok,prediction:prediction.ok,odds:odds.ok}
   };
+  // Bundle TTL follows odds (shortest pre-match component). Individual
+  // endpoints retain their longer caches, so a refresh usually costs only
+  // the field whose freshness window actually expired.
+  cache.set(bundleKey,bundle,2*60);
+  return bundle;
 }
 
 module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds };
