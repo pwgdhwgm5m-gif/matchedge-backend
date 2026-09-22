@@ -110,6 +110,11 @@ function groupedPerformance(picks,key){
  const map={};for(const p of picks){const k=String(p[key]||'Other');map[k]??={name:k,won:0,total:0};map[k].total++;if(p.result==='won')map[k].won++}
  return Object.values(map).filter(x=>x.total>=3).map(x=>({...x,accuracy:Math.round(x.won/x.total*100)})).sort((a,b)=>b.accuracy-a.accuracy||b.total-a.total);
 }
+router.get('/users/discover',async(req,res)=>{
+ const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
+ const users=await User.find({_id:{$ne:req.user.userId}}).sort({xp:-1,correctPicks:-1,createdAt:-1}).limit(60).lean();
+ res.json({users:users.map(u=>({...publicUser(u),relationship:relation(me,u),isFollowing:(me.following||[]).some(x=>String(x)===String(u._id))}))});
+});
 router.get('/users/search',async(req,res)=>{
  const q=String(req.query.q||'').trim().toLowerCase().slice(0,30);if(q.length<2)return res.json({users:[]});
  const safeQ=q.replace(/[.*+?^$()|[\]{}\\]/g,'\\$&');
