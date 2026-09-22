@@ -160,11 +160,13 @@ router.get('/:fixtureId', async (req, res) => {
           }
           result.dataQualityScore = health;
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
-          const coreMarkets = (result.marketBoard.allMarkets || []).filter(x => ['1X2','GOL','KG','KORNER'].includes(x.market));
-          result.marketBoard.topPredictions = coreMarkets.slice(0,3);
-          // Always expose the strongest available model market. Health/sample remain
-          // warnings and confidence context instead of a NO BET gate.
-          result.marketBoard.best = coreMarkets[0] || null;
+          // Preserve the value-aware selector produced by the engine. Sportmonks
+          // enrichment may improve data health, but must never replace Top Picks
+          // with the highest raw-probability core markets.
+          result.marketBoard.topPredictions = (result.marketBoard.topPredictions || [])
+            .filter(x => x.isBettingValue === true)
+            .slice(0,3);
+          result.marketBoard.best = result.marketBoard.topPredictions[0] || null;
         }
       }
     }
