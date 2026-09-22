@@ -534,7 +534,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const oddsApiMarketBoard = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchMarketOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
-  const marketOddsBoard = sportmonksOddsBoard?.bookmakers?.length ? sportmonksOddsBoard : oddsApiMarketBoard;
+  const marketOddsBoard = (sportmonksOddsBoard?.bookmakers?.length || oddsApiMarketBoard?.bookmakers?.length) ? {
+    source: useSportmonksPrimary ? 'sportmonks-primary-with-fallback' : 'the-odds-api',
+    bookmakers: [...(sportmonksOddsBoard?.bookmakers || []), ...(oddsApiMarketBoard?.bookmakers || [])]
+  } : null;
   // Extended soccer markets are event-level at The Odds API. Reuse the event
   // already returned by the league odds call, so no extra event-list lookup is
   // needed. The extra request is cached and fails open when a market/plan is
@@ -543,13 +546,16 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     require('../utils/textNormalize').teamNamesMatch(m.home_team,homeTeamName) &&
     require('../utils/textNormalize').teamNamesMatch(m.away_team,awayTeamName)
   ) : null;
-  let extendedOddsBoard = sportmonksOddsBoard?.bookmakers?.length ? {bookmakers:sportmonksOddsBoard.bookmakers} : null;
-  if (!extendedOddsBoard && oddsEvent?.id && sportKey) {
+  let extendedOddsBoard = sportmonksOddsBoard?.bookmakers?.length ? {bookmakers:[...sportmonksOddsBoard.bookmakers]} : null;
+  if (oddsEvent?.id && sportKey) {
     const extended = await Promise.race([
       oddsApi.getEventExtendedOdds(sportKey,oddsEvent.id),
       new Promise(resolve=>setTimeout(()=>resolve({ok:false,error:'extended_odds_timeout'}),3500))
     ]);
-    if (extended?.ok) extendedOddsBoard=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
+    if (extended?.ok) {
+      const apiExtended=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
+      if(apiExtended?.bookmakers?.length) extendedOddsBoard={bookmakers:[...(extendedOddsBoard?.bookmakers||[]),...apiExtended.bookmakers]};
+    }
   }
   // Football-Data is an additive, fail-open fallback. It is used only when
   // the existing odds provider has no match and both team names match exactly
