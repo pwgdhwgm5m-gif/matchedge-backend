@@ -44,7 +44,8 @@ router.get('/', async (req, res) => {
   // SportsMonks-first: one subscribed daily feed is the canonical fixture,
   // score and half-time source. Legacy providers are used only when a
   // SportMonks match is unavailable; they never overwrite SportMonks data.
-  const [turkeySmResult, smResult, legacyResult, verifiedResult, supplemental, bsdResult] = await Promise.all([
+  const season=sportsDb.getCurrentSeasonString(new Date(date+'T12:00:00Z'));
+  const [turkeySmResult, smResult, legacyResult, verifiedResult, supplemental, bsdResult, faCupSchedule] = await Promise.all([
     cache.getOrFetch(`sportmonks:tr:600:${date}`, config.cache.ttlLive, () => sportmonks.getLeagueFixturesByDate(date, 600)),
     Promise.race([
       cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
@@ -53,7 +54,10 @@ router.get('/', async (req, res) => {
     cache.getOrFetch(`results:${date}`, config.cache.ttlLive, () => sportsDb.getMatchesByDate(date)),
     cache.getOrFetch(`football-data-org:${date}`, 300, () => footballDataOrg.getMatchesByDate(date)),
     cache.getOrFetch(`cup-fixtures:${date}`, config.cache.ttlStatic, () => cupFixtures.getSupplementalMatches(date)),
-    cache.getOrFetch(`bsd:results:${date}`, 300, () => bsdService.getResultMatchesForDate(date))
+    cache.getOrFetch(`bsd:results:${date}`, 300, () => bsdService.getResultMatchesForDate(date)),
+    // eventsday can omit FA Cup qualifying/replays. The league-season schedule
+    // is a separate TSDB source and is filtered back to the requested day.
+    cache.getOrFetch(`sportsdb:facup:4482:${season}`, 1800, () => sportsDb.getLeagueSeasonScheduleFormatted(4482, season))
   ]);
 
   console.log('[results:sportmonks:turkey]', JSON.stringify({
@@ -86,6 +90,12 @@ router.get('/', async (req, res) => {
   // and therefore authoritative when the same fixture exists in both feeds.
   const bsdMatches = bsdResult?.ok && Array.isArray(bsdResult.matches) ? bsdResult.matches : [];
   simplified = cupFixtures.mergeUnique(simplified, bsdMatches);
+
+  const faCupMatches = faCupSchedule?.available ? faCupSchedule.events.filter(e=>String(e.date||'').slice(0,10)===date).map(e=>({
+    ...e, league:'FA Cup', leagueId:'4482', statusShort:e.finished?'FT':'NS', isLive:false,
+    source:'sportsdb-fa-cup-season'
+  })) : [];
+  simplified = cupFixtures.mergeUnique(simplified, faCupMatches);
 
   // football-data.org is fallback verification only for matches that did not
   // arrive from SportMonks.
@@ -123,7 +133,8 @@ router.get('/', async (req, res) => {
     primarySource: (turkeySmResult?.ok || smResult?.ok) ? 'sportmonks' : 'fallback',
     sportmonksCount: sportmonksMatches.length,
     fallbackCount: Math.max(0, simplified.length - sportmonksMatches.length),
-    bsdCount: bsdMatches.length
+    bsdCount: bsdMatches.length,
+    faCupScheduleCount: faCupMatches.length
   });
 });
 module.exports = router;
