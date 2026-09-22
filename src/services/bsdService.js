@@ -375,7 +375,7 @@ function eventToResultMatch(e) {
     awayTeam:getAwayTeamName(e)||'',
     homeScore, awayScore,
     halftimeHome:ht?.home??null, halftimeAway:ht?.away??null,
-    league:String(e.__soccerEdgeLeagueName||pickField(e,['league.name','league_name','competition.name','competition_name','competition','league','tournament.name','tournament_name','country.name'])||''),
+    league:String(e.__soccerEdgeLeagueName||pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','competition','league.title','league','tournament.name','tournament_name'])||''),
     leagueId:String(pickField(e,['league.id','league_id','competition.id','competition_id'])||''),
     statusShort:finished?'FT':(live?String(pickField(e,['status_short','state.short_name','status'])||'LIVE').toUpperCase():'NS'),
     isLive:live,
@@ -393,7 +393,12 @@ async function getResultMatchesForDate(dateStr) {
     fetchBsdCached(base+'&league_id=39&status=finished',5*60,8000)
   ]);
   if(!daily.ok && !faCup.ok)return {ok:false,error:daily.error||faCup.error,matches:[]};
-  const dailyRows=daily.ok?extractList(daily.data):[];
+  const dailyRows=(daily.ok?extractList(daily.data):[]).map(e=>{
+    // BSD v2 may expose country separately while competition metadata is sparse.
+    // Never turn a country or a missing competition into the generic "League" bucket.
+    const competition=String(pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','league.title','tournament.name','tournament_name'])||'').trim();
+    return competition ? {...e,__soccerEdgeLeagueName:competition} : e;
+  });
   const faCupRows=(faCup.ok?extractList(faCup.data):[]).map(e=>({...e,__soccerEdgeLeagueName:'FA Cup',__soccerEdgeLeagueId:'39'}));
   const rows=[...dailyRows,...faCupRows];
   const seen=new Set();
