@@ -105,6 +105,11 @@ router.get('/premium-lab/fixtures', async (req,res)=>{try{const rows=await premi
 
 router.get('/model-dashboard',async(req,res)=>{try{const [performance,v4,groups,paired,couponPending,couponSettled,pickPending,pickSettled,ledgerPending,ledgerSettled]=await Promise.all([ledger.performance(),ledger.v4ActivationStatus(),ledger.v4CrossCheckPerformance(),ledger.pairedAudit(),Coupon.countDocuments({$or:[{status:'pending'},{'legs.selection.result':'pending'}]}),Coupon.countDocuments({status:{$in:['won','lost','void']}}),CommunityPick.countDocuments({verified:true,result:'pending'}),CommunityPick.countDocuments({verified:true,result:{$in:['won','lost','void']}}),PredictionSnapshot.countDocuments({status:'pending'}),PredictionSnapshot.countDocuments({status:'settled'})]);res.json({generatedAt:new Date().toISOString(),socceredge:{version:performance.version,strongestPick:performance.strongestPick,summary:performance.summary},settlement:{coupons:{pending:couponPending,settled:couponSettled},myPicks:{pending:pickPending,settled:pickSettled},predictionLedger:{pending:ledgerPending,settled:ledgerSettled}},v4:{activation:v4,agreementGroups:groups},pairedAudit:paired});}catch(error){console.error('[model-dashboard]',error);res.status(500).json({error:'Model dashboard unavailable.'})}});
 
+router.get('/selection-performance', async (req,res)=>{
+  try{res.json(await ledger.selectionPerformance());}
+  catch(error){console.error('[selection-performance]',error);res.status(500).json({error:'Selection performance unavailable.'});}
+});
+
 router.get('/model-performance', async (req, res) => {
   try { res.json(await ledger.performance()); }
   catch (error) { console.error('[model-performance]', error); res.status(500).json({ error: 'Model karnesi alınamadı.' }); }
