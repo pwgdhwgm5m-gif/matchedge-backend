@@ -164,25 +164,54 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       : null;
   }
 
-  const eligible=candidates.filter(x=>x.isBettingValue)
+  // Top Picks answer a different product question from Value Picks:
+  // "what does the analysis support most strongly?" vs "is the quoted price
+  // mathematically attractive?". Odds availability must never erase a strong
+  // analytical selection. Value remains a stricter, independently verified tag.
+  const valueEligible=candidates.filter(x=>x.isBettingValue)
     .sort((a,b)=>b.valueScore-a.valueScore || b.edgePoints-a.edgePoints || b.probability-a.probability);
-  const diversified=[];
-  const usedFamilies=new Set();
-  for(const item of eligible){
-    if(diversified.length>=3)break;
-    const family=item.market==='1X2'?'1X2':item.market==='GOL'&&['over25','under25'].includes(item.key)?'TOTALS_25':item.market;
-    if(usedFamilies.has(family))continue;
-    diversified.push(item);usedFamilies.add(family);
-  }
-  if(diversified.length<3){for(const item of eligible){if(diversified.length>=3)break;if(!diversified.some(x=>x.key===item.key))diversified.push(item);}}
-
+  const topEligible=candidates.filter(x=>
+    !x.topPickExclusion &&
+    x.probability>=50 &&
+    x.evidenceReliability>=.45 &&
+    health>=45
+  ).sort((a,b)=>{
+    const av=a.isBettingValue?1:0, bv=b.isBettingValue?1:0;
+    return bv-av || b.score-a.score || b.probability-a.probability;
+  });
+  const diversify = pool => {
+    const out=[], usedFamilies=new Set();
+    for(const item of pool){
+      if(out.length>=3)break;
+      const family=item.market==='1X2'?'1X2':item.market==='GOL'&&['over25','under25'].includes(item.key)?'TOTALS_25':item.market;
+      if(usedFamilies.has(family))continue;
+      out.push(item);usedFamilies.add(family);
+    }
+    if(out.length<3)for(const item of pool){if(out.length>=3)break;if(!out.some(x=>x.key===item.key))out.push(item);}
+    return out;
+  };
+  const topPredictions=diversify(topEligible);
 
   return {
     allMarkets: candidates,
-    topPredictions: diversified,
-    best: (health >= 45 ? diversified[0] || null : null),
-    valuePicks: eligible,
-    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, requiresFreshOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'], modelHealthGate:healthGate, modelHealthReadiness:modelHealth?.readiness||'unavailable' },
+    topPredictions,
+    best: topPredictions[0] || null,
+    valuePicks: valueEligible,
+    selectionPolicy: {
+      mode:'analysis-first-with-verified-value-overlay',
+      topPicksRequireOdds:false,
+      topPicksMinimumProbability:50,
+      topPicksMinimumEvidenceReliability:.45,
+      topPicksMinimumDataHealth:45,
+      valueRequiresVerifiedOdds:true,
+      valueRequiresFreshOdds:true,
+      valueRequiresPositiveExpectedValue:true,
+      valueUsesUncertaintyAdjustedEdge:true,
+      noBetCustomerFacing:false,
+      excludedMarkets:['shOver05'],
+      modelHealthGate:healthGate,
+      modelHealthReadiness:modelHealth?.readiness||'unavailable'
+    },
   };
 }
 
