@@ -395,44 +395,4 @@ function toResultMatches(fixtures) {
   }));
 }
 
-async function getPreMatchOdds(fixtureId) {
-  if (!fixtureId) return {ok:false,error:'fixture_id_missing',data:[]};
-  const r = await request('/odds/pre-match/fixtures/' + fixtureId, { include:'market;bookmaker' });
-  return r.ok ? {ok:true,data:r.data?.data || []} : r;
-}
-
-function normalizePreMatchOdds(rows) {
-  const list=Array.isArray(rows)?rows:[];
-  const books=new Map();
-  const num=v=>{const n=Number(v);return Number.isFinite(n)&&n>1?n:null;};
-  const freshAt=r=>r.latest_bookmaker_update||r.updated_at||null;
-  for(const r of list){
-    if(r.stopped===true) continue;
-    const bookmaker=String(r.bookmaker?.name||r.bookmaker?.name_en||r.bookmaker_id||'SportMonks');
-    if(!books.has(bookmaker)) books.set(bookmaker,{bookmaker,h2h:{},totals:{},btts:{},teamTotals:{home:{},away:{}},times:[]});
-    const b=books.get(bookmaker), price=num(r.value); if(!price) continue;
-    const desc=String(r.market?.name||r.market_description||'').toLowerCase();
-    const label=String(r.name||r.label||'').toLowerCase();
-    const total=Number(r.total);
-    const ts=freshAt(r); if(ts)b.times.push(new Date(ts).getTime());
-    if(/match winner|fulltime result|3 way|1x2/.test(desc)){
-      if(/home|^1$/.test(label)) b.h2h.home=price;
-      else if(/draw|^x$/.test(label)) b.h2h.draw=price;
-      else if(/away|^2$/.test(label)) b.h2h.away=price;
-    } else if(/both teams.*score|btts/.test(desc)){
-      if(/yes/.test(label)) b.btts.yes=price; else if(/no/.test(label)) b.btts.no=price;
-    } else if(/team.*total/.test(desc) && [1.5,2.5,3.5].includes(total)){
-      const side=/home/.test(label)||String(r.participants||'')==='home'?'home':/away/.test(label)||String(r.participants||'')==='away'?'away':null;
-      if(side){const line=String(total);b.teamTotals[side][line]||={};if(/over/.test(label))b.teamTotals[side][line].over=price;if(/under/.test(label))b.teamTotals[side][line].under=price;}
-    } else if(/over.*under|total goals|goals over/.test(desc) && total===2.5){
-      if(/over/.test(label)) b.totals.over25=price; else if(/under/.test(label)) b.totals.under25=price;
-    }
-  }
-  const bookmakers=[...books.values()].map(b=>{const latest=b.times.filter(Number.isFinite).sort((a,z)=>z-a)[0]||null,ageMs=latest?Date.now()-latest:null;return{bookmaker:b.bookmaker,h2h:b.h2h,totals:b.totals,btts:b.btts,teamTotals:b.teamTotals,updatedAt:latest?new Date(latest).toISOString():null,ageSeconds:Number.isFinite(ageMs)?Math.round(ageMs/1000):null,fresh:Number.isFinite(ageMs)&&ageMs>=0&&ageMs<=15*60*1000};});
-  const best=path=>bookmakers.filter(b=>b.fresh).map(b=>({bookmaker:b.bookmaker,price:path(b)})).filter(x=>Number(x.price)>1).sort((a,b)=>b.price-a.price)[0]||null;
-  const main={home:best(b=>b.h2h.home),draw:best(b=>b.h2h.draw),away:best(b=>b.h2h.away),over25:best(b=>b.totals.over25),under25:best(b=>b.totals.under25)};
-  const complete=main.home&&main.draw&&main.away?{home:main.home.price,draw:main.draw.price,away:main.away.price}:null;
-  return {source:'sportmonks',bookmakers,bookmakerCount:bookmakers.length,best:main,btts:null,matchOdds:complete};
-}
-
-module.exports = { getPreMatchOdds, normalizePreMatchOdds, toResultMatches, getLeagueFixturesByDate, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+module.exports = { toResultMatches, getLeagueFixturesByDate, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
