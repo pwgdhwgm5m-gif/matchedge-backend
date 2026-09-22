@@ -181,3 +181,16 @@ const staleOddsBoard=buildMarketBoard({
 assert.equal(staleOddsBoard.topPredictions.length,0);
 assert.equal(staleOddsBoard.selectionPolicy.requiresFreshOdds,true);
 console.log('stale odds gate tests passed');
+
+const extendedValueBoard=buildMarketBoard({
+ modelProbabilities:{homeWinProbability:58,drawProbability:24,awayWinProbability:18},
+ goalMarkets:{over25GoalsPercent:60,bttsPercent:72,totalGoals:{'1.5':{over:78},'3.5':{over:32,under:68}},scoring:{home:80,away:68},teamGoals:{home:{'1.5':{over:55},'2.5':{over:30},'3.5':{over:12}},away:{'1.5':{over:38},'2.5':{over:16},'3.5':{over:6}}}},
+ cornerMetrics:{over95Percent:52,under95Percent:48},
+ halfMarkets:{...halves,firstHalf:{...halves.firstHalf,homeScores:74,awayScores:48,over05:79}},
+ dataHealth:{score:88},premium:{},evidenceStrength:.85,modelAgreementScore:85,
+ extendedOddsBoard:{bookmakers:[{bookmaker:'testbook',fresh:true,btts:{yes:1.55,no:2.55},firstHalf:{home:2.2,draw:2.6,away:5.2},firstHalfTotal05:{over:1.4,under:3.0},firstHalfTeam05:{home:{over:1.55,under:2.45},away:{over:2.25,under:1.65}}}]}
+});
+assert.ok(extendedValueBoard.allMarkets.find(x=>x.key==='bttsYes')?.verifiedOdds>1);
+assert.ok(extendedValueBoard.allMarkets.find(x=>x.key==='fhHomeScores')?.verifiedOdds>1);
+assert.equal(extendedValueBoard.allMarkets.find(x=>x.key==='fhHomeScores')?.oddsFresh,true);
+console.log('extended odds Top Picks tests passed');
