@@ -29,14 +29,31 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     { key: 'under25', market: 'GOL', label: '2.5 Alt', probability: 100 - Number(goalMarkets?.over25GoalsPercent || 0) },
     { key: 'bttsYes', market: 'KG', label: 'KG Var', probability: Number(goalMarkets?.bttsPercent || 0) },
     { key: 'bttsNo', market: 'KG', label: 'KG Yok', probability: 100 - Number(goalMarkets?.bttsPercent || 0) },
+    { key: 'over15', market: 'GOL', label: '1.5 Üst', probability: Number(goalMarkets?.totalGoals?.['1.5']?.over || 0) },
+    { key: 'over35', market: 'GOL', label: '3.5 Üst', probability: Number(goalMarkets?.totalGoals?.['3.5']?.over || 0) },
+    { key: 'under35', market: 'GOL', label: '3.5 Alt', probability: Number(goalMarkets?.totalGoals?.['3.5']?.under || 0) },
+    { key: 'homeScores', market: 'TAKIM GOLÜ', label: 'Ev Sahibi Gol Atar', probability: Number(goalMarkets?.scoring?.home || 0) },
+    { key: 'awayScores', market: 'TAKIM GOLÜ', label: 'Deplasman Gol Atar', probability: Number(goalMarkets?.scoring?.away || 0) },
+    { key: 'homeOver15', market: 'EV TAKIM GOLÜ', label: 'Ev 1.5 Üst', probability: Number(goalMarkets?.teamGoals?.home?.['1.5']?.over || 0) },
+    { key: 'homeOver25', market: 'EV TAKIM GOLÜ', label: 'Ev 2.5 Üst', probability: Number(goalMarkets?.teamGoals?.home?.['2.5']?.over || 0) },
+    { key: 'homeOver35', market: 'EV TAKIM GOLÜ', label: 'Ev 3.5 Üst', probability: Number(goalMarkets?.teamGoals?.home?.['3.5']?.over || 0) },
+    { key: 'awayOver15', market: 'DEP TAKIM GOLÜ', label: 'Dep 1.5 Üst', probability: Number(goalMarkets?.teamGoals?.away?.['1.5']?.over || 0) },
+    { key: 'awayOver25', market: 'DEP TAKIM GOLÜ', label: 'Dep 2.5 Üst', probability: Number(goalMarkets?.teamGoals?.away?.['2.5']?.over || 0) },
+    { key: 'awayOver35', market: 'DEP TAKIM GOLÜ', label: 'Dep 3.5 Üst', probability: Number(goalMarkets?.teamGoals?.away?.['3.5']?.over || 0) },
     { key: 'cornersOver95', market: 'KORNER', label: '9.5 Üst Korner', probability: Number(cornerMetrics?.over95Percent || 0) },
     { key: 'cornersUnder95', market: 'KORNER', label: '9.5 Alt Korner', probability: Number(cornerMetrics?.under95Percent ?? (100 - Number(cornerMetrics?.over95Percent || 0))) },
     { key: 'fhHome', market: 'İLK YARI', label: 'Ev Sahibi', probability: Number(halfMarkets?.firstHalf?.home || 0) },
     { key: 'fhDraw', market: 'İLK YARI', label: 'Beraberlik', probability: Number(halfMarkets?.firstHalf?.draw || 0) },
     { key: 'fhAway', market: 'İLK YARI', label: 'Deplasman', probability: Number(halfMarkets?.firstHalf?.away || 0) },
+    { key: 'fhHomeScores', market: 'İLK YARI GOL', label: 'Ev İlk Yarı Gol Atar', probability: Number(halfMarkets?.firstHalf?.homeScores || 0) },
+    { key: 'fhAwayScores', market: 'İLK YARI GOL', label: 'Dep İlk Yarı Gol Atar', probability: Number(halfMarkets?.firstHalf?.awayScores || 0) },
+    { key: 'fhOver05', market: 'İLK YARI GOL', label: 'İlk Yarı 0.5 Üst', probability: Number(halfMarkets?.firstHalf?.over05 || 0) },
     { key: 'shHome', market: 'İKİNCİ YARI', label: 'Ev Sahibi', probability: Number(halfMarkets?.secondHalf?.home || 0) },
     { key: 'shDraw', market: 'İKİNCİ YARI', label: 'Beraberlik', probability: Number(halfMarkets?.secondHalf?.draw || 0) },
     { key: 'shAway', market: 'İKİNCİ YARI', label: 'Deplasman', probability: Number(halfMarkets?.secondHalf?.away || 0) },
+    { key: 'shHomeScores', market: 'İKİNCİ YARI GOL', label: 'Ev İkinci Yarı Gol Atar', probability: Number(halfMarkets?.secondHalf?.homeScores || 0) },
+    { key: 'shAwayScores', market: 'İKİNCİ YARI GOL', label: 'Dep İkinci Yarı Gol Atar', probability: Number(halfMarkets?.secondHalf?.awayScores || 0) },
+    { key: 'shOver05', market: 'İKİNCİ YARI GOL', label: 'İkinci Yarı 0.5 Üst', probability: Number(halfMarkets?.secondHalf?.over05 || 0) },
     { key: 'mostGoalsFirst', market: 'EN GOLLÜ YARI', label: 'İlk Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.first || 0) },
     { key: 'mostGoalsEqual', market: 'EN GOLLÜ YARI', label: 'Eşit', probability: Number(halfMarkets?.mostGoalsHalf?.equal || 0) },
     { key: 'mostGoalsSecond', market: 'EN GOLLÜ YARI', label: 'İkinci Yarı', probability: Number(halfMarkets?.mostGoalsHalf?.second || 0) },
@@ -50,6 +67,9 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       else if(item.key==='bttsYes') evidence=ev.bttsQuality;
       else if(item.key==='bttsNo') evidence=ev.bttsQuality!=null?2-ev.bttsQuality:null;
       else if(item.market==='KORNER') evidence=item.key==='cornersOver95'?ev.cornerQuality:(ev.cornerQuality!=null?2-ev.cornerQuality:null);
+      else if(item.market==='TAKIM GOLÜ'||item.market==='EV TAKIM GOLÜ') evidence=item.key.startsWith('home')?ev.homeThreat:ev.awayThreat;
+      else if(item.market==='DEP TAKIM GOLÜ') evidence=ev.awayThreat;
+      else if(item.market==='İLK YARI GOL'||item.market==='İKİNCİ YARI GOL') evidence=ev.goalQuality;
       const evidenceBonus=evidence==null?0:clamp((evidence-1)*12,-4,4);
       // Rank markets by their own evidence quality. A high headline probability
       // should not outrank a better-supported market merely because it is more
