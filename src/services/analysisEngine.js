@@ -13,6 +13,7 @@ const accuracy = require('./accuracyEngineService');
 const footballDataOdds = require('./footballDataUpcomingOddsService');
 const sportmonks = require('./sportmonksService');
 const powerRating = require('./powerRatingService');
+const predictionLedger = require('./predictionLedgerService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -582,6 +583,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     return { homeThreat, awayThreat, goalQuality, bttsQuality, cornerQuality, sample, venueSplit:true };
   })();
 
+  const modelHealth = await predictionLedger.calibrationHealth({cached:true}).catch(()=>null);
+
   const marketBoard = premiumIntelligence.buildMarketBoard({
     modelProbabilities: matchProbabilities,
     goalMarkets: marketProbabilities,
@@ -594,6 +597,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     evidenceStrength,
     modelAgreementScore: agreementScore,
     marketOddsBoard,
+    modelHealth,
   });
 
   return {
