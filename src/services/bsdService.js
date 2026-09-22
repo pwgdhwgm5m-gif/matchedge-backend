@@ -38,6 +38,7 @@
 
 const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
+const fixtureIdentity = require('./fixtureIdentityService');
 
 const BASE_URL = 'https://sports.bzzoiro.com/api/v2';
 const API_KEY = process.env.BSD_API_KEY || '';
