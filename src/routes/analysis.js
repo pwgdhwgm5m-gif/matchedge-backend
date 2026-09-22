@@ -5,6 +5,7 @@ const { computeFullAnalysis } = require('../services/analysisEngine');
 const sportsDb = require('../services/sportsDbService');
 const ledger = require('../services/predictionLedgerService');
 const sportmonks = require('../services/sportmonksService');
+const sourcePolicy = require('../services/sourcePolicyService');
 const premiumLab = require('../services/premiumLabService');
 
 /**
@@ -90,11 +91,13 @@ router.get('/:fixtureId', async (req, res) => {
     });
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 22000));
     let result = await Promise.race([analysisPromise, timeoutPromise]);
+    // SportMonks is queried only for the six subscribed core leagues.
+    const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
     // Add verified Sportmonks fixture intelligence when we can map the match.
-    const smLive = await Promise.race([
+    const smLive = providerPolicy.sportmonks ? await Promise.race([
       cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores()),
       new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_timeout'}), 3500))
-    ]);
+    ]) : {ok:false,error:'sportmonks_not_subscribed_for_league'};
     const sm = smLive.ok ? sportmonks.findMatch(smLive.fixtures, homeTeamName, awayTeamName) : null;
     if (sm?.sportmonksId) {
       const intel = await Promise.race([
