@@ -145,3 +145,15 @@ assert.equal(possessionOnly.available,true);
 assert.equal(possessionOnly.confidence,5);
 assert.equal(calculateMatchDominance({}, {}, {}).available,false);
 console.log('live match dominance tests passed');
+
+const evidenceHalves = calculateHalfMarkets(2.0,1.0,{
+  source:'test-verified-halftime',homeFirstRate:1.1,homeSecondRate:.7,awayFirstRate:.25,awaySecondRate:.75,homeSample:10,awaySample:10
+});
+assert.equal(evidenceHalves.evidence.source,'test-verified-halftime');
+assert.ok(evidenceHalves.evidence.homeFirstShare>45);
+assert.ok(evidenceHalves.evidence.awayFirstShare<45);
+assert.ok(evidenceHalves.firstHalf.homeScores>halves.firstHalf.homeScores-20);
+const sparseHalves=calculateHalfMarkets(2,1,{homeFirstRate:2,homeSecondRate:.2,awayFirstRate:.2,awaySecondRate:2,homeSample:1,awaySample:1});
+assert.ok(sparseHalves.evidence.homeFirstShare<50);
+assert.ok(sparseHalves.evidence.awayFirstShare>40);
+console.log('half-specific evidence tests passed');
