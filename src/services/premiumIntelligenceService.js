@@ -158,7 +158,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     const healthMarket=item.key==='bttsYes'||item.key==='bttsNo'?'btts':item.key==='under25'?'over25':item.key;
     const degraded=healthGate&&(driftMarkets.has(healthMarket)||bucketMarkets.has(healthMarket));
     item.isBettingValue=Boolean(!excludedFromTopPicks && !degraded && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
-    item.topPickExclusion = excludedFromTopPicks ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : (degraded ? 'MODEL_HEALTH_GATE' : null);
+    item.topPickExclusion = !cornerTopPickReady ? 'INSUFFICIENT_REAL_CORNER_EVIDENCE' : (item.key==='shOver05' ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : (degraded ? 'MODEL_HEALTH_GATE' : null));
     item.valueScore=item.isBettingValue
       ? +(item.expectedValuePercent*.45 + item.edgePoints*.35 + item.evidenceReliability*20).toFixed(2)
       : null;
