@@ -559,4 +559,23 @@ async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
   return {available:true,source:'bsd',eventId:getEventId(event),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate };
+
+async function diagnostic(dateStr) {
+  const safe = async (name, fn) => {
+    try {
+      const r = await fn();
+      const list = r && r.data ? extractList(r.data) : [];
+      return { name, ok: !!r?.ok, error: r?.error || null, count: list.length,
+        sample: list.slice(0,2).map(e=>({id:getEventId(e),home:getHomeTeamName(e),away:getAwayTeamName(e),kickoff:getKickoff(e),status:pickField(e,['status','state','status_short','state.name']),homeScore:pickField(e,['home_score','score.home','scores.fulltime.home']),awayScore:pickField(e,['away_score','score.away','scores.fulltime.away'])})) };
+    } catch (e) { return {name,ok:false,error:e.message,count:0,sample:[]}; }
+  };
+  const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=200';
+  const tests=[];
+  tests.push(await safe('events-day',()=>fetchBsdCached(base,1,8000)));
+  tests.push(await safe('fa-cup-finished',()=>fetchBsdCached(base+'&league_id=39&status=finished',1,8000)));
+  tests.push(await safe('live',()=>fetchBsdCached('/events/live/',1,8000)));
+  const fa=await getResultMatchesForDate(dateStr);
+  return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
+}
+
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, diagnostic };
