@@ -387,4 +387,52 @@ async function getStatsForMatch(homeTeam,awayTeam,kickoffIso) {
   return {available:true,eventId,source:'bsd',data:result.data};
 }
 
-module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch };
+
+function normalizeConsensusOdds(payload) {
+  const root=payload?.odds || payload?.data?.odds || payload || {};
+  const n=v=>{const x=Number(v);return Number.isFinite(x)&&x>1?x:null;};
+  const updatedAt=payload?.last_update_at || payload?.updated_at || payload?.data?.last_update_at || null;
+  const ageMs=updatedAt ? Date.now()-new Date(updatedAt).getTime() : null;
+  // BSD publishes its own refresh schedule. We preserve freshness rather than
+  // pretending consensus is a live bookmaker quote.
+  const fresh=Number.isFinite(ageMs)&&ageMs>=0&&ageMs<=6*60*60*1000;
+  return {
+    source:'bsd-consensus',
+    executable:false,
+    consensus:true,
+    updatedAt,
+    ageSeconds:Number.isFinite(ageMs)?Math.round(ageMs/1000):null,
+    fresh,
+    h2h:{home:n(root.home_win),draw:n(root.draw),away:n(root.away_win)},
+    totals:{
+      over15:n(root.over_15_goals),under15:n(root.under_15_goals),
+      over25:n(root.over_25_goals),under25:n(root.under_25_goals),
+      over35:n(root.over_35_goals),under35:n(root.under_35_goals)
+    },
+    btts:{yes:n(root.btts_yes),no:n(root.btts_no)}
+  };
+}
+
+async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
+  if(!API_KEY) return {available:false,error:'no_api_key'};
+  const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
+  if(!eventId) return {available:false,error:'event_not_found'};
+  const [stats,lineups,h2h,prediction,odds]=await Promise.all([
+    fetchBsd('/events/'+eventId+'/stats/',5000),
+    fetchBsd('/events/'+eventId+'/lineups/',5000),
+    fetchBsd('/events/'+eventId+'/h2h/',5000),
+    fetchBsd('/events/'+eventId+'/prediction/',5000),
+    fetchBsd('/events/'+eventId+'/odds/',5000)
+  ]);
+  return {
+    available:true,eventId,source:'bsd',
+    stats:stats.ok?stats.data:null,
+    lineups:lineups.ok?lineups.data:null,
+    h2h:h2h.ok?h2h.data:null,
+    prediction:prediction.ok?prediction.data:null,
+    consensusOdds:odds.ok?normalizeConsensusOdds(odds.data):null,
+    coverage:{stats:stats.ok,lineups:lineups.ok,h2h:h2h.ok,prediction:prediction.ok,odds:odds.ok}
+  };
+}
+
+module.exports = { getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds };
