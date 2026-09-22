@@ -138,11 +138,23 @@ function calculateMarketProbabilities(homeLambda, awayLambda, maxGoals = 12, rho
   };
 }
 
-function calculateHalfMarkets(homeLambda, awayLambda) {
-  const firstHalf = calculateMatchProbabilities(homeLambda * 0.45, awayLambda * 0.45, 5);
-  const secondHalf = calculateMatchProbabilities(homeLambda * 0.55, awayLambda * 0.55, 5);
-  const firstTotal = (homeLambda + awayLambda) * 0.45;
-  const secondTotal = (homeLambda + awayLambda) * 0.55;
+function calculateHalfMarkets(homeLambda, awayLambda, evidence = null) {
+  const boundedShare=(first,second,sample)=>{
+    if(!Number.isFinite(first)||!Number.isFinite(second)||first+second<=0)return .45;
+    const observed=clamp(first/(first+second),.30,.62);
+    const w=Math.min(.70,Math.max(0,Number(sample||0))/10*.70);
+    return .45*(1-w)+observed*w;
+  };
+  // 45/55 remains the conservative league prior. Verified half-specific
+  // Sportmonks history may move each team's split, with sample shrinkage.
+  const hs=boundedShare(Number(evidence?.homeFirstRate),Number(evidence?.homeSecondRate),evidence?.homeSample);
+  const as=boundedShare(Number(evidence?.awayFirstRate),Number(evidence?.awaySecondRate),evidence?.awaySample);
+  const homeFirstLambda=homeLambda*hs, awayFirstLambda=awayLambda*as;
+  const homeSecondLambda=Math.max(0,homeLambda-homeFirstLambda), awaySecondLambda=Math.max(0,awayLambda-awayFirstLambda);
+  const firstHalf = calculateMatchProbabilities(homeFirstLambda, awayFirstLambda, 5);
+  const secondHalf = calculateMatchProbabilities(homeSecondLambda, awaySecondLambda, 5);
+  const firstTotal = homeFirstLambda + awayFirstLambda;
+  const secondTotal = homeSecondLambda + awaySecondLambda;
   let firstMore = 0, secondMore = 0, equal = 0;
   for (let first = 0; first <= 6; first++) {
     for (let second = 0; second <= 6; second++) {
@@ -155,12 +167,12 @@ function calculateHalfMarkets(homeLambda, awayLambda) {
   return {
     firstHalf: {
       home: firstHalf.homeWinProbability, draw: firstHalf.drawProbability, away: firstHalf.awayWinProbability,
-      homeScores: scoreAtLeastOnce(homeLambda * 0.45), awayScores: scoreAtLeastOnce(awayLambda * 0.45),
+      homeScores: scoreAtLeastOnce(homeFirstLambda), awayScores: scoreAtLeastOnce(awayFirstLambda),
       over05: scoreAtLeastOnce(firstTotal),
     },
     secondHalf: {
       home: secondHalf.homeWinProbability, draw: secondHalf.drawProbability, away: secondHalf.awayWinProbability,
-      homeScores: scoreAtLeastOnce(homeLambda * 0.55), awayScores: scoreAtLeastOnce(awayLambda * 0.55),
+      homeScores: scoreAtLeastOnce(homeSecondLambda), awayScores: scoreAtLeastOnce(awaySecondLambda),
       over05: scoreAtLeastOnce(secondTotal),
     },
     mostGoalsHalf: {
@@ -168,6 +180,11 @@ function calculateHalfMarkets(homeLambda, awayLambda) {
       equal: +((equal / total) * 100).toFixed(1),
       second: +((secondMore / total) * 100).toFixed(1),
     },
+    evidence: {
+      source:evidence?.source || 'league-prior-45-55',
+      homeFirstShare:+(hs*100).toFixed(1), awayFirstShare:+(as*100).toFixed(1),
+      homeSample:Number(evidence?.homeSample||0), awaySample:Number(evidence?.awaySample||0)
+    }
   };
 }
 
