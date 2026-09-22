@@ -49,6 +49,18 @@ async function getEventsForLeague(sportKey) {
   return result;
 }
 
+async function getEventExtendedOdds(sportKey,eventId){
+ if(!oddsEnabled()||!sportKey||!eventId)return {ok:false,error:'extended_odds_unavailable'};
+ const cacheKey=`extendedOdds:${sportKey}:${eventId}`;
+ const hit=cache.get(cacheKey);if(hit)return {ok:true,data:hit,cached:true};
+ const result=await fetchT({method:'GET',url:`${config.oddsApi.baseUrl}/sports/${sportKey}/events/${eventId}/odds`,params:{
+  apiKey:config.oddsApi.key,regions:'eu',markets:'btts,h2h_3_way_h1,totals_h1,team_totals_h1',oddsFormat:'decimal'
+ }},6000,'The Odds API Extended');
+ if(!result.ok){markOddsFailure(result);return result;}
+ cache.set(cacheKey,result.data,5*60);
+ return result;
+}
+
 async function getFixtureEventsByDate(dateStr) {
   if (!oddsEnabled()) return { ok:false,error:'odds_api_disabled_or_circuit_open',matches:[] };
   const keys=config.trackedLeagues||[]; const matches=[];
@@ -210,6 +222,27 @@ function extractMatchMarketOdds(oddsResponse,homeTeamName,awayTeamName){
  return{bookmakers:books.length,best:{home:best(b=>b.h2h?.home),draw:best(b=>b.h2h?.draw),away:best(b=>b.h2h?.away),over25:best(b=>b.totals?.over25),under25:best(b=>b.totals?.under25)},btts:null};
 }
 
+function extractExtendedMarketOdds(event,homeTeamName,awayTeamName){
+ if(!event?.bookmakers?.length)return null;
+ const books=[];
+ for(const b of event.bookmakers){
+  const market=k=>b.markets?.find(x=>x.key===k);
+  const pair=(m,yes='Yes',no='No')=>m?{yes:m.outcomes?.find(o=>String(o.name).toLowerCase()===yes.toLowerCase())?.price,no:m.outcomes?.find(o=>String(o.name).toLowerCase()===no.toLowerCase())?.price}:null;
+  const btts=pair(market('btts'));
+  const h1=market('h2h_3_way_h1');
+  const firstHalf=h1?{home:h1.outcomes?.find(o=>teamNamesMatch(o.name,homeTeamName))?.price,draw:h1.outcomes?.find(o=>normalizeTeamName(o.name)==='draw')?.price,away:h1.outcomes?.find(o=>teamNamesMatch(o.name,awayTeamName))?.price}:null;
+  const t1=market('totals_h1'),line05=(t1?.outcomes||[]).filter(o=>Number(o.point)===0.5);
+  const firstHalfTotal05=line05.length?{over:line05.find(o=>/^over$/i.test(o.name))?.price,under:line05.find(o=>/^under$/i.test(o.name))?.price}:null;
+  const tt=market('team_totals_h1');
+  const team05={};
+  for(const o of tt?.outcomes||[]){if(Number(o.point)!==0.5)continue;const desc=String(o.description||'');const side=teamNamesMatch(desc,homeTeamName)?'home':teamNamesMatch(desc,awayTeamName)?'away':null;if(side)team05[side]||(team05[side]={});if(/^over$/i.test(o.name))team05[side].over=o.price;if(/^under$/i.test(o.name))team05[side].under=o.price;}
+  const times=[b.last_update,...(b.markets||[]).map(x=>x.last_update)].filter(Boolean).map(x=>new Date(x).getTime()).filter(Number.isFinite);
+  const latest=times.length?Math.max(...times):null,ageMs=latest?Date.now()-latest:null,fresh=Number.isFinite(ageMs)&&ageMs>=0&&ageMs<=15*60*1000;
+  books.push({bookmaker:b.title||b.key,fresh,updatedAt:latest?new Date(latest).toISOString():null,btts,firstHalf,firstHalfTotal05,firstHalfTeam05:team05});
+ }
+ return {bookmakers:books};
+}
+
 /**
  * Ondalik oranlari, bookmaker marjini (overround) cikarilmis gercek
  * olasiliklara cevirir. Oranlarin ham 1/oran toplami her zaman %100'u
@@ -290,6 +323,7 @@ function marketDivergence(model,market){
 
 module.exports = {
   getOddsForLeague,
+  getEventExtendedOdds,
   getEventsForLeague,
   getFixtureEventsByDate,
   hasMatchesToday,
@@ -299,6 +333,7 @@ module.exports = {
   findValueBets,
   extractMatchOdds,
   extractMatchMarketOdds,
+  extractExtendedMarketOdds,
   normalizeImpliedProbabilities,
   shinImpliedProbabilities,
   marketDivergence,
