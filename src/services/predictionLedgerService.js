@@ -219,7 +219,9 @@ function driftFlags(predictions){
 }
 async function calibrationHealth(){
  const rows=await Prediction.find({status:'settled',modelVersion:VERSION}).sort({kickoff:1}).select('league probabilities actual kickoff calibrationVersion selectionVersion').lean();
- return {modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets:probabilityBuckets(rows),drift:driftFlags(rows),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
+ const buckets=probabilityBuckets(rows),drift=driftFlags(rows);
+ const bucketAlerts=buckets.filter(b=>b.n>=20&&Math.abs(b.gapPercent)>=8).map(b=>({market:b.market,range:[b.from,b.to],count:b.n,gapPercent:b.gapPercent,wilson95:b.wilson95,severity:Math.abs(b.gapPercent)>=12?'high':'watch'}));
+ return {modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets,drift,bucketAlerts,healthy:drift.every(x=>x.severity!=='high')&&bucketAlerts.every(x=>x.severity!=='high'),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
 }
 async function pairedAudit(){
  const rows=await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities comparisonProbabilities actual kickoff').lean();
