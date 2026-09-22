@@ -23,7 +23,7 @@ const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
 const SUPERLIG_LEAGUE_ID = '71';
 
-async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey }) {
+async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey, kickoff }) {
   const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
   const useSportmonksPrimary = providerPolicy.sportmonks === true;
   const useBsdPrimary = providerPolicy.primary === 'bsd';
@@ -635,8 +635,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // Capture it as provenance/comparison evidence first; calibration can later
   // assign weight prospectively after enough settled samples exist.
   const [bsdPrediction, bsdConsensusOdds] = await Promise.all([
-    Promise.race([bsd.getPredictionForMatch(homeTeamName,awayTeamName,null),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))]),
-    Promise.race([bsd.getConsensusOddsForMatch(homeTeamName,awayTeamName,null),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))])
+    Promise.race([bsd.getPredictionForMatch(homeTeamName,awayTeamName,kickoff),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))]),
+    Promise.race([bsd.getConsensusOddsForMatch(homeTeamName,awayTeamName,kickoff),new Promise(r=>setTimeout(()=>r({available:false,error:'timeout'}),2200))])
   ]);
 
   const modelHealth = await predictionLedger.calibrationHealth({cached:true}).catch(()=>null);
