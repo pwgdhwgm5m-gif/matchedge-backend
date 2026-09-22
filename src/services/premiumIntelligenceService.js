@@ -16,7 +16,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null, modelHealth=null }) {
   let health = Number(dataHealth?.score || 0);
   const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
   const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
@@ -98,6 +98,9 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   // meaningful de-vigged edge. High-base-rate markets (for example 2H O0.5)
   // stay available in analysis but cannot dominate Top Picks merely because
   // their raw occurrence probability is high.
+  const healthGate=modelHealth?.readiness==='decision-ready'&&modelHealth?.healthy===false;
+  const driftMarkets=new Set((modelHealth?.drift||[]).filter(x=>x.severity==='high').map(x=>x.market));
+  const bucketMarkets=new Set((modelHealth?.bucketAlerts||[]).filter(x=>x.severity==='high').map(x=>x.market));
   const priceMap = new Map();
   const books = Array.isArray(marketOddsBoard?.bookmakers) ? marketOddsBoard.bookmakers : [];
   const registerBook = (bookmaker, family, odds) => {
@@ -153,7 +156,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     allMarkets: candidates,
     topPredictions: diversified,
     best: (health >= 45 ? diversified[0] || null : null),
-    valuePicks: eligible,\n    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'] },
+    valuePicks: eligible,\n    selectionPolicy: { mode:'verified-value', requiresVerifiedOdds:true, positiveExpectedValue:true, uncertaintyAdjustedEdge:true, noBetWhenEmpty:true, excludedMarkets:['shOver05'], modelHealthGate:healthGate, modelHealthReadiness:modelHealth?.readiness||'unavailable' },
   };
 }
 
