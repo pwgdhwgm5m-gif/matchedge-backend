@@ -29,7 +29,7 @@ router.get('/', async (req, res) => {
   const rawEvents = result && result.ok ? (result.data?.events || []) : [];
   let simplified = rawEvents
     .map(sportsDb.transformEvent)
-    .filter(m => sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId, m.league));
+    .filter(m => sportsDb.isWhitelistedLeague(m.leagueId));
 
   // cupFixtureService dizi dondurur; eski kod bunu {ok,matches} sanip
   // supplemental fiksturleri sessizce atiyordu.
