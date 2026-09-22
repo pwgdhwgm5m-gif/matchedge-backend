@@ -149,7 +149,8 @@ app.listen(config.port, async () => {
         console.log('[prediction-ledger/auto-settle]',settled,'fixtures settled and power ratings updated');
         const calibration=require('./services/modelCalibrationService');
         const trained=await calibration.retrain();
-        console.log('[model-calibration/after-settlement]',JSON.stringify(trained));
+        const rollback=await calibration.deactivateStaleOrRegressed();
+        console.log('[model-calibration/after-settlement]',JSON.stringify({...trained,rollback}));
       }
     } catch(error){ console.warn('[prediction-ledger/auto-settle]',error.message); }
   };
