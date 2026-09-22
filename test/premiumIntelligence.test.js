@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict');
 const { buildPremiumIntelligence, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
-const { calculateHalfMarkets } = require('../src/services/poissonService');
+const { calculateHalfMarkets, calculateMarketProbabilities, estimateCornerMetrics } = require('../src/services/poissonService');
 
 const strong = buildPremiumIntelligence({
   modelProbabilities: { homeWinProbability: 60, drawProbability: 23, awayWinProbability: 17 },
@@ -56,12 +56,13 @@ console.log('premiumIntelligence tests passed');
 
 const board = buildMarketBoard({
   modelProbabilities: { homeWinProbability: 44, drawProbability: 28, awayWinProbability: 28 },
-  goalMarkets: { over25GoalsPercent: 68, bttsPercent: 61 },
-  cornerMetrics: { over85Percent: 72 },
+  goalMarkets: { over25GoalsPercent: 68, bttsPercent: 61, totalGoals:{'1.5':{over:82,under:18},'3.5':{over:44,under:56}}, teamGoals:{home:{'1.5':{over:67},'2.5':{over:42},'3.5':{over:22}},away:{'1.5':{over:31},'2.5':{over:12},'3.5':{over:4}}}, scoring:{home:84,away:55} },
+  cornerMetrics: { over95Percent: 62, under95Percent:38 },
   dataHealth: { score: 80 },
   premium: { status: 'PICK', selection: 'home', bestEdge: null },
 });
-assert.equal(board.best.key, 'cornersOver85');
+assert.ok(board.allMarkets.some(item => item.key === 'homeOver15'));
+assert.ok(board.allMarkets.some(item => item.key === 'homeScores'));
 assert.equal(board.topPredictions.length, 3);
 assert.ok(board.topPredictions.some(item => item.key === 'over25'));
 
@@ -69,3 +70,18 @@ const halves = calculateHalfMarkets(1.8, 0.9);
 assert.ok(halves.firstHalf.home > halves.firstHalf.away);
 assert.ok(halves.secondHalf.home > halves.secondHalf.away);
 assert.ok(halves.mostGoalsHalf.second > halves.mostGoalsHalf.first);
+
+
+const expanded = calculateMarketProbabilities(3.2, 0.8);
+assert.ok(expanded.teamGoals.home['2.5'].over > expanded.teamGoals.away['2.5'].over);
+assert.ok(expanded.totalGoals['1.5'].over > expanded.totalGoals['4.5'].over);
+assert.ok(expanded.scoring.home > expanded.scoring.away);
+
+const highGoalNoCornerData = estimateCornerMetrics(5.5, 1.2);
+assert.equal(highGoalNoCornerData.source, 'league-prior-bounded-tempo');
+assert.ok(highGoalNoCornerData.expectedTotal <= 10.3);
+assert.ok(highGoalNoCornerData.over85Percent < 80);
+
+assert.ok(halves.firstHalf.homeScores > halves.firstHalf.awayScores);
+assert.ok(halves.secondHalf.homeScores > halves.secondHalf.awayScores);
+console.log('expanded market probability tests passed');
