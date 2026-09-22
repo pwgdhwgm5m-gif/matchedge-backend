@@ -432,7 +432,7 @@ function normalizePreMatchOdds(rows) {
   const best=path=>bookmakers.filter(b=>b.fresh).map(b=>({bookmaker:b.bookmaker,price:path(b)})).filter(x=>Number(x.price)>1).sort((a,b)=>b.price-a.price)[0]||null;
   const main={home:best(b=>b.h2h.home),draw:best(b=>b.h2h.draw),away:best(b=>b.h2h.away),over25:best(b=>b.totals.over25),under25:best(b=>b.totals.under25)};
   const complete=main.home&&main.draw&&main.away?{home:main.home.price,draw:main.draw.price,away:main.away.price}:null;
-  return {source:'sportmonks',bookmakers:bookmakers.length,bookmakerRows:bookmakers,best:main,btts:null,matchOdds:complete};
+  return {source:'sportmonks',bookmakers,bookmakerCount:bookmakers.length,best:main,btts:null,matchOdds:complete};
 }
 
 module.exports = { getPreMatchOdds, normalizePreMatchOdds, toResultMatches, getLeagueFixturesByDate, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
