@@ -79,7 +79,7 @@ async function retrain() {
 async function offsets() {
   if (Date.now() < cacheUntil) return cached;
   try {
-    const rows = await ModelCalibration.find({active:true, calibrationVersion:CALIBRATION_VERSION, trainedAt:{$gte:new Date(Date.now()-30*86400000)}}).select('key logitOffset modelVersion').lean();
+    const rows = await ModelCalibration.find({active:true, modelVersion:MODEL_VERSION, calibrationVersion:CALIBRATION_VERSION, trainedAt:{$gte:new Date(Date.now()-30*86400000)}}).select('key logitOffset modelVersion').lean();
     cached = new Map(rows.map(row => [row.key, row.logitOffset]));
     cacheUntil = Date.now() + 15*60000;
   } catch (error) {
