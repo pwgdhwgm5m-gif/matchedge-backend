@@ -154,7 +154,12 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     // it does not multiply probabilities or manufacture a larger edge.
     const uncertaintyBuffer=+(2+(1-item.evidenceReliability)*4).toFixed(1);
     item.valueThresholdPoints=uncertaintyBuffer;
-    const excludedFromTopPicks = item.key === 'shOver05';
+    const cornerTopPickReady = item.market!=='KORNER' || (
+      Number(cornerMetrics?.sample)>=8 &&
+      cornerMetrics?.lowEvidence!==true &&
+      ['sportmonks-history-pressure','historical-corners'].includes(String(cornerMetrics?.source||''))
+    );
+    const excludedFromTopPicks = item.key === 'shOver05' || !cornerTopPickReady;
     const healthMarket=item.key==='bttsYes'||item.key==='bttsNo'?'btts':item.key==='under25'?'over25':item.key;
     const degraded=healthGate&&(driftMarkets.has(healthMarket)||bucketMarkets.has(healthMarket));
     item.isBettingValue=Boolean(!excludedFromTopPicks && !degraded && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
