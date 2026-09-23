@@ -32,11 +32,19 @@ app.set('trust proxy', 1);
 const configuredOrigins = String(process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
   .split(',').map(x => x.trim()).filter(Boolean);
 const developmentOrigins = ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5500'];
-const allowedOrigins = configuredOrigins.length
-  ? configuredOrigins
-  : (config.nodeEnv === 'production'
-    ? ['https://app.socceredgepro.com', 'https://pwgdhwgm5m-gif.github.io']
-    : developmentOrigins);
+const defaultProductionOrigins = [
+  'https://app.socceredgepro.com',
+  'https://socceredgepro.com',
+  'https://www.socceredgepro.com',
+  'https://matchedge-frontend.onrender.com',
+  'https://pwgdhwgm5m-gif.github.io'
+];
+// Keep configured origins, but always include the actual deployed frontend
+// domains so a stale CORS_ORIGINS secret cannot take the app offline.
+const allowedOrigins = [...new Set([
+  ...(config.nodeEnv === 'production' ? defaultProductionOrigins : developmentOrigins),
+  ...configuredOrigins
+])];
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -73,7 +81,7 @@ app.use((req, res, next) => {
 
 // Keep-alive ping'in hedef aldigi endpoint - cok hafif olmali
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), couponSettlement: 'provider-fallback-v5' });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), couponSettlement: 'provider-fallback-v6' });
 });
 
 app.use('/api/admin-passkey', adminPasskeyRoute);
