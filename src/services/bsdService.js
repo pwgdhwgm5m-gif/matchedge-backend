@@ -389,11 +389,28 @@ async function getHalftimeScoreForMatch(homeTeam, awayTeam, kickoffIso) {
 }
 
 
+function eventStatusText(e) {
+  const candidates=[
+    pickField(e,['status_short']),pickField(e,['state.short_name']),pickField(e,['state.name']),
+    pickField(e,['status.short_name']),pickField(e,['status.name']),pickField(e,['status']),pickField(e,['state'])
+  ];
+  for(const v of candidates){
+    if(v==null)return '';
+    if(typeof v==='object'){
+      const nested=v.short_name||v.name||v.status||v.state;
+      if(nested)return String(nested);
+      continue;
+    }
+    if(String(v).trim())return String(v);
+  }
+  return '';
+}
+
 function eventToResultMatch(e) {
   const homeScore=toScoreNumber(pickField(e,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
   const awayScore=toScoreNumber(pickField(e,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
   const ht=extractHalftimeScore(e);
-  const rawStatus=String(pickField(e,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
+  const rawStatus=eventStatusText(e).toLowerCase();
   const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
   const live=/live|in.?play|1st|2nd|half.?time|ht/.test(rawStatus) && !finished;
   return {
@@ -406,7 +423,7 @@ function eventToResultMatch(e) {
     halftimeHome:ht?.home??null, halftimeAway:ht?.away??null,
     league:String(e.__soccerEdgeLeagueName||pickField(e,['league.name','league_name','competition.name','competition_name','competition.title','competition_title','competition','league.title','league','tournament.name','tournament_name'])||''),
     leagueId:String(pickField(e,['league.id','league_id','competition.id','competition_id'])||''),
-    statusShort:finished?'FT':(live?String(pickField(e,['status_short','state.short_name','status'])||'LIVE').toUpperCase():'NS'),
+    statusShort:finished?'FT':(live?(eventStatusText(e)||'LIVE').toUpperCase():'NS'),
     minute:(()=>{const v=pickField(e,['minute','elapsed','time.elapsed','timer.minute','clock.minute','match_minute','time','timer','clock','status_detail','status_text']);const n=Number(String(v??'').replace(/[^0-9.]/g,''));return Number.isFinite(n)&&n>0?n:null;})(),
     isLive:live,
     source:'bsd'
