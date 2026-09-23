@@ -66,6 +66,15 @@ try {
   });
 }
 app.use(express.json());
+// The legacy admin console is a self-contained page with inline event handlers.
+// Keep the strict Helmet CSP everywhere else, but allow that page to execute its
+// own handlers so the Passkey / Face ID button is usable.
+app.use((req, res, next) => {
+  if (req.path === '/admin' || req.path === '/admin.html') {
+    res.set('Content-Security-Policy', "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'self'; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline'; script-src-attr 'unsafe-inline'; style-src 'self' https: 'unsafe-inline'; connect-src 'self'; upgrade-insecure-requests");
+  }
+  next();
+});
 app.use(express.static(path.join(process.cwd(), 'public')));
 app.get('/admin', (req, res) => res.sendFile(path.join(process.cwd(), 'public', 'admin.html')));
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 40, keyPrefix: 'auth' }));
