@@ -103,7 +103,17 @@ async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   // This prevents a match being visible as FT in Results while remaining pending in a coupon.
   // Search adjacent UTC dates too: the stored kickoff date and the provider's
   // local fixture date can differ around midnight. Match exact provider ID first.
-  const day=new Date(matchDate+'T12:00:00Z');
+  const rawDate=String(matchDate||kickoff||'').trim();
+  let dateKey=/^\d{4}-\d{2}-\d{2}/.test(rawDate)?rawDate.slice(0,10):'';
+  if(!dateKey){
+    const parsed=new Date(rawDate);
+    if(!Number.isNaN(parsed.getTime()))dateKey=parsed.toISOString().slice(0,10);
+  }
+  if(!dateKey){
+    console.warn('[coupons/bsd-date-invalid]',JSON.stringify({fixtureId,homeTeam,awayTeam,matchDate,kickoff}));
+    return null;
+  }
+  const day=new Date(dateKey+'T12:00:00Z');
   const dates=[0,-1,1].map(offset=>new Date(day.getTime()+offset*86400000).toISOString().slice(0,10));
   const knownIds=[providerIds.bsd,mappedIds.bsd].filter(Boolean).map(String);
   for(const date of dates){
