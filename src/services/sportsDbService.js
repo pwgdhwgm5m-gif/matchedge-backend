@@ -643,7 +643,24 @@ async function attachHalftimeScores(matches) {
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
     const batch = candidates.slice(i, i + CONCURRENCY);
     await Promise.all(batch.map(async function (m) {
-      const ht = await computeHalftimeScore(m.fixtureId, m.homeScore, m.awayScore);
+      let ht = { home:null, away:null };
+      // The live feed often omits HT; lookup-event carries the provider's
+      // official half-time fields. Cache found details and retry misses briefly.
+      const detailKey = 'sportsdb-detail:' + String(m.fixtureId);
+      let detail = cache.get(detailKey);
+      if (detail === undefined) {
+        detail = await getEventById(m.fixtureId).catch(function () { return { ok:false }; });
+        cache.set(detailKey, detail, detail?.ok ? HALFTIME_CACHE_TTL : 60);
+      }
+      const event = detail?.ok ? (detail.data?.events || [])[0] : null;
+      const direct = event ? transformEvent(event) : null;
+      if (direct?.halftimeHome != null && direct?.halftimeAway != null) {
+        ht = { home:direct.halftimeHome, away:direct.halftimeAway };
+        m.halftimeSource = 'sportsdb-event-detail';
+      } else {
+        ht = await computeHalftimeScore(m.fixtureId, m.homeScore, m.awayScore);
+        if (ht.home != null && ht.away != null) m.halftimeSource = 'sportsdb-timeline';
+      }
       m.halftimeHome = ht.home;
       m.halftimeAway = ht.away;
     }));
