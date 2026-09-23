@@ -107,7 +107,7 @@ async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   const dates=[0,-1,1].map(offset=>new Date(day.getTime()+offset*86400000).toISOString().slice(0,10));
   const knownIds=[providerIds.bsd,mappedIds.bsd].filter(Boolean).map(String);
   for(const date of dates){
-    const pool=await bsdService.getResultMatchesForDate(date).catch(()=>({ok:false,matches:[]}));
+    const pool=await bsdService.getRawFinalMatchesForDate(date).catch(()=>({ok:false,matches:[]}));
     if(!pool.ok)continue;
     const rows=pool.matches||[];
     const hit=rows.find(m=>knownIds.includes(String(m.fixtureId||m.bsdId||m.eventId||''))&&finalMatch(m))
