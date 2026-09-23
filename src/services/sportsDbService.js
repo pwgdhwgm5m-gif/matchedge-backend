@@ -636,7 +636,8 @@ async function attachHalftimeScores(matches) {
   const CONCURRENCY = 4;
   const candidates = matches.filter(function (m) {
     const pastHalftime = m.statusShort === 'FT' || (m.isLive && m.minute != null && m.minute > 45);
-    return pastHalftime && (m.halftimeHome === null || m.halftimeHome === undefined) && m.fixtureId;
+    const atHalfTime=m.statusShort==='HT';
+    return (pastHalftime||atHalfTime) && (m.halftimeHome === null || m.halftimeHome === undefined) && m.fixtureId;
   });
 
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
