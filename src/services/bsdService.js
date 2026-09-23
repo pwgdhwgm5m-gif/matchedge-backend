@@ -128,11 +128,15 @@ function pickField(obj, candidates) {
   return null;
 }
 
+function teamValue(v){
+  if(v&&typeof v==='object')return v.name||v.team_name||v.title||v.short_name||v.full_name||'';
+  return v==null?'':String(v);
+}
 function getHomeTeamName(e) {
-  return pickField(e, ['home_team', 'home.name', 'home_name', 'home']);
+  return teamValue(pickField(e, ['home_team.name','home_team.team_name','home_team.title','home_team','home.name','home_name','home']));
 }
 function getAwayTeamName(e) {
-  return pickField(e, ['away_team', 'away.name', 'away_name', 'away']);
+  return teamValue(pickField(e, ['away_team.name','away_team.team_name','away_team.title','away_team','away.name','away_name','away']));
 }
 function getKickoff(e) {
   return pickField(e, ['kickoff', 'start_time', 'date', 'event_date']);
@@ -506,7 +510,7 @@ async function getTeamFixturesForAnalysis(teamName, count) {
   if(!result.ok) return result;
   const events=extractList(result.data)
     .filter(e=>isNameMatch(getHomeTeamName(e),teamName)||isNameMatch(getAwayTeamName(e),teamName))
-    .filter(e=>toScoreNumber(pickField(e,['home_score','score.home','scores.fulltime.home']))!==null && toScoreNumber(pickField(e,['away_score','score.away','scores.fulltime.away']))!==null)
+    .filter(e=>toScoreNumber(pickField(e,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']))!==null && toScoreNumber(pickField(e,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']))!==null)
     .sort((a,b)=>new Date(getKickoff(a)||0)-new Date(getKickoff(b)||0))
     .slice(-n);
   return {ok:true,source:'bsd',teamName,data:{response:events.map(eventToAnalysisFixture)}};
@@ -601,8 +605,8 @@ async function getFinalResultByEventId(eventId){
  const result=await fetchBsdCached('/events/'+eventId+'/',60,6000);
  if(!result.ok)return {available:false,error:result.error};
  const e=result.data?.data||result.data?.event||result.data;
- const home=toScoreNumber(pickField(e,['home_score','score.home','scores.fulltime.home']));
- const away=toScoreNumber(pickField(e,['away_score','score.away','scores.fulltime.away']));
+ const home=toScoreNumber(pickField(e,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
+ const away=toScoreNumber(pickField(e,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
  const rawStatus=String(pickField(e,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
  const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
  if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
@@ -623,8 +627,8 @@ async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
     else if(!day.ok)return {available:false,error:day.error||allDay.error};
   }
   if(!event)return {available:false,error:'event_not_found'};
-  const home=toScoreNumber(pickField(event,['home_score','score.home','scores.fulltime.home']));
-  const away=toScoreNumber(pickField(event,['away_score','score.away','scores.fulltime.away']));
+  const home=toScoreNumber(pickField(event,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
+  const away=toScoreNumber(pickField(event,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
   const rawStatus=String(pickField(event,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
   const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
   if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
@@ -639,7 +643,7 @@ async function diagnostic(dateStr) {
       const r = await fn();
       const list = r && r.data ? extractList(r.data) : [];
       return { name, ok: !!r?.ok, error: r?.error || null, count: list.length,
-        sample: list.slice(0,2).map(e=>({id:getEventId(e),home:getHomeTeamName(e),away:getAwayTeamName(e),kickoff:getKickoff(e),status:pickField(e,['status','state','status_short','state.name']),homeScore:pickField(e,['home_score','score.home','scores.fulltime.home']),awayScore:pickField(e,['away_score','score.away','scores.fulltime.away'])})) };
+        sample: list.slice(0,2).map(e=>({id:getEventId(e),home:getHomeTeamName(e),away:getAwayTeamName(e),kickoff:getKickoff(e),status:pickField(e,['status','state','status_short','state.name']),homeScore:pickField(e,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']),awayScore:pickField(e,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away'])})) };
     } catch (e) { return {name,ok:false,error:e.message,count:0,sample:[]}; }
   };
   const base='/events/?date_from='+dateStr+'&date_to='+dateStr+'&limit=200';
