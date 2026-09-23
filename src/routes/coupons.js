@@ -180,24 +180,7 @@ async function resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff){
   const match=response.ok&&response.data?.data?sportmonks.transformFixture(response.data.data):null;
   return match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match)?{source:'sportmonks',match}:null;
 }
-async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null){
-  if(canonicalProvider==='sportmonks')return await resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff)||{source:null,match:null};
-  if(canonicalProvider==='sportsdb'){
-    const id=providerIds?.sportsdb;
-    const raw=id?await sportsDb.getEventById(id).catch(()=>({ok:false})):null;
-    const event=raw?.ok?(raw.data?.events||[])[0]:null;
-    const match=event?sportsDb.transformEvent(event):null;
-    return match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match)?{source:'sportsdb',match}:{source:null,match:null};
-  }
-  // Legacy coupons have no provider namespace; settle them only through
-  // team+kickoff matching, never through a client-supplied numeric ID.
-  if(canonicalProvider&&canonicalProvider!=='bsd')return {source:null,match:null};
-  const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
-  const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
-  return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)
-    || {source:null,match:null};
-}
-function bsdCornerTotal(payload){
+async function resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff){\n  const rawDate=String(matchDate||kickoff||'').slice(0,10);\n  const base=new Date((/^\d{4}-\d{2}-\d{2}/.test(rawDate)?rawDate:new Date().toISOString().slice(0,10))+'T12:00:00Z');\n  for(const offset of [0,-1,1]){\n    const date=new Date(base.getTime()+offset*86400000).toISOString().slice(0,10);\n    const raw=await sportsDb.getMatchesByDate(date).catch(()=>({ok:false}));\n    const events=raw?.ok?(raw.data?.events||[]):[];\n    const match=events.map(sportsDb.transformEvent).find(m=>verifiedFixtureMatch(m,homeTeam,awayTeam,kickoff)&&finalMatch(m));\n    if(match)return {source:'sportsdb-results-fallback',match,date};\n  }\n  return null;\n}\nasync function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null){\n  const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);\n  const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));\n  if(canonicalProvider==='sportmonks'){\n    const exact=await resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff);\n    if(exact)return exact;\n  }\n  if(canonicalProvider==='sportsdb'){\n    const id=providerIds?.sportsdb;\n    const raw=id?await sportsDb.getEventById(id).catch(()=>({ok:false})):null;\n    const event=raw?.ok?(raw.data?.events||[])[0]:null;\n    const match=event?sportsDb.transformEvent(event):null;\n    if(match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match))return {source:'sportsdb',match};\n  }\n  // A provider-specific result may lag after FT. Every canonical provider,\n  // including old/unknown provider namespaces, falls back only through\n  // independently verified team + kickoff matches.\n  return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)\n    || await resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff)\n    || {source:null,match:null};\n}\nfunction bsdCornerTotal(payload){
   const root=payload?.data?.data||payload?.data||payload;
   const blocks=[root?.stats,root?.statistics,root?.team_stats,root?.teamStats,root];
   const number=v=>v===null||v===undefined||v===''?null:(Number.isFinite(Number(v))?Number(v):null);
