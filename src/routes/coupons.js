@@ -13,12 +13,13 @@ const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require(
 
 const router = express.Router();
 router.use(requireAuth);
-const settlementInFlight = new Set();
+const settlementInFlight = new Map();
 function settlePendingBackground(userId) {
   const key=String(userId);
-  if(settlementInFlight.has(key)) return;
-  settlementInFlight.add(key);
-  settlePending(userId).catch(e=>console.warn('[coupons/background-settle]',key,e.message)).finally(()=>settlementInFlight.delete(key));
+  if(settlementInFlight.has(key)) return settlementInFlight.get(key);
+  const promise=settlePending(userId).catch(e=>console.warn('[coupons/background-settle]',key,e.message)).finally(()=>settlementInFlight.delete(key));
+  settlementInFlight.set(key,promise);
+  return promise;
 }
 
 const CORNER_KEYS = new Set(['cornersOver95','cornersUnder95','cornersOver85','cornersUnder85']);
@@ -364,7 +365,8 @@ router.get('/', async (req, res) => {
     // Never block the coupon screen on external score/stat providers.
     // Settlement still runs automatically, but in the background with a
     // per-user in-flight guard so repeated polling cannot fan out API calls.
-    settlePendingBackground(req.user.userId);
+    const settlementPromise=settlePendingBackground(req.user.userId);
+    await Promise.race([settlementPromise,new Promise(resolve=>setTimeout(resolve,12000))]);
     const coupons = await Coupon.find({ userId: req.user.userId }).sort({ createdAt: -1 }).limit(100).lean();
     res.json({ coupons, settlementRunning: settlementInFlight.has(String(req.user.userId)) });
   } catch (error) {
