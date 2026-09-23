@@ -100,9 +100,6 @@ async function applyCanonicalProbabilities(legs){
     const fixtureKeys=[...new Set(snapshots.map(x=>x.canonicalFixtureKey).filter(Boolean))];
     if(fixtureKeys.length!==1)return {ok:false,error:'Maç sağlayıcı kimliği kesin olarak doğrulanamadı.',code:'AMBIGUOUS_FIXTURE_ID'};
     const snapshot=snapshots[0];
-    const lowConfidenceAccepted=leg.selection?.riskAcknowledged===true;
-    if(!['PICK','VALUE'].includes(snapshot?.publicationStatus)&&!lowConfidenceAccepted)
-      return {ok:false,error:'Veri güveni düşük. Kupona eklemek için düşük güven uyarısını onaylayın.',code:'LOW_CONFIDENCE_CONFIRMATION_REQUIRED'};
     const candidates=(['PICK','VALUE'].includes(snapshot?.publicationStatus)
       ? (snapshot?.publishedSelections||[])
       : (snapshot?.marketBoardSnapshot||[])).filter(Boolean);
@@ -125,7 +122,6 @@ async function applyCanonicalProbabilities(legs){
     leg.selection.market=String(canonical.market).slice(0,30);
     leg.selection.label=String(canonical.label).slice(0,50);
     leg.selection.probability=Number(probability.toFixed(2));
-    leg.selection.riskAcknowledged=lowConfidenceAccepted;
     leg.canonicalFixtureKey=String(snapshot.canonicalFixtureKey);
     leg.canonicalProvider=canonicalProvider;
     leg.providerIds={sportmonks:'',bsd:'',sportsdb:'',footballData:'',[canonicalProvider]:canonicalId};
