@@ -654,7 +654,12 @@ async function attachHalftimeScores(matches) {
       }
       const event = detail?.ok ? (detail.data?.events || [])[0] : null;
       const direct = event ? transformEvent(event) : null;
-      if (direct?.halftimeHome != null && direct?.halftimeAway != null) {
+      if (m.statusShort === 'HT' && m.homeScore != null && m.awayScore != null) {
+        // At the provider's explicit HT state, the current score is the
+        // official first-half score.
+        ht = { home:Number(m.homeScore), away:Number(m.awayScore) };
+        m.halftimeSource = 'sportsdb-live-ht-state';
+      } else if (direct?.halftimeHome != null && direct?.halftimeAway != null) {
         ht = { home:direct.halftimeHome, away:direct.halftimeAway };
         m.halftimeSource = 'sportsdb-event-detail';
       } else {
