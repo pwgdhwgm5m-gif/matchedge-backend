@@ -617,6 +617,26 @@ async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
   return bundle;
 }
 
+
+// Fill HT scores from the BSD event-detail endpoint when the day feed omits
+// them. The detail response is cached by getEventById, so repeated scoreboard
+// refreshes do not fan out indefinitely.
+async function attachHalftimeScores(matches){
+  const CONCURRENCY=4;
+  const candidates=(matches||[]).filter(m=>
+    (m.statusShort==='FT'||m.statusShort==='HT'||(m.isLive&&Number(m.minute)>=45)) &&
+    (m.halftimeHome==null||m.halftimeAway==null) && (m.bsdEventId||m.fixtureId)
+  );
+  for(let i=0;i<candidates.length;i+=CONCURRENCY){
+    await Promise.all(candidates.slice(i,i+CONCURRENCY).map(async m=>{
+      const detail=await getEventById(String(m.bsdEventId||m.fixtureId)).catch(()=>({available:false}));
+      const ht=detail?.available?detail.match:null;
+      if(ht?.halftimeHome!=null&&ht?.halftimeAway!=null){m.halftimeHome=ht.halftimeHome;m.halftimeAway=ht.halftimeAway;m.halftimeSource='bsd-event-detail';}
+    }));
+  }
+  return matches;
+}
+
 async function getFinalResultByEventId(eventId){
  if(!API_KEY||!eventId)return {available:false,error:'missing_event_id'};
  const result=await fetchBsdCached('/events/'+eventId+'/',60,6000);
@@ -682,4 +702,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
