@@ -108,6 +108,9 @@ async function checkGoals() {
       const couponUsers = usersForTrackedMatch(tracked, m, id, true);
       const matchUsers = usersForTrackedMatch(tracked, m, id, false);
       if (!matchUsers.size) continue;
+      const trackedRow = tracked.matches.find(row => sameTrackedMatch(row, m));
+      const homeTeam = String(m.homeTeam || trackedRow?.homeTeam || 'Maç');
+      const awayTeam = String(m.awayTeam || trackedRow?.awayTeam || '');
       const home = Number(m.homeScore || 0), away = Number(m.awayScore || 0), total = home + away;
       const old = lastScores.get(id);
       const isLive = m.isLive === true || ['LIVE','1H','2H','HT'].includes(String(m.statusShort || '').toUpperCase());
@@ -115,8 +118,8 @@ async function checkGoals() {
       if (isLive && couponUsers.size && !old?.started) {
         const eventId = 'coupon-start:' + id;
         if (await claimPushEvent(eventId, 'coupon-start')) await sendToUsers([...couponUsers], {
-          type:'match-start', eventId, fixtureId:id, title:'⚽ Maç başladı', body:m.homeTeam+' – '+m.awayTeam+' başladı.',
-          homeTeam:m.homeTeam, awayTeam:m.awayTeam, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
+          type:'match-start', eventId, fixtureId:id, title:'⚽ Maç başladı', body:homeTeam+' – '+awayTeam+' başladı.',
+          homeTeam, awayTeam, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
         });
       }
       if (!old || total <= old.total) continue;
@@ -124,7 +127,7 @@ async function checkGoals() {
       if (wasGoalAlreadySent(eventKey)) continue;
       markGoalSent(eventKey);
       if (await claimPushEvent(eventKey, 'goal')) await sendToUsers([...matchUsers], {
-        type:'goal', eventId:eventKey, fixtureId:id, title:'⚽ GOL!', body:m.homeTeam+' '+home+' – '+away+' '+m.awayTeam,
+        type:'goal', eventId:eventKey, fixtureId:id, title:'⚽ GOL!', body:homeTeam+' '+home+' – '+away+' '+awayTeam,
         homeTeam:m.homeTeam, awayTeam:m.awayTeam, homeScore:home, awayScore:away, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
       });
     }
