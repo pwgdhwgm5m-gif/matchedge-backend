@@ -1,15 +1,21 @@
 const express=require('express');
 const User=require('../models/User');
 const CommunityPick=require('../models/CommunityPick');
+const PredictionSnapshot=require('../models/PredictionSnapshot');
 const Coupon=require('../models/Coupon');
 const MiniLeague=require('../models/MiniLeague');
 const {requireAuth}=require('../middleware/authMiddleware');
 const {rankForXp,dailyState,ensureWallet}=require('../services/gamificationService');
 const sportmonks=require('../services/sportmonksService');
+const bsd=require('../services/bsdService');
 const sportsDb=require('../services/sportsDbService');
-const footballDataOrg=require('../services/footballDataOrgService');
 const router=express.Router();
 router.use(requireAuth);
+const normFixtureTeam=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim();
+const sameFixtureTeams=(fixture,home,away)=>{
+ const h=normFixtureTeam(home),a=normFixtureTeam(away),fh=normFixtureTeam(fixture?.homeTeam),fa=normFixtureTeam(fixture?.awayTeam);
+ return !!h&&!!a&&!!fh&&!!fa&&(fh===h||fh.includes(h)||h.includes(fh))&&(fa===a||fa.includes(a)||a.includes(fa));
+};
 
 function analystTier(user){
  const total=(user.correctPicks||0)+(user.wrongPicks||0),accuracy=total?Math.round((user.correctPicks/total)*100):0;
@@ -74,14 +80,29 @@ router.get('/weekly-challenge',async(req,res)=>{
  const coupons=await Coupon.find({userId:req.user.userId,createdAt:{$gte:start,$lt:end}}).lean();
  const settled=coupons.filter(x=>x.status!=='pending'),perfect=settled.filter(x=>x.status==='won'&&(x.legs?.length||0)>=3).length;
  const legs=coupons.reduce((n,x)=>n+(x.legs?.length||0),0),progress={slips:coupons.length,legs,perfect},goals={slips:3,legs:10,perfect:1};
- let user=await getWalletUser(req.user.userId);if(!user)return res.status(404).json({error:'Kullanıcı bulunamadı.'});
- if(user.weeklyChallengeKey!==weekKey){user.weeklyChallengeKey=weekKey;user.weeklyChallengeRewards={slips:false,legs:false,perfect:false};await user.save()}
- const claimed=user.weeklyChallengeRewards||{slips:false,legs:false,perfect:false},earned=[];
- let xp=0,coins=0;
- if(progress.slips>=goals.slips&&!claimed.slips){claimed.slips=true;xp+=20;earned.push({key:'slips',xp:20,coins:0})}
- if(progress.legs>=goals.legs&&!claimed.legs){claimed.legs=true;xp+=30;earned.push({key:'legs',xp:30,coins:0})}
- if(progress.perfect>=goals.perfect&&!claimed.perfect){claimed.perfect=true;xp+=100;coins+=50;earned.push({key:'perfect',xp:100,coins:50})}
- if(earned.length){user.xp=(user.xp||0)+xp;user.edgeCoins=(user.edgeCoins||0)+coins;user.weeklyChallengeRewards=claimed;await user.save()}
+  let user=await getWalletUser(req.user.userId);if(!user)return res.status(404).json({error:'Kullanıcı bulunamadı.'});
+  // Resetting the week is idempotent; each reward is then claimed with a
+  // conditional atomic update so two concurrent requests cannot pay twice.
+  if(user.weeklyChallengeKey!==weekKey){
+    await User.updateOne({_id:user._id,weeklyChallengeKey:{$ne:weekKey}},{$set:{weeklyChallengeKey:weekKey,weeklyChallengeRewards:{slips:false,legs:false,perfect:false}}});
+  }
+  const earned=[];
+  const rewards=[
+    {key:'slips',met:progress.slips>=goals.slips,xp:20,coins:0},
+    {key:'legs',met:progress.legs>=goals.legs,xp:30,coins:0},
+    {key:'perfect',met:progress.perfect>=goals.perfect,xp:100,coins:50},
+  ];
+  for(const reward of rewards){
+    if(!reward.met)continue;
+    const claimed=await User.findOneAndUpdate(
+      {_id:user._id,weeklyChallengeKey:weekKey,[`weeklyChallengeRewards.${reward.key}`]:{$ne:true}},
+      {$inc:{xp:reward.xp,edgeCoins:reward.coins},$set:{[`weeklyChallengeRewards.${reward.key}`]:true}},
+      {new:true}
+    );
+    if(claimed)earned.push({key:reward.key,xp:reward.xp,coins:reward.coins});
+  }
+  user=await User.findById(user._id);
+  const claimed=user.weeklyChallengeRewards||{slips:false,legs:false,perfect:false};
  res.json({startsAt:start,endsAt:end,progress,goals,rewards:{slips:{xp:20,coins:0},legs:{xp:30,coins:0},perfect:{xp:100,coins:50}},claimed,earned,profile:publicUser(user)});
 });
 router.post('/mini-leagues',async(req,res)=>{
@@ -183,17 +204,42 @@ router.get('/feed/following',async(req,res)=>{
 });
 router.get('/verified-picks/:fixtureId/mine',async(req,res)=>{const picks=await CommunityPick.find({userId:req.user.userId,fixtureId:String(req.params.fixtureId),verified:true}).lean();res.json({picks:picks.map(p=>({key:p.key,market:p.market,label:p.label,result:p.result,createdAt:p.createdAt}))})});
 router.post('/verified-picks',async(req,res)=>{
- const b=req.body||{},fixtureId=String(b.fixtureId||''),key=String(b.key||''),market=String(b.market||'').slice(0,40),label=String(b.label||'').slice(0,60),homeTeam=String(b.homeTeam||'').slice(0,80),awayTeam=String(b.awayTeam||'').slice(0,80),league=String(b.league||'').slice(0,80);
- if(!fixtureId||!key||!market||!label||!homeTeam||!awayTeam)return res.status(400).json({error:'Missing pick data.'});
- const existing=await CommunityPick.findOne({userId:req.user.userId,fixtureId,key,verified:true}).lean();if(existing)return res.json({pick:existing,locked:true});
+  const b=req.body||{},fixtureId=String(b.fixtureId||''),requestedKey=String(b.key||'');
+  if(!fixtureId||!requestedKey)return res.status(400).json({error:'Missing pick data.'});
+  const snapshots=await PredictionSnapshot.find({fixtureId,status:'pending',canonicalFixtureKey:{$ne:null}}).sort({capturedAt:-1}).limit(10).lean();
+  const fixtureKeys=[...new Set(snapshots.map(x=>x.canonicalFixtureKey).filter(Boolean))];
+  if(fixtureKeys.length!==1)return res.status(409).json({error:'Canonical fixture identity is ambiguous or unavailable.'});
+  const snapshot=snapshots[0],canonicalFixtureKey=String(snapshot.canonicalFixtureKey);
+  if(!snapshot||!snapshot.kickoff)return res.status(409).json({error:'No canonical prediction snapshot is available. Pick was not locked.'});
+  const existing=await CommunityPick.findOne({userId:req.user.userId,canonicalFixtureKey,key:requestedKey,verified:true}).lean();if(existing)return res.json({pick:existing,locked:true});
+  if(!['PICK','VALUE'].includes(snapshot.publicationStatus))return res.status(409).json({error:'This match has no published prediction selection.'});
+  const candidates=(snapshot.publishedSelections||[]).filter(Boolean);
+  const canonical=candidates.find(p=>String(p.key)===requestedKey);
+  if(!canonical||!canonical.market||!canonical.label)return res.status(409).json({error:'Selection is not present in the canonical prediction snapshot.'});
+  const key=String(canonical.key),market=String(canonical.market).slice(0,40),label=String(canonical.label).slice(0,60);
+  const homeTeam=String(snapshot.homeTeam||'').slice(0,80),awayTeam=String(snapshot.awayTeam||'').slice(0,80),league=String(snapshot.league||'').slice(0,80);
+  if(!homeTeam||!awayTeam)return res.status(409).json({error:'Canonical fixture data is incomplete.'});
  let fixture=null;
- const direct=await sportmonks.request('/fixtures/'+encodeURIComponent(fixtureId),{include:'participants'}).catch(()=>({ok:false}));
- if(direct.ok&&direct.data?.data)fixture=sportmonks.transformFixture(direct.data.data);
- if(!fixture){const supplied=b.kickoff?new Date(b.kickoff):null;if(supplied&&!Number.isNaN(supplied.getTime())){const day=supplied.toISOString().slice(0,10);const [sm,raw,fd]=await Promise.all([sportmonks.getFixturesByDate(day).catch(()=>({ok:false,fixtures:[]})),sportsDb.getMatchesByDate(day).catch(()=>({ok:false})),footballDataOrg.getMatchesByDate(day).catch(()=>({ok:false,matches:[]}))]);const norm=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim(),pair=x=>{const h=norm(homeTeam),a=norm(awayTeam),mh=norm(x?.homeTeam),ma=norm(x?.awayTeam);return h&&a&&mh&&ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))};let rows=sm.ok?(sm.fixtures||[]):[];fixture=rows.find(x=>String(x.sportmonksId||x.fixtureId)===fixtureId)||rows.find(pair);if(!fixture){rows=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];if(fd.ok)rows=footballDataOrg.mergeVerifiedScores(rows,fd.matches);fixture=rows.find(x=>String(x.fixtureId)===fixtureId)||rows.find(pair)}}}
- if(!fixture||!fixture.kickoff)return res.status(409).json({error:'Fixture kickoff could not be verified. Pick was not locked.'});
- const kickoff=new Date(fixture.kickoff);if(Number.isNaN(kickoff.getTime())||kickoff.getTime()<=Date.now()||fixture.isLive||fixture.statusShort==='FT')return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
- const conflicting=await CommunityPick.findOne({userId:req.user.userId,fixtureId,verified:true}).lean();if(conflicting)return res.status(409).json({error:'Only one MY PICK can be locked per match.',code:'MY_PICK_FIXTURE_LOCKED',pick:{key:conflicting.key,market:conflicting.market,label:conflicting.label,result:conflicting.result}});
- const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam:fixture.homeTeam||homeTeam,awayTeam:fixture.awayTeam||awayTeam,league,kickoff,result:'pending',verified:true,lockedAt:new Date(),source:String(b.source)==='match-room'?'match-room':'analysis'});
+ const canonicalProvider=String(snapshot.canonicalProvider||''),canonicalId=String(snapshot.providerIds?.[canonicalProvider]||'');
+ if(!['sportmonks','bsd','sportsdb'].includes(canonicalProvider)||!canonicalId)return res.status(409).json({error:'Canonical fixture identity is unavailable.'});
+ if(canonicalProvider==='sportmonks'){
+  const direct=await sportmonks.request('/fixtures/'+encodeURIComponent(canonicalId),{include:'participants'}).catch(()=>({ok:false}));
+  if(direct.ok&&direct.data?.data)fixture=sportmonks.transformFixture(direct.data.data);
+ }else if(canonicalProvider==='bsd'){
+  const direct=await bsd.getEventById(canonicalId).catch(()=>({available:false}));
+  if(direct.available)fixture=direct.match;
+ }else{
+  const direct=await sportsDb.getEventById(canonicalId).catch(()=>({ok:false}));
+  const event=direct.ok?(direct.data?.events||[])[0]:null;
+  if(event)fixture=sportsDb.transformEvent(event);
+ }
+ if(fixture&&!sameFixtureTeams(fixture,homeTeam,awayTeam))fixture=null;
+  if(!fixture||!fixture.kickoff)return res.status(409).json({error:'Fixture kickoff could not be verified. Pick was not locked.'});
+  const kickoff=new Date(snapshot.kickoff),providerKickoff=new Date(fixture.kickoff);
+  if(Number.isNaN(kickoff.getTime())||Number.isNaN(providerKickoff.getTime())||Math.abs(kickoff-providerKickoff)>15*60*1000||kickoff.getTime()<=Date.now()||fixture.isLive||fixture.statusShort==='FT')return res.status(409).json({error:'Started matches cannot receive new verified picks.'});
+  const conflicting=await CommunityPick.findOne({userId:req.user.userId,canonicalFixtureKey,verified:true}).lean();if(conflicting)return res.status(409).json({error:'Only one MY PICK can be locked per match.',code:'MY_PICK_FIXTURE_LOCKED',pick:{key:conflicting.key,market:conflicting.market,label:conflicting.label,result:conflicting.result}});
+  const pick=await CommunityPick.create({userId:req.user.userId,fixtureId,key,market,label,homeTeam,awayTeam,league,kickoff,
+   canonicalFixtureKey,canonicalProvider,providerIds:{[canonicalProvider]:canonicalId},result:'pending',verified:true,lockedAt:new Date(),source:String(b.source)==='match-room'?'match-room':'analysis'});
  try{require('../services/pushGoalService').checkSmartNotifications().catch(()=>{})}catch(_){}
  res.status(201).json({pick,locked:true});
 });

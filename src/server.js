@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const config = require('./config/config');
 const { connectDB } = require('./db');
 const { bootstrapAdmin } = require('./services/adminBootstrapService');
@@ -23,14 +24,43 @@ const messagesRoute = require('./routes/messages');
 const pushRoute = require('./routes/push');
 const { startPushGoalMonitor } = require('./services/pushGoalService');
 const { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron } = require('./cron/precomputeJob');
+const { rateLimit } = require('./middleware/rateLimit');
 
 const app = express();
 app.set('trust proxy', 1);
 
-app.use(cors());
+const configuredOrigins = String(process.env.CORS_ORIGINS || process.env.FRONTEND_URL || '')
+  .split(',').map(x => x.trim()).filter(Boolean);
+const developmentOrigins = ['http://localhost:3000', 'http://localhost:5173', 'http://localhost:5500'];
+const allowedOrigins = configuredOrigins.length
+  ? configuredOrigins
+  : (config.nodeEnv === 'production'
+    ? ['https://app.socceredgepro.com', 'https://pwgdhwgm5m-gif.github.io']
+    : developmentOrigins);
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
+  credentials: true,
+}));
+try {
+  const helmet = require('helmet');
+  app.use(helmet());
+} catch (_) {
+  app.use((req, res, next) => {
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    next();
+  });
+}
 app.use(express.json());
-app.use(express.static('public'));
-app.get('/admin', (req, res) => res.sendFile(require('path').join(process.cwd(), 'public', 'admin.html')));
+app.use(express.static(path.join(process.cwd(), 'public')));
+app.get('/admin', (req, res) => res.sendFile(path.join(process.cwd(), 'public', 'admin.html')));
+app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 40, keyPrefix: 'auth' }));
+app.use('/api/auth', authRoute);
 
 // Basit istek loglama - performans sorunlarini gozlemlemek icin
 app.use((req, res, next) => {
@@ -46,7 +76,6 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.use('/api/auth', authRoute);
 app.use('/api/admin-passkey', adminPasskeyRoute);
 app.use('/api/notes', notesRoute);
 app.use('/api/favorites', favoritesRoute);

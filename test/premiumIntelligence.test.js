@@ -34,8 +34,8 @@ const earlySeason = buildPremiumIntelligence({
   h2hCount: 0,
 });
 
-assert.equal(earlySeason.status, 'PICK');
-assert.equal(earlySeason.selection, 'home');
+assert.equal(earlySeason.status, 'UNAVAILABLE');
+assert.equal(earlySeason.selection, null);
 assert.ok(earlySeason.blockers.includes('SMALL_SAMPLE'));
 
 const noOdds = buildPremiumIntelligence({

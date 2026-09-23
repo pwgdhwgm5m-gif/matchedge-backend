@@ -7,6 +7,7 @@ const ledger = require('../services/predictionLedgerService');
 const sportmonks = require('../services/sportmonksService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const premiumLab = require('../services/premiumLabService');
+const { requireAuth } = require('../middleware/authMiddleware');
 
 /**
  * GET /api/analysis/:fixtureId
@@ -50,8 +51,8 @@ router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
   } catch(e) { res.status(500).json({ok:false,error:e.message}); }
 });
 
-router.get('/:fixtureId/v4-intelligence',async(req,res)=>{try{const fixtureId=String(req.params.fixtureId);const [sim,similar,patterns]=await Promise.all([premiumLab.simulateFixture(fixtureId).catch(e=>({unavailable:true,error:e.message})),premiumLab.similarMatches(fixtureId,{limit:20}).catch(e=>({unavailable:true,error:e.message})),premiumLab.patternFinder({}).catch(e=>({unavailable:true,error:e.message}))]);let value={unavailable:true};try{const vf=await premiumLab.valueFinder({limit:80});const m=(vf.matches||[]).find(x=>String(x.fixtureId)===fixtureId);value=m||{unavailable:true,providerAvailable:vf.providerAvailable,note:vf.note}}catch(e){value={unavailable:true,error:e.message}}const row=await ledger.reportCard(fixtureId);const lockedV4=await premiumLab.fixtureValidation(fixtureId);const pick=row.strongestPick||null,mc=sim.simulation&&pick?premiumLab.monteCarlo50k({fixtureId,homeLambda:sim.simulation.expectedGoals?.home,awayLambda:sim.simulation.expectedGoals?.away}):null;let simProb=null;if(mc&&pick){const k=pick.key;simProb=k==='home'?mc.home:k==='draw'?mc.draw:k==='away'?mc.away:k==='over25'?mc.over25:k==='under25'?mc.under25:k==='bttsYes'?mc.bttsYes:k==='bttsNo'?mc.bttsNo:null}const modelProb=Number(pick?.probability);const gap=Number.isFinite(modelProb)&&simProb!=null?+Math.abs(modelProb-simProb).toFixed(1):null;const agreement=lockedV4?.agreement||(gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict');const health=Number((await require('../models/PredictionSnapshot').findOne({fixtureId}).select('dataQualityScore').lean())?.dataQualityScore||0);const activation=await ledger.v4ActivationStatus();const baseStrong=!!pick&&modelProb>=60&&health>=55;const strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));const edgeClass=!pick?'NO_EDGE':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH';res.json({engine:'premium-v4-intelligence',fixtureId,edgeId:row.edgeId,strongestPick:pick,edgeDecision:{classification:edgeClass,strongEdge,modelProbability:modelProb,dataQualityScore:health,v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated,rule:activation.validated?'AI >=60 + data health >=55 + validated V4 strong/aligned':'AI >=60 + data health >=55; V4 shadow only'},v4Activation:activation,lockedValidation:lockedV4,simulation:mc?{runs:mc.runs,probability:simProb,gap,agreement:gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict',expectedGoals:sim.simulation.expectedGoals,mostLikelyScores:sim.simulation.mostLikelyScores}:sim,similarMatches:similar,patterns,value,policy:{primaryModel:'socceredge-ai',v4Role:'cross-check-and-evidence',weakFillerAllowed:false,noValueClaimWithoutVerifiedOdds:true}})}catch(e){res.status(e.status||500).json({error:'v4_intelligence_unavailable',detail:e.message})}});
-router.post('/v4-decisions',async(req,res)=>{try{const activation=await ledger.v4ActivationStatus();const ids=[...new Set((req.body?.fixtureIds||[]).map(String))].slice(0,60);const Prediction=require('../models/PredictionSnapshot');const rows=await Prediction.find({fixtureId:{$in:ids},status:'pending'}).select('fixtureId strongestPick dataQualityScore v4Validation').lean();res.json({v4Activation:activation,items:rows.map(x=>{const v=(x.v4Validation||[]).find(z=>z?.kind==='fixture-cross-check'),p=Number(x.strongestPick?.probability),health=Number(x.dataQualityScore||0),agreement=v?.agreement||'unavailable',baseStrong=!!x.strongestPick&&p>=60&&health>=55,strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));return{fixtureId:x.fixtureId,strongestPick:x.strongestPick,classification:!x.strongestPick?'NO_EDGE':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH',strongEdge,dataQualityScore:health,v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated}})});}catch(e){res.status(500).json({error:'v4_decisions_unavailable'})}});
+router.get('/:fixtureId/v4-intelligence',requireAuth,async(req,res)=>{try{const fixtureId=String(req.params.fixtureId);const [sim,similar,patterns]=await Promise.all([premiumLab.simulateFixture(fixtureId).catch(e=>({unavailable:true,error:e.message})),premiumLab.similarMatches(fixtureId,{limit:20}).catch(e=>({unavailable:true,error:e.message})),premiumLab.patternFinder({}).catch(e=>({unavailable:true,error:e.message}))]);let value={unavailable:true};try{const vf=await premiumLab.valueFinder({limit:80});const m=(vf.matches||[]).find(x=>String(x.fixtureId)===fixtureId);value=m||{unavailable:true,providerAvailable:vf.providerAvailable,note:vf.note}}catch(e){value={unavailable:true,error:e.message}}const row=await ledger.reportCard(fixtureId);const lockedV4=await premiumLab.fixtureValidation(fixtureId);const pick=row.strongestPick||null,mc=sim.simulation&&pick?premiumLab.monteCarlo50k({fixtureId,homeLambda:sim.simulation.expectedGoals?.home,awayLambda:sim.simulation.expectedGoals?.away}):null;let simProb=null;if(mc&&pick){const k=pick.key;simProb=k==='home'?mc.home:k==='draw'?mc.draw:k==='away'?mc.away:k==='over25'?mc.over25:k==='under25'?mc.under25:k==='bttsYes'?mc.bttsYes:k==='bttsNo'?mc.bttsNo:null}const modelProb=Number(pick?.probability);const gap=Number.isFinite(modelProb)&&simProb!=null?+Math.abs(modelProb-simProb).toFixed(1):null;const agreement=lockedV4?.agreement||(gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict');const health=Number((await require('../models/PredictionSnapshot').findOne({fixtureId}).select('dataQualityScore').lean())?.dataQualityScore||0);const activation=await ledger.v4ActivationStatus();const baseStrong=!!pick&&modelProb>=60&&health>=55;const strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));const edgeClass=!pick?'NO_EDGE':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH';res.json({engine:'premium-v4-intelligence',fixtureId,edgeId:row.edgeId,strongestPick:pick,edgeDecision:{classification:edgeClass,strongEdge,modelProbability:modelProb,dataQualityScore:health,v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated,rule:activation.validated?'AI >=60 + data health >=55 + validated V4 strong/aligned':'AI >=60 + data health >=55; V4 shadow only'},v4Activation:activation,lockedValidation:lockedV4,simulation:mc?{runs:mc.runs,probability:simProb,gap,agreement:gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict',expectedGoals:sim.simulation.expectedGoals,mostLikelyScores:sim.simulation.mostLikelyScores}:sim,similarMatches:similar,patterns,value,policy:{primaryModel:'socceredge-ai',v4Role:'cross-check-and-evidence',weakFillerAllowed:false,noValueClaimWithoutVerifiedOdds:true}})}catch(e){res.status(e.status||500).json({error:'v4_intelligence_unavailable',detail:e.message})}});
+router.post('/v4-decisions',requireAuth,async(req,res)=>{try{const activation=await ledger.v4ActivationStatus();const ids=[...new Set((req.body?.fixtureIds||[]).map(String))].slice(0,60);const Prediction=require('../models/PredictionSnapshot');const rows=await Prediction.find({fixtureId:{$in:ids},status:'pending'}).select('fixtureId strongestPick dataQualityScore v4Validation').lean();res.json({v4Activation:activation,items:rows.map(x=>{const v=(x.v4Validation||[]).find(z=>z?.kind==='fixture-cross-check'),p=Number(x.strongestPick?.probability),health=Number(x.dataQualityScore||0),agreement=v?.agreement||'unavailable',baseStrong=!!x.strongestPick&&p>=60&&health>=55,strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));return{fixtureId:x.fixtureId,strongestPick:x.strongestPick,classification:!x.strongestPick?'NO_EDGE':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH',strongEdge,dataQualityScore:health,v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated}})});}catch(e){res.status(500).json({error:'v4_decisions_unavailable'})}});
 router.get('/model/v4-performance',async(req,res)=>{try{res.json({activation:await ledger.v4ActivationStatus(),rows:await ledger.v4CrossCheckPerformance()})}catch(e){res.status(500).json({error:'v4_performance_unavailable'})}});
 router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.reportCard(req.params.fixtureId))}catch(e){res.status(500).json({error:'report_card_unavailable'})}});
 router.get('/:fixtureId', async (req, res) => {
@@ -73,7 +74,13 @@ router.get('/:fixtureId', async (req, res) => {
   const precomputed = cache.get(`precomputed:${fixtureId}`);
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
-      try { await ledger.capture(precomputed,{fixtureId,kickoff,league:leagueName,homeTeam:homeTeamName,awayTeam:awayTeamName}); await premiumLab.lockFixtureValidation(fixtureId); } catch(e) { console.warn('[prediction-capture/precomputed]',e.message); }
+      try {
+        const precomputedPolicy=sourcePolicy.policy({leagueName,sportKey});
+        const canonicalProvider=precomputedPolicy.primary==='sportmonks'?'sportmonks':precomputedPolicy.primary==='bsd'?'bsd':'sportsdb';
+        await ledger.capture(precomputed,{fixtureId,kickoff,league:leagueName,homeTeam:homeTeamName,awayTeam:awayTeamName,
+          canonicalProvider,providerIds:{[canonicalProvider]:String(fixtureId)}});
+        await premiumLab.lockFixtureValidation(fixtureId);
+      } catch(e) { console.warn('[prediction-capture/precomputed]',e.message); }
     }
     return res.json({
       ...precomputed,
@@ -94,11 +101,12 @@ router.get('/:fixtureId', async (req, res) => {
     // SportMonks is queried only for the six subscribed core leagues.
     const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
     // Add verified Sportmonks fixture intelligence when we can map the match.
-    const smLive = providerPolicy.sportmonks ? await Promise.race([
-      cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores()),
+    const smLookup = providerPolicy.sportmonks ? await Promise.race([
+      cache.getOrFetch(`sportmonks:fixture-match:${providerPolicy.sportmonksLeagueId||'all'}:${String(kickoff||'no-date').slice(0,10)}:${homeTeamName}:${awayTeamName}`, 300,
+        () => sportmonks.getFixtureForMatch(homeTeamName, awayTeamName, kickoff, providerPolicy.sportmonksLeagueId)),
       new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_timeout'}), 3500))
     ]) : {ok:false,error:'sportmonks_not_subscribed_for_league'};
-    const sm = smLive.ok ? sportmonks.findMatch(smLive.fixtures, homeTeamName, awayTeamName) : null;
+    const sm = smLookup.ok ? smLookup.fixture : null;
     if (sm?.sportmonksId) {
       const intel = await Promise.race([
         cache.getOrFetch(`sportmonks:intel:${sm.sportmonksId}`, 300, () => sportmonks.getFixtureIntelligence(sm.sportmonksId)),
@@ -185,7 +193,10 @@ router.get('/:fixtureId', async (req, res) => {
     }
     if (kickoff && homeTeamName && awayTeamName) {
       try {
-        await ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName });
+        const canonicalProvider=sm?.sportmonksId?'sportmonks':providerPolicy.primary==='bsd'?'bsd':'sportsdb';
+        const canonicalId=sm?.sportmonksId||fixtureId;
+        await ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName,
+          canonicalProvider,providerIds:{[canonicalProvider]:String(canonicalId)} });
         await premiumLab.lockFixtureValidation(fixtureId);
       } catch(err) { console.error('[prediction-capture]', err); }
     }

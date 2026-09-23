@@ -120,7 +120,9 @@ async function precomputeTodaysMatches() {
       };
 
       cache.set(`precomputed:${fixture.fixtureId}`, precomputed, config.cache.ttlPrecomputed);
-      await ledger.capture(result, { fixtureId: fixture.fixtureId, kickoff: fixture.kickoff, league: fixture.leagueName, homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName });
+      await ledger.capture(result, { fixtureId: fixture.fixtureId, kickoff: fixture.kickoff, league: fixture.leagueName,
+        homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName, canonicalProvider:'sportsdb',
+        providerIds:{sportsdb:String(fixture.fixtureId)} });
       await premiumLab.lockFixtureValidation(fixture.fixtureId);
     } catch (err) {
       console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
