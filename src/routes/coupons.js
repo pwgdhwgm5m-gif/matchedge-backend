@@ -114,10 +114,18 @@ async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds
       ||rows.find(m=>teamPairMatch(m,homeTeam,awayTeam)&&finalMatch(m));
     if(hit)return {source:'bsd-results-pool',match:hit,date};
   }
+  // New coupon fixture IDs are BSD IDs when explicitly marked; legacy IDs
+  // can be other providers, so only probe the raw ID after name/date matching.
   let bsdId=providerIds.bsd||mappedIds.bsd||null;
   if(!bsdId) bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>null);
   let bsd=bsdId?await bsdService.getFinalResultByEventId?.(bsdId).catch(()=>({available:false})):null;
   if(!bsd?.available) bsd=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>({available:false}));
+  // The daily result pool can omit a match without a mapped league or when
+  // pagination/provider filters lag. Direct BSD ID lookup still works.
+  if(!bsd?.available && !bsdId && fixtureId){
+    const direct=await bsdService.getFinalResultByEventId(fixtureId).catch(()=>({available:false}));
+    if(direct?.available)bsd=direct;
+  }
   if(!bsd?.available)return null;
   return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
 }
