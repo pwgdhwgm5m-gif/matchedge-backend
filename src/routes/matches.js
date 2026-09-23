@@ -9,6 +9,27 @@ const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
 const sourcePolicy = require('../services/sourcePolicyService');
 
+
+function fixtureTeamNorm(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
+function fixtureDedupeKey(m){
+  const teams=[fixtureTeamNorm(m?.homeTeam),fixtureTeamNorm(m?.awayTeam)].filter(Boolean).sort();
+  const league=fixtureTeamNorm(m?.league||m?.leagueName||m?.leagueId);
+  const time=new Date(m?.kickoff||m?.date||0).getTime();
+  if(teams.length!==2||!league||!Number.isFinite(time))return null;
+  return league+'|'+teams.join('|')+'|'+Math.round(time/(10*60*1000));
+}
+function fixtureSourceRank(m){const p=String(m?.canonicalProvider||m?.source||'').toLowerCase();return p==='sportmonks'?3:p==='bsd'?2:p==='sportsdb'||p==='thesportsdb'?1:0}
+function dedupeFixtures(rows){
+  const unique=new Map(),unkeyed=[];
+  for(const m of rows){
+    const key=fixtureDedupeKey(m);
+    if(!key){unkeyed.push(m);continue}
+    const old=unique.get(key);
+    if(!old||fixtureSourceRank(m)>fixtureSourceRank(old))unique.set(key,m);
+  }
+  return [...unique.values(),...unkeyed];
+}
+
 /** GET /api/matches?date=YYYY-MM-DD
  * Fixture coverage stays broad. Provider ownership is applied as an overlay,
  * not as a destructive whitelist: SportMonks is authoritative for the six
@@ -55,7 +76,7 @@ router.get('/', async (req,res)=>{
     put({...m,canonicalProvider:'sportmonks',providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}},true);
   }
 
-  let matches=[...map.values()].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  let matches=dedupeFixtures([...map.values()].sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0)));
   if(live?.ok){
     const raw=(live.data?.livescore||[]).filter(e=>String(e.strSport||'').toLowerCase()==='soccer');
     matches=sportsDb.applyLiveOverlay(matches,raw);
