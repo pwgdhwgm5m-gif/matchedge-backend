@@ -122,23 +122,14 @@ async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
 }
 async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null){
-  // Coupon fixture IDs are TheSportsDB IDs. The premium V2 livescore feed can
-  // still hold the authoritative score after a lower-league/cup match drops
-  // out of the compact day/event feeds. Check it first and let
-  // transformLiveEvent's stale-match guard turn an expired live status into FT.
+  // BSD is the primary result source for every coupon league.
+  // Other providers are fallbacks only when BSD cannot confirm a final result.
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
-  // The fixture ID may belong to another provider; only use it as a
-  // SportsDB ID when no explicit alternative provider ID was supplied.
+  const bsdFirst=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
+  if(bsdFirst)return bsdFirst;
   const sportsdbId=providerIds.sportsdb||mappedIds.sportsdb||
     (!providerIds.bsd&&!providerIds.sportmonks&&!providerIds.footballData?fixtureId:null);
-  const useSportmonksFirst=sportmonksResultLeague(league);
-  // Match results by team/date as well as ID: coupons can carry a fixture
-  // identifier from a different provider than the results feed.
-  if(!useSportmonksFirst){
-    const bsdFirst=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
-    if(bsdFirst)return bsdFirst;
-  }
   if(sportsdbId){
     const live=await sportsDb.getLiveScores().catch(()=>({ok:false}));
     if(live.ok){
@@ -309,7 +300,7 @@ router.post('/', async (req, res) => {
     return {fixtureId:String(leg.fixtureId),homeTeam:String(leg.homeTeam).slice(0,80),awayTeam:String(leg.awayTeam).slice(0,80),
       league:String(leg.league||'').slice(0,80),kickoff:date,matchDate:date&&!Number.isNaN(date.getTime())?date.toISOString().slice(0,10):null,
       selection:{key:s.key,market:String(s.market||'').slice(0,30),label:String(s.label||'').slice(0,50),probability:Number(s.probability)||null},
-      providerIds:{sportsdb:String(leg.providerIds?.sportsdb||leg.fixtureId||''),sportmonks:String(leg.providerIds?.sportmonks||''),bsd:String(leg.providerIds?.bsd||''),footballData:String(leg.providerIds?.footballData||'')}};
+      providerIds:{sportsdb:String(leg.providerIds?.sportsdb||''),sportmonks:String(leg.providerIds?.sportmonks||''),bsd:String(leg.providerIds?.bsd||''),footballData:String(leg.providerIds?.footballData||'')}};
   }).filter(Boolean);
   if(!safeLegs.length) return res.status(400).json({error:'En az bir geçerli seçim gerekli.'});
   if(safeLegs.some(x=>CORNER_KEYS.has(x.selection.key)&&!cornerCouponSupported(x.league))) return res.status(422).json({error:'Korner seçimi bu ligde kupona eklenemez; sonuç korner verisi desteklenmiyor.',code:'CORNER_SETTLEMENT_UNSUPPORTED'});
