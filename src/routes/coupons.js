@@ -96,11 +96,28 @@ function settleSelectionWithAvailableData(key,home,away,corners,halftimeHome,hal
 }
 async function applyCanonicalProbabilities(legs){
   for(const leg of legs){
-    const snapshots=await Prediction.find({fixtureId:String(leg.fixtureId),status:'pending',canonicalFixtureKey:{$ne:null}}).sort({capturedAt:-1})
-      .limit(10).select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
-    const fixtureKeys=[...new Set(snapshots.map(x=>x.canonicalFixtureKey).filter(Boolean))];
-    if(fixtureKeys.length!==1)return {ok:false,error:'Maç sağlayıcı kimliği kesin olarak doğrulanamadı.',code:'AMBIGUOUS_FIXTURE_ID'};
-    const snapshot=snapshots[0];
+    const kickoffTime=new Date(leg.kickoff||0).getTime();
+    const baseQuery={status:'pending',canonicalFixtureKey:{$ne:null}};
+    let snapshots=await Prediction.find({...baseQuery,fixtureId:String(leg.fixtureId)})
+      .sort({capturedAt:-1}).limit(20)
+      .select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
+    // A fixture can arrive through different providers with different numeric
+    // IDs. If the frontend ID has no direct snapshot, recover by the verified
+    // team pair and kickoff window instead of rejecting a valid selection.
+    if(!snapshots.length&&Number.isFinite(kickoffTime)){
+      snapshots=await Prediction.find({...baseQuery,kickoff:{$gte:new Date(kickoffTime-6*60*60*1000),$lte:new Date(kickoffTime+6*60*60*1000)}})
+        .sort({capturedAt:-1}).limit(50)
+        .select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
+    }
+    const identitySnapshots=snapshots.filter(x=>teamPairMatch(x,leg.homeTeam,leg.awayTeam)&&kickoffMatch(x,leg.kickoff));
+    if(!identitySnapshots.length)return {ok:false,error:'Maç sağlayıcı kimliği kesin olarak doğrulanamadı.',code:'AMBIGUOUS_FIXTURE_ID'};
+    const usable=identitySnapshots.find(x=>{
+      const provider=String(x.canonicalProvider||'');
+      const id=String(x.providerIds?.[provider]||'');
+      const candidates=(['PICK','VALUE'].includes(x.publicationStatus)?(x.publishedSelections||[]):(x.marketBoardSnapshot||[])).filter(Boolean);
+      return ['sportmonks','bsd','sportsdb'].includes(provider)&&!!id&&candidates.some(item=>String(item.key)===String(leg.selection.key));
+    });
+    const snapshot=usable||identitySnapshots[0];
     const candidates=(['PICK','VALUE'].includes(snapshot?.publicationStatus)
       ? (snapshot?.publishedSelections||[])
       : (snapshot?.marketBoardSnapshot||[])).filter(Boolean);
