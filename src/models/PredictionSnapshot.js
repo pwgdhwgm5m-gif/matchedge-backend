@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const predictionSchema = new mongoose.Schema({
   fixtureId: { type: String, required: true },
+  canonicalFixtureKey: { type: String, default: null, index: true },
   modelVersion: { type: String, required: true },
   calibrationVersion: { type: String, default: null },
   selectionVersion: { type: String, default: null },
@@ -10,6 +11,10 @@ const predictionSchema = new mongoose.Schema({
   awayTeam: { type: String, required: true },
   homeTeamId: { type: String, default: null },
   awayTeamId: { type: String, default: null },
+  canonicalProvider: { type: String, enum: ['sportmonks','bsd','sportsdb',null], default: null },
+  providerIds: { type: mongoose.Schema.Types.Mixed, default: {} },
+  publicationStatus: { type: String, enum: ['UNAVAILABLE','PICK','VALUE','NO_BET',null], default: null },
+  publishedSelections: { type: [mongoose.Schema.Types.Mixed], default: [] },
   capturedAt: { type: Date, default: Date.now },
   homeLambda: Number,
   awayLambda: Number,
@@ -26,5 +31,5 @@ const predictionSchema = new mongoose.Schema({
   actual: { type: mongoose.Schema.Types.Mixed, default: null },
   settledAt: Date,
 }, { minimize: false });
-predictionSchema.index({ fixtureId: 1, modelVersion: 1 }, { unique: true });
+predictionSchema.index({ canonicalFixtureKey: 1, modelVersion: 1 }, { unique: true, sparse: true });
 module.exports = mongoose.model('PredictionSnapshot', predictionSchema);

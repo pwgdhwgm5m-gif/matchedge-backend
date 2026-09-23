@@ -277,11 +277,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   let sportmonksFixtureId = null;
   if (useSportmonksPrimary) {
   try {
-    const liveIndex = await Promise.race([
-      cache.getOrFetch('sportmonks:livescores', 60, () => sportmonks.getLivescores()),
+    const fixtureIndex = await Promise.race([
+      cache.getOrFetch(`sportmonks:fixture-match:${providerPolicy.sportmonksLeagueId||'all'}:${String(kickoff||'no-date').slice(0,10)}:${homeTeamName}:${awayTeamName}`, 300,
+        () => sportmonks.getFixtureForMatch(homeTeamName, awayTeamName, kickoff, providerPolicy.sportmonksLeagueId)),
       new Promise(resolve => setTimeout(() => resolve({ok:false}), 2500))
     ]);
-    const smMatch = liveIndex.ok ? sportmonks.findMatch(liveIndex.fixtures, homeTeamName, awayTeamName) : null;
+    const smMatch = fixtureIndex.ok ? fixtureIndex.fixture : null;
     sportmonksFixtureId = smMatch?.sportmonksId || null;
     if (smMatch?.homeTeamId && smMatch?.awayTeamId) {
       const [hh, ah] = await Promise.all([

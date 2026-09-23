@@ -395,7 +395,7 @@ function eventStatusText(e) {
     pickField(e,['status.short_name']),pickField(e,['status.name']),pickField(e,['status']),pickField(e,['state'])
   ];
   for(const v of candidates){
-    if(v==null)return '';
+    if(v==null)continue;
     if(typeof v==='object'){
       const nested=v.short_name||v.name||v.status||v.state;
       if(nested)return String(nested);
@@ -412,7 +412,7 @@ function eventToResultMatch(e) {
   const ht=extractHalftimeScore(e);
   const rawStatus=eventStatusText(e).toLowerCase();
   const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
-  const live=/live|in.?play|1st|2nd|half.?time|ht/.test(rawStatus) && !finished;
+  const live=/live|in.?play|1st|2nd|\b[12]h\b|half.?time|ht/.test(rawStatus) && !finished;
   return {
     fixtureId:String(getEventId(e)||''),
     bsdEventId:String(getEventId(e)||''),
@@ -624,11 +624,21 @@ async function getFinalResultByEventId(eventId){
  const e=result.data?.data||result.data?.event||result.data;
  const home=toScoreNumber(pickField(e,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
  const away=toScoreNumber(pickField(e,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
- const rawStatus=String(pickField(e,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
+  const rawStatus=eventStatusText(e).toLowerCase();
  const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
  if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
  const ht=extractHalftimeScore(e);
  return {available:true,source:'bsd',eventId:String(eventId),homeScore:home,awayScore:away,halftimeHome:ht?.home??null,halftimeAway:ht?.away??null,status:'FT'};
+}
+
+async function getEventById(eventId){
+ if(!API_KEY||!eventId)return {available:false,error:'missing_event_id'};
+ const result=await fetchBsdCached('/events/'+eventId+'/',60,6000);
+ if(!result.ok)return {available:false,error:result.error};
+ const e=result.data?.data||result.data?.event||result.data;
+ const match=eventToResultMatch(e);
+ if(!match.fixtureId||!match.homeTeam||!match.awayTeam||!match.date)return {available:false,error:'invalid_event_payload'};
+ return {available:true,source:'bsd',match:{...match,kickoff:match.date,canonicalProvider:'bsd',providerIds:{bsd:String(match.bsdEventId||eventId)}}};
 }
 
 async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
@@ -646,7 +656,7 @@ async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
   if(!event)return {available:false,error:'event_not_found'};
   const home=toScoreNumber(pickField(event,['home_score','home_score_display','score.home','score.current.home','scores.fulltime.home','scores.current.home']));
   const away=toScoreNumber(pickField(event,['away_score','away_score_display','score.away','score.current.away','scores.fulltime.away','scores.current.away']));
-  const rawStatus=String(pickField(event,['status','state','status_short','state.name','state.short_name'])||'').toLowerCase();
+  const rawStatus=eventStatusText(event).toLowerCase();
   const finished=/finished|finish|ended|completed|complete|full.?time|\bft\b|after extra time|penalties/.test(rawStatus);
   if(!finished||home===null||away===null)return {available:false,error:'not_final',status:rawStatus};
   const ht=extractHalftimeScore(event);
@@ -672,4 +682,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, extractList, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };

@@ -32,26 +32,60 @@ router.get('/', async (req, res) => {
     quickBound(cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),{ok:false,error:'bsd_live_timeout'})
   ]);
   const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
-  const key=m=>norm(m.homeTeam)+'|'+norm(m.awayTeam);
+  const providerId=m=>{
+    if(m.canonicalProvider==='sportmonks') return m.providerIds?.sportmonks || m.sportmonksId || m.fixtureId;
+    if(m.canonicalProvider==='bsd') return m.providerIds?.bsd || m.bsdEventId || m.fixtureId;
+    return m.fixtureId;
+  };
+  const nameKey=m=>norm(m.homeTeam)+'|'+norm(m.awayTeam);
+  const sameProviderId=(a,b)=>a.canonicalProvider===b.canonicalProvider &&
+    providerId(a)!=null && providerId(b)!=null && String(providerId(a))===String(providerId(b));
   const map=new Map();
+  const nameIndex=new Map();
+  const sourcePriority={sportmonks:3,bsd:2,thesportsdb:1};
+  const addMatch=m=>{
+    // Provider IDs are authoritative. Names are only an exact, normalized
+    // fallback for legacy rows that lack a canonical ID.
+    const id=providerId(m);
+    const idKey=id!=null ? `${m.canonicalProvider}:${id}` : null;
+    if(idKey && map.has(idKey)){ map.set(idKey,{...map.get(idKey),...m}); return; }
+    const nk=nameKey(m);
+    const existingKey=nameIndex.get(nk);
+    const existing=existingKey?map.get(existingKey):null;
+    const mt=new Date(m.kickoff||m.date||0).getTime(),et=new Date(existing?.kickoff||existing?.date||0).getTime();
+    const sameKickoff=existing&&(!Number.isFinite(mt)||!Number.isFinite(et)||Math.abs(mt-et)<=6*60*60*1000);
+    if(existing&&sameKickoff){
+      const preferNew=(sourcePriority[m.canonicalProvider]||0)>=(sourcePriority[existing.canonicalProvider]||0);
+      const merged=preferNew?{...existing,...m}:{...m,...existing};
+      const target=preferNew?(idKey||existingKey):existingKey;
+      if(target!==existingKey)map.delete(existingKey);
+      map.set(target,merged);nameIndex.set(nk,target);return;
+    }
+    if(!idKey){
+      if(map.has(nk)){ map.set(nk,{...map.get(nk),...m}); return; }
+      map.set(nk,m);nameIndex.set(nk,nk);
+      return;
+    }
+    map.set(idKey,m);nameIndex.set(nk,idKey);
+  };
   if(tsdbLive.ok){
     for(const e of (tsdbLive.data?.livescore||[])){
       if(String(e.strSport||'').toLowerCase()!=='soccer')continue;
       const m=sportsDb.transformLiveEvent(e);
-      if(m?.isLive)map.set(key(m),m);
+       if(m?.isLive)addMatch({...m,canonicalProvider:'thesportsdb',providerIds:{thesportsdb:String(m.fixtureId)}});
     }
   }
   if(bsdLive.ok){
     for(const e of bsdService.extractList(bsdLive.data)){
       const m=bsdService.eventToResultMatch(e);
-      if(m?.isLive)map.set(key(m),{...m,canonicalProvider:'bsd'});
+       if(m?.isLive)addMatch({...m,canonicalProvider:'bsd',providerIds:{bsd:String(m.bsdEventId||m.fixtureId)}});
     }
   }
   if(smLive.ok){
     for(const sm of (smLive.fixtures||[])){
       if(!sm.isLive)continue;
-      const m={fixtureId:String(sm.sportmonksId),sportmonksId:sm.sportmonksId,leagueId:sm.leagueId,league:sm.leagueName,homeTeam:sm.homeTeam,awayTeam:sm.awayTeam,homeScore:sm.homeScore,awayScore:sm.awayScore,halftimeHome:sm.halftimeHome,halftimeAway:sm.halftimeAway,kickoff:sm.kickoff,minute:sm.minute,statusShort:sm.statusShort||'LIVE',isLive:true,canonicalProvider:'sportmonks',dataSource:'sportmonks'};
-      map.set(key(m),m);
+       const m={fixtureId:String(sm.sportmonksId),sportmonksId:sm.sportmonksId,leagueId:sm.leagueId,league:sm.leagueName,homeTeam:sm.homeTeam,awayTeam:sm.awayTeam,homeScore:sm.homeScore,awayScore:sm.awayScore,halftimeHome:sm.halftimeHome,halftimeAway:sm.halftimeAway,kickoff:sm.kickoff,minute:sm.minute,statusShort:sm.statusShort||'LIVE',isLive:true,canonicalProvider:'sportmonks',providerIds:{sportmonks:String(sm.sportmonksId)},dataSource:'sportmonks'};
+       addMatch(m);
     }
   }
   const matches=[...map.values()];

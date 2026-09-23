@@ -2,6 +2,7 @@ const express = require('express');
 const Coupon = require('../models/Coupon');
 const User = require('../models/User');
 const CommunityPick = require('../models/CommunityPick');
+const Prediction = require('../models/PredictionSnapshot');
 const { requireAuth } = require('../middleware/authMiddleware');
 const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
@@ -85,17 +86,54 @@ function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   return 'void';
 }
 
-function settleSelectionWithAvailableData(key,home,away,corners,halftimeHome,halftimeAway){
+function settleSelectionWithAvailableData(key,home,away,corners,halftimeHome,halftimeAway,allowUnavailableHalfTimeVoid=false){
   const needsCorners=String(key||'').startsWith('corners');
   const needsHalftime=['fhHome','fhDraw','fhAway','fhHomeScores','fhAwayScores','fhOver05','shHome','shDraw','shAway','shHomeScores','shAwayScores','shOver05','mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'].includes(key);
   if(needsCorners&&corners==null)return 'pending';
-  if(needsHalftime&&(halftimeHome==null||halftimeAway==null))return 'pending';
+   if(needsHalftime&&(halftimeHome==null||halftimeAway==null))return allowUnavailableHalfTimeVoid?'void':'pending';
   return settleSelection(key,home,away,corners,halftimeHome,halftimeAway);
+}
+async function applyCanonicalProbabilities(legs){
+  for(const leg of legs){
+    const snapshots=await Prediction.find({fixtureId:String(leg.fixtureId),status:'pending',canonicalFixtureKey:{$ne:null}}).sort({capturedAt:-1})
+      .limit(10).select('canonicalFixtureKey publicationStatus publishedSelections canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
+    const fixtureKeys=[...new Set(snapshots.map(x=>x.canonicalFixtureKey).filter(Boolean))];
+    if(fixtureKeys.length!==1)return {ok:false,error:'Maç sağlayıcı kimliği kesin olarak doğrulanamadı.',code:'AMBIGUOUS_FIXTURE_ID'};
+    const snapshot=snapshots[0];
+    if(!['PICK','VALUE'].includes(snapshot?.publicationStatus))
+      return {ok:false,error:'Bu maç için yayınlanmış bir analiz seçimi bulunmuyor.',code:'SELECTION_NOT_PUBLISHED'};
+    const candidates=(snapshot?.publishedSelections||[]).filter(Boolean);
+    const canonical=candidates.find(item=>String(item.key)===String(leg.selection.key));
+    const probability=Number(canonical?.probability);
+    if(!Number.isFinite(probability)||probability<5||probability>95)return {ok:false,error:'Seçim olasılığı geçersiz.',code:'CANONICAL_PROBABILITY_INVALID'};
+    const canonicalProvider=String(snapshot?.canonicalProvider||'');
+    const canonicalId=String(snapshot?.providerIds?.[canonicalProvider]||'');
+    if(!snapshot?.homeTeam||!snapshot?.awayTeam||!snapshot?.kickoff||!canonical?.market||!canonical?.label||
+      !['sportmonks','bsd','sportsdb'].includes(canonicalProvider)||!canonicalId)
+      return {ok:false,error:'Bu maç için doğrulanmış analiz seçimi bulunmuyor.',code:'CANONICAL_PROBABILITY_UNAVAILABLE'};
+    const kickoff=new Date(snapshot.kickoff);
+    if(!Number.isFinite(kickoff.getTime())||kickoff.getTime()<=Date.now())
+      return {ok:false,error:'Başlamış maç kupona eklenemez.',code:'FIXTURE_ALREADY_STARTED'};
+    leg.homeTeam=String(snapshot.homeTeam).slice(0,80);
+    leg.awayTeam=String(snapshot.awayTeam).slice(0,80);
+    leg.league=String(snapshot.league||'').slice(0,80);
+    leg.kickoff=kickoff;
+    leg.matchDate=kickoff.toISOString().slice(0,10);
+    leg.selection.market=String(canonical.market).slice(0,30);
+    leg.selection.label=String(canonical.label).slice(0,50);
+    leg.selection.probability=Number(probability.toFixed(2));
+    leg.canonicalFixtureKey=String(snapshot.canonicalFixtureKey);
+    leg.canonicalProvider=canonicalProvider;
+    leg.providerIds={sportmonks:'',bsd:'',sportsdb:'',footballData:'',[canonicalProvider]:canonicalId};
+  }
+  return {ok:true};
 }
 
 function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
 function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
+function kickoffMatch(m,kickoff,tolerance=6*60*60*1000){const a=new Date(m?.kickoff||m?.date||0).getTime(),b=new Date(kickoff||0).getTime();return Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=tolerance}
+function verifiedFixtureMatch(m,home,away,kickoff){return teamPairMatch(m,home,away)&&kickoffMatch(m,kickoff)}
 const SPORTMONKS_RESULT_LEAGUES=new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
 function sportmonksResultLeague(league){return SPORTMONKS_RESULT_LEAGUES.has(couponLeagueKey(league))}
 async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff){
@@ -120,28 +158,40 @@ async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds
     const pool=await bsdService.getRawFinalMatchesForDate(date).catch(()=>({ok:false,matches:[]}));
     if(!pool.ok)continue;
     const rows=pool.matches||[];
-    const hit=rows.find(m=>knownIds.includes(String(m.fixtureId||m.bsdId||m.eventId||''))&&finalMatch(m))
-      ||rows.find(m=>teamPairMatch(m,homeTeam,awayTeam)&&finalMatch(m));
+    const hit=rows.find(m=>knownIds.includes(String(m.fixtureId||m.bsdId||m.eventId||''))&&verifiedFixtureMatch(m,homeTeam,awayTeam,kickoff)&&finalMatch(m))
+      ||rows.find(m=>verifiedFixtureMatch(m,homeTeam,awayTeam,kickoff)&&finalMatch(m));
     if(hit)return {source:'bsd-results-pool',match:hit,date};
   }
   // New coupon fixture IDs are BSD IDs when explicitly marked; legacy IDs
   // can be other providers, so only probe the raw ID after name/date matching.
   let bsdId=providerIds.bsd||mappedIds.bsd||null;
   if(!bsdId) bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>null);
-  let bsd=bsdId?await bsdService.getFinalResultByEventId?.(bsdId).catch(()=>({available:false})):null;
-  if(!bsd?.available) bsd=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>({available:false}));
-  // The daily result pool can omit a match without a mapped league or when
-  // pagination/provider filters lag. Direct BSD ID lookup still works.
-  if(!bsd?.available && !bsdId && fixtureId){
-    const direct=await bsdService.getFinalResultByEventId(fixtureId).catch(()=>({available:false}));
-    if(direct?.available)bsd=direct;
-  }
-  if(!bsd?.available)return null;
-  return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
+  const direct=bsdId?await bsdService.getEventById(bsdId).catch(()=>({available:false})):null;
+  if(direct?.available&&verifiedFixtureMatch(direct.match,homeTeam,awayTeam,kickoff)&&finalMatch(direct.match))
+    return {source:'bsd',match:direct.match,date:matchDate};
+  const byMatch=await bsdService.getFinalResultForMatch(homeTeam,awayTeam,kickoff).catch(()=>({available:false}));
+  if(!byMatch?.available)return null;
+  return {source:'bsd',match:{fixtureId:String(byMatch.eventId||fixtureId),homeTeam,awayTeam,kickoff,homeScore:byMatch.homeScore,awayScore:byMatch.awayScore,halftimeHome:byMatch.halftimeHome,halftimeAway:byMatch.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
 }
-async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null){
-  // Only BSD is authoritative for coupon results and final scores.
-  // Never settle a slip using SportsDB, SportMonks or Football-Data scores.
+async function resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff){
+  const id=providerIds?.sportmonks;
+  if(!id)return null;
+  const response=await sportmonks.request('/fixtures/'+encodeURIComponent(id),{include:'participants;scores;periods'}).catch(()=>({ok:false}));
+  const match=response.ok&&response.data?.data?sportmonks.transformFixture(response.data.data):null;
+  return match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match)?{source:'sportmonks',match}:null;
+}
+async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null){
+  if(canonicalProvider==='sportmonks')return await resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff)||{source:null,match:null};
+  if(canonicalProvider==='sportsdb'){
+    const id=providerIds?.sportsdb;
+    const raw=id?await sportsDb.getEventById(id).catch(()=>({ok:false})):null;
+    const event=raw?.ok?(raw.data?.events||[])[0]:null;
+    const match=event?sportsDb.transformEvent(event):null;
+    return match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match)?{source:'sportsdb',match}:{source:null,match:null};
+  }
+  // Legacy coupons have no provider namespace; settle them only through
+  // team+kickoff matching, never through a client-supplied numeric ID.
+  if(canonicalProvider&&canonicalProvider!=='bsd')return {source:null,match:null};
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
   return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)
@@ -182,7 +232,8 @@ async function settlePending(userId) {
     // Migrate/settle legacy one-match coupons created before multi-leg slips.
     if(!coupon.legs?.length){
       if(!coupon.fixtureId || !coupon.matchDate || !(coupon.selections||[]).length) continue;
-      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam,{},coupon.league||'',coupon.kickoff||null);
+      if(coupon.kickoff&&new Date(coupon.kickoff).getTime()>Date.now())continue;
+      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam,{},coupon.league||'',coupon.kickoff||null,null);
       const match=resolved.match;
       if(!match)continue;
       let corners=null;
@@ -193,7 +244,8 @@ async function settlePending(userId) {
       }
       for(const selection of coupon.selections){
         if(selection.result!=='pending')continue;
-        selection.result=settleSelectionWithAvailableData(selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
+         const graceElapsed=coupon.kickoff&&Date.now()-new Date(coupon.kickoff).getTime()>=6*60*60*1000;
+         selection.result=settleSelectionWithAvailableData(selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway,graceElapsed);
       }
       const legacyResults=coupon.selections.map(s=>s.result);
       coupon.status=legacyResults.some(x=>x==='lost')?'lost':legacyResults.some(x=>x==='pending')?'pending':legacyResults.some(x=>x==='won')?'won':'void';
@@ -215,7 +267,8 @@ async function settlePending(userId) {
     for(const leg of coupon.legs){
       if(leg.selection.result!=='pending') continue;
       if(!leg.matchDate) continue;
-      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null);
+      if(leg.kickoff&&new Date(leg.kickoff).getTime()>Date.now())continue;
+      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null,leg.canonicalProvider||null);
       const match=resolved.match;
       if(!match && leg.finalScore?.home!=null && leg.finalScore?.away!=null){
         const result=settleSelectionWithAvailableData(leg.selection.key,Number(leg.finalScore.home),Number(leg.finalScore.away),null,null,null);
@@ -228,7 +281,8 @@ async function settlePending(userId) {
         if(stats.available)corners=bsdCornerTotal(stats);
         if(corners==null&&match?.statistics)corners=bsdCornerTotal(match.statistics);
       }
-      leg.selection.result=settleSelectionWithAvailableData(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
+       const graceElapsed=leg.kickoff&&Date.now()-new Date(leg.kickoff).getTime()>=6*60*60*1000;
+       leg.selection.result=settleSelectionWithAvailableData(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway,graceElapsed);
       leg.finalScore={home:match.homeScore,away:match.awayScore};
     }
     const results=coupon.legs.map(l=>l.selection.result);
@@ -309,14 +363,16 @@ router.post('/', async (req, res) => {
     const date=leg.kickoff?new Date(leg.kickoff):null;
     return {fixtureId:String(leg.fixtureId),homeTeam:String(leg.homeTeam).slice(0,80),awayTeam:String(leg.awayTeam).slice(0,80),
       league:String(leg.league||'').slice(0,80),kickoff:date,matchDate:date&&!Number.isNaN(date.getTime())?date.toISOString().slice(0,10):null,
-      selection:{key:s.key,market:String(s.market||'').slice(0,30),label:String(s.label||'').slice(0,50),probability:Number(s.probability)||null},
-      providerIds:{sportsdb:String(leg.providerIds?.sportsdb||''),sportmonks:String(leg.providerIds?.sportmonks||''),bsd:String(leg.providerIds?.bsd||''),footballData:String(leg.providerIds?.footballData||'')}};
+       selection:{key:s.key,market:String(s.market||'').slice(0,30),label:String(s.label||'').slice(0,50),probability:null},
+      canonicalFixtureKey:null,canonicalProvider:null,providerIds:{sportsdb:'',sportmonks:'',bsd:'',footballData:''}};
   }).filter(Boolean);
   if(!safeLegs.length) return res.status(400).json({error:'En az bir geçerli seçim gerekli.'});
   if(safeLegs.some(x=>CORNER_KEYS.has(x.selection.key)&&!cornerCouponSupported(x.league))) return res.status(422).json({error:'Korner seçimi bu ligde kupona eklenemez; sonuç korner verisi desteklenmiyor.',code:'CORNER_SETTLEMENT_UNSUPPORTED'});
   if(new Set(safeLegs.map(x=>x.fixtureId)).size!==safeLegs.length) return res.status(400).json({error:'Her maçtan yalnızca bir seçim eklenebilir.'});
   if(safeLegs.some(x=>x.kickoff&&!Number.isNaN(x.kickoff.getTime())&&x.kickoff.getTime()<=Date.now())) return res.status(409).json({error:'Başlamış maç kupona eklenemez.'});
   try{
+     const canonical=await applyCanonicalProbabilities(safeLegs);
+     if(!canonical.ok)return res.status(422).json({error:canonical.error,code:canonical.code});
     let user=await User.findById(req.user.userId); if(!user)return res.status(404).json({error:'Kullanıcı bulunamadı.'});
     if(ensureWallet(user))await user.save();
     const stake=ALLOWED_STAKES.includes(Number(stakeCoins))?Number(stakeCoins):COUPON_STAKE;
@@ -391,26 +447,41 @@ router.delete('/:id/legs/:fixtureId', async (req,res)=>{
   const leg=(coupon.legs||[]).find(l=>String(l.fixtureId)===String(req.params.fixtureId));
   if(!leg)return res.status(404).json({error:'Maç kuponda bulunamadı.'});
   if(leg.kickoff&&new Date(leg.kickoff).getTime()<=Date.now())return res.status(409).json({error:'Başlamış maç kupondan silinemez.'});
+  if(coupon.legs.length===1){
+    const removed=await Coupon.findOneAndDelete({_id:coupon._id,userId:req.user.userId,status:'pending','legs.1':{$exists:false}});
+    if(!removed)return res.status(409).json({error:'Kupon aynı anda değiştirildi; tekrar deneyin.'});
+    const refund=removed.stakeCoins||COUPON_STAKE;
+    await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:refund,totalCoinsSpent:-refund}});
+    return res.json({deleted:true,couponDeleted:true,refunded:refund});
+  }
   coupon.legs=coupon.legs.filter(l=>String(l.fixtureId)!==String(req.params.fixtureId));
-  if(!coupon.legs.length){await coupon.deleteOne();return res.json({deleted:true,couponDeleted:true})}
   const payout=calculatePayout(coupon.legs.map(x=>x.selection),coupon.stakeCoins||COUPON_STAKE);
   coupon.payoutMultiplier=payout.multiplier;coupon.potentialPayout=payout.payout;coupon.markModified('legs');await coupon.save();
   res.json({deleted:true,coupon});
 });
 
 router.delete('/:id', async (req, res) => {
-  const coupon = await Coupon.findOne({ _id: req.params.id, userId: req.user.userId });
+  const coupon = await Coupon.findOne({ _id: req.params.id, userId: req.user.userId }).lean();
   if (!coupon) return res.status(404).json({ error: 'Kupon bulunamadı.' });
   if(coupon.status==='pending'){
     const allKickoffs=(coupon.legs||[]).map(l=>l.kickoff).filter(Boolean);
     if(coupon.kickoff)allKickoffs.push(coupon.kickoff);
     if(allKickoffs.some(k=>new Date(k).getTime()<=Date.now()))return res.status(409).json({error:'Başlamış maç içeren kupon silinemez.'});
-    await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE,totalCoinsSpent:-(coupon.stakeCoins||COUPON_STAKE)}});
+    const removed=await Coupon.findOneAndDelete({_id:req.params.id,userId:req.user.userId,status:'pending'});
+    if(!removed)return res.status(409).json({error:'Kupon aynı anda değiştirildi veya sonuçlandı.'});
+    const refund=removed.stakeCoins||COUPON_STAKE;
+    await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:refund,totalCoinsSpent:-refund}});
+    return res.json({deleted:true,refunded:refund});
   }
-  await coupon.deleteOne();
+  const removed=await Coupon.findOneAndDelete({_id:req.params.id,userId:req.user.userId,status:{$ne:'pending'}});
+  if(!removed)return res.status(409).json({error:'Kupon aynı anda değiştirildi.'});
   res.json({ deleted: true });
 });
 
 router.settleAllPendingCoupons = settleAllPendingCoupons;
 router.cleanupFinishedCoupons = cleanupFinishedCoupons;
+router.settleSelection = settleSelection;
+router.settleSelectionWithAvailableData = settleSelectionWithAvailableData;
+router.applyCanonicalProbabilities = applyCanonicalProbabilities;
+router.verifiedFixtureMatch = verifiedFixtureMatch;
 module.exports = router;

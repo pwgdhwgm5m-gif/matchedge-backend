@@ -2,8 +2,10 @@ const Prediction = require('../models/PredictionSnapshot');
 const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
 const sportmonks = require('./sportmonksService');
+const bsd = require('./bsdService');
 const VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
 const SELECTION_VERSION = 'top-picks-analysis-value-v3';
+const HALFTIME_GRACE_MS = 6 * 60 * 60 * 1000;
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;
 function probabilities(a) {
   const m = a.modelOnlyProbabilities || {};
@@ -22,20 +24,30 @@ function probabilities(a) {
 }
 async function capture(a, fixture) {
   const kickoff = new Date(fixture.kickoff);
+  const canonicalProvider=String(fixture.canonicalProvider||'');
+  const canonicalId=String(fixture.providerIds?.[canonicalProvider]||'');
+  const canonicalFixtureKey=['sportmonks','bsd','sportsdb'].includes(canonicalProvider)&&canonicalId
+    ? `${canonicalProvider}:${canonicalId}` : null;
   if (!a || !fixture.fixtureId || !fixture.homeTeam || !fixture.awayTeam ||
-      !Number.isFinite(kickoff.getTime()) || kickoff <= new Date()) return false;
+      !canonicalFixtureKey || !Number.isFinite(kickoff.getTime()) || kickoff <= new Date()) return false;
   const values = probabilities(a);
   if (Object.values(values).some(v => v === null)) return false;
   const result = await Prediction.updateOne(
-    { fixtureId: String(fixture.fixtureId), modelVersion: VERSION },
+    { canonicalFixtureKey, modelVersion: VERSION },
     { $setOnInsert: {
-      fixtureId: String(fixture.fixtureId), modelVersion: VERSION, calibrationVersion:a.calibrationVersion||null, selectionVersion:SELECTION_VERSION, kickoff,
+      fixtureId: String(fixture.fixtureId), canonicalFixtureKey, modelVersion: VERSION, calibrationVersion:a.calibrationVersion||null, selectionVersion:SELECTION_VERSION, kickoff,
       league: fixture.league || '', homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
       homeTeamId: fixture.homeTeamId || fixture.homeId || null, awayTeamId: fixture.awayTeamId || fixture.awayId || null,
+      canonicalProvider: fixture.canonicalProvider || null,
+      providerIds: fixture.providerIds || {},
+      publicationStatus: a.premium?.status || 'UNAVAILABLE',
+      publishedSelections: ['PICK','VALUE'].includes(a.premium?.status)
+        ? (a.marketBoard?.topPredictions||[]).map(x=>({key:x.key,market:x.market,label:x.label,probability:x.probability}))
+        : [],
       capturedAt: new Date(), homeLambda: a.homeLambda, awayLambda: a.awayLambda,
       dataQualityScore: a.dataQualityScore, probabilities: values,
       sportmonksEvidence: a.sportmonksMarketEvidence || null,
-      marketBoardSnapshot: Array.isArray(a.marketBoard?.allMarkets) ? a.marketBoard.allMarkets.map(x => ({ key:x.key, market:x.market, probability:x.probability, score:x.score, sportmonksEvidence:x.sportmonksEvidence, sportmonksEvidenceBonus:x.sportmonksEvidenceBonus })) : null,
+      marketBoardSnapshot: Array.isArray(a.marketBoard?.allMarkets) ? a.marketBoard.allMarkets.map(x => ({ key:x.key, market:x.market, label:x.label, probability:x.probability, score:x.score, sportmonksEvidence:x.sportmonksEvidence, sportmonksEvidenceBonus:x.sportmonksEvidenceBonus })) : null,
       strongestPick: a.marketBoard?.best ? { key:a.marketBoard.best.key, market:a.marketBoard.best.market, label:a.marketBoard.best.label, probability:a.marketBoard.best.probability, score:a.marketBoard.best.score } : null,
       topPicksSnapshot: (a.marketBoard?.topPredictions||[]).map(x=>({key:x.key,market:x.market,label:x.label,probability:x.probability,odds:x.verifiedOdds,bookmaker:x.bookmaker,oddsFresh:x.oddsFresh===true,marketImpliedProbability:x.marketImpliedProbability,edgePoints:x.edgePoints,expectedValuePercent:x.expectedValuePercent,valueScore:x.valueScore})),
       rawProbabilities: a.rawModelProbabilities ? {
@@ -59,7 +71,7 @@ async function capture(a, fixture) {
     } }, { upsert: true });
   return Boolean(result.upsertedCount);
 }
-function outcomes(m) {
+function outcomes(m, options = {}) {
   if (m.homeScore == null || m.awayScore == null) return null;
   const h = Number(m.homeScore), a = Number(m.awayScore);
   if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
@@ -71,11 +83,54 @@ function outcomes(m) {
     out.fhHomeScores=hh>0?1:0;out.fhAwayScores=ha>0?1:0;out.fhOver05=hh+ha>0?1:0;
     out.shHomeScores=h-hh>0?1:0;out.shAwayScores=a-ha>0?1:0;out.shOver05=(h-hh)+(a-ha)>0?1:0;
   }
+  if (options.halftimeUnavailable) {
+    out.settlementStatus = 'ungraded';
+    out.ungradedMarkets = ['fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
+    out.settlementReason = 'halftime_data_unavailable_after_grace_period';
+  }
   return out;
 }
 function normTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
 function ledgerTeamPairMatch(m,p){const h=normTeam(p.homeTeam),a=normTeam(p.awayTeam),mh=normTeam(m?.homeTeam),ma=normTeam(m?.awayTeam);return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))}
 function ledgerFinal(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s)||[5,8,9].includes(Number(m.stateId)))&&m.homeScore!=null&&m.awayScore!=null}
+function providerIdFor(p, provider) {
+  return String(p?.providerIds?.[provider] || p?.[`${provider}Id`] || '').trim() || null;
+}
+function kickoffClose(m, p) {
+  const a = new Date(m?.kickoff || m?.date || 0).getTime();
+  const b = new Date(p?.kickoff || 0).getTime();
+  return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 6 * 60 * 60 * 1000;
+}
+function resultIdentityMatches(m,p){return ledgerTeamPairMatch(m,p)&&kickoffClose(m,p)}
+function exactProviderMatch(m, p, provider) {
+  const id = providerIdFor(p, provider);
+  if (!id) return false;
+  return String(m?.providerIds?.[provider] || m?.[`${provider}Id`] ||
+    m?.[`${provider}FixtureId`] || m?.sportmonksId || m?.fixtureId || m?.id || '') === id;
+}
+async function directCanonicalResult(p) {
+  const bsdId = providerIdFor(p, 'bsd') || (p.canonicalProvider === 'bsd' ? String(p.fixtureId) : null);
+  if (bsdId) {
+    const r = await bsd.getEventById(bsdId).catch(() => ({ available: false }));
+    if (r?.available && resultIdentityMatches(r.match,p) && ledgerFinal(r.match))
+      return { match: { ...r.match, canonicalProvider:'bsd' } };
+  }
+  const smId = providerIdFor(p, 'sportmonks') || (p.canonicalProvider === 'sportmonks' ? String(p.fixtureId) : null);
+  if (smId) {
+    const r = await sportmonks.request(`/fixtures/${encodeURIComponent(smId)}`, {
+      include: 'league;participants;scores;periods'
+    });
+    const match = r.ok && r.data?.data ? sportmonks.transformFixture(r.data.data) : null;
+    if (ledgerFinal(match)&&resultIdentityMatches(match,p)) return { match: { ...match, canonicalProvider: 'sportmonks' } };
+  }
+  if (p.fixtureId && (!p.canonicalProvider || p.canonicalProvider === 'sportsdb')) {
+    const r = await sportsDb.getEventById(p.fixtureId).catch(() => ({ ok: false }));
+    const event = r.ok ? (r.data?.events || [])[0] : null;
+    const match = event && sportsDb.transformEvent(event);
+    if (ledgerFinal(match)&&resultIdentityMatches(match,p)) return { match: { ...match, canonicalProvider: 'sportsdb' } };
+  }
+  return null;
+}
 async function settlePending() {
   const pending = await Prediction.find({ status: 'pending', kickoff: { $lt: new Date() } })
     .sort({ kickoff: 1 }).limit(150).lean();
@@ -83,26 +138,31 @@ async function settlePending() {
   const days = [...new Set(pending.flatMap(p => [-1,0,1].map(n => day(p.kickoff,n))))];
   const providerRows=[];
   for (const date of days) {
-    const [raw,verified,sm]=await Promise.all([
+    const [raw,verified,sm,bsdResults]=await Promise.all([
       sportsDb.getMatchesByDate(date).catch(()=>({ok:false})),
       footballDataOrg.getMatchesByDate(date).catch(()=>({ok:false,matches:[]})),
-      sportmonks.getFixturesByDate(date).catch(()=>({ok:false,fixtures:[]}))
+      sportmonks.getFixturesByDate(date).catch(()=>({ok:false,fixtures:[]})),
+      bsd.getRawFinalMatchesForDate(date).catch(()=>({ok:false,matches:[]}))
     ]);
     let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
     if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);
     providerRows.push(...fallback.filter(ledgerFinal));
     if(sm.ok)providerRows.push(...(sm.fixtures||[]).filter(ledgerFinal));
+    if(bsdResults.ok)providerRows.push(...(bsdResults.matches||[]).filter(ledgerFinal));
   }
   let settled = 0;
   for (const p of pending) {
-    let match=providerRows.find(m=>String(m.sportmonksId||m.fixtureId||m.id)===String(p.fixtureId))
-      ||providerRows.find(m=>ledgerTeamPairMatch(m,p));
-    if(!match&&p.fixtureId){
-      const direct=await sportsDb.getEventById(p.fixtureId).catch(()=>({ok:false}));
-      const event=direct.ok?(direct.data?.events||[])[0]:null;
-      if(event){const exact=sportsDb.transformEvent(event);if(ledgerFinal(exact))match=exact;}
-    }
-    const actual = match && outcomes(match);
+    const direct=await directCanonicalResult(p);
+    let match=direct?.match || providerRows.find(m =>
+      resultIdentityMatches(m,p) && (exactProviderMatch(m,p,'bsd') || exactProviderMatch(m,p,'sportmonks') ||
+      exactProviderMatch(m,p,'sportsdb')));
+    if(!match)match=providerRows.find(m=>ledgerTeamPairMatch(m,p)&&kickoffClose(m,p));
+    const halftimeUnavailable=Boolean(match&&ledgerFinal(match)&&
+      (Date.now()-new Date(p.kickoff).getTime()>=HALFTIME_GRACE_MS)&&
+      (match.halftimeHome==null||match.halftimeAway==null));
+    if (match && ledgerFinal(match) && (match.halftimeHome == null || match.halftimeAway == null) &&
+        !halftimeUnavailable) continue;
+    const actual = match && outcomes(match,{halftimeUnavailable});
     if (!actual) continue;
     const result = await Prediction.updateOne(
       { _id: p._id, status: 'pending' },
@@ -378,4 +438,4 @@ async function reportCard(fixtureId){
  return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
-module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, calibrationHealth, selectionPerformance, VERSION, SELECTION_VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, calibrationHealth, selectionPerformance, outcomes, HALFTIME_GRACE_MS, VERSION, SELECTION_VERSION };

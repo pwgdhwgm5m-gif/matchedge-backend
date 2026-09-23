@@ -44,6 +44,9 @@ function halftimeValue(scores, participant) {
       .toUpperCase().replace(/[- ]+/g,'_').replace(/_+/g,'_').trim();
     const p = String(s.score?.participant || s.participant || s.location || '').toLowerCase();
     if (p !== participant) return false;
+    // Numeric score type ids are plan-dependent.  Type 1 is the only
+    // documented/stable first-half score id; never guess from an unknown id.
+    if (!raw && Number(s.type_id) === 1) return true;
     return raw === '1ST_HALF' || raw === '1ST_HALF_ONLY' || raw === 'FIRST_HALF' ||
       raw === 'HALFTIME' || raw === 'HALF_TIME' || raw === 'HT' ||
       raw.includes('1ST_HALF') || raw.includes('FIRST_HALF');
@@ -124,8 +127,17 @@ function transformFixture(f) {
     isLive: [2,3,4,6,18,21,22,23,24,25,26].includes(Number(f.state_id)),
     minute: (() => {
       const periods = Array.isArray(f.periods) ? f.periods : [];
-      const active = [...periods].reverse().find(p => p.ticking === true || p.ended === null || p.ended_at == null);
-      const rawMinute = active?.minutes ?? active?.minute ?? f?.time?.minute ?? null;
+      const active = [...periods].reverse().find(p => {
+        if (p.ticking === true) return true;
+        // A period without an end is not necessarily active: future periods
+        // are commonly returned with null ended_at as well.
+        return (p.started === true || p.started_at != null) &&
+          p.ended !== true && p.ended_at == null;
+      });
+      const liveStates = [2,3,4,6,18,21,22,23,24,25,26];
+      const rawMinute = active?.minutes ?? active?.minute ??
+        (liveStates.includes(Number(f.state_id)) ? f?.time?.minute : null);
+      if (rawMinute == null || rawMinute === '') return null;
       const n = Number(rawMinute);
       return Number.isFinite(n) ? n : null;
     })(),
@@ -233,7 +245,7 @@ async function getTeamFixtureHistory(teamId, days = 120) {
   const start = new Date(end.getTime() - Math.max(30, days) * 86400000);
   const iso = d => d.toISOString().slice(0,10);
   const result = await request('/fixtures/between/' + iso(start) + '/' + iso(end) + '/' + teamId, {
-    include: 'participants;scores;periods;statistics.type',
+     include: 'league;participants;scores;periods;statistics.type',
   });
   if (!result.ok) return result;
   const fixtures = (result.data?.data || []).map(transformFixture)
@@ -326,7 +338,7 @@ async function getFixturesByDate(date) {
   // Do not hard-code league IDs here: SportMonks itself is the entitlement boundary.
   const all=[]; let page=1;
   while(page<=20){
-    const result=await request('/fixtures/date/'+date,{include:'participants;scores;periods;statistics.type',page,per_page:50});
+    const result=await request('/fixtures/date/'+date,{include:'league;participants;scores;periods;statistics.type',page,per_page:50});
     if(!result.ok)return result;
     const body=result.data||{},rows=Array.isArray(body.data)?body.data:[];
     all.push(...rows.map(transformFixture));
@@ -336,6 +348,23 @@ async function getFixturesByDate(date) {
   }
   const unique=new Map();for(const x of all)unique.set(String(x.sportmonksId),x);
   return {ok:true,fixtures:[...unique.values()]};
+}
+
+async function getFixtureForMatch(homeTeam, awayTeam, kickoff, leagueId) {
+  const when = new Date(kickoff || 0);
+  if (Number.isFinite(when.getTime())) {
+    const date = when.toISOString().slice(0,10);
+    const result = leagueId
+      ? await getLeagueFixturesByDate(date, leagueId)
+      : await getFixturesByDate(date);
+    if (!result.ok) return result;
+    return { ok:true, fixture:findMatch(result.fixtures,homeTeam,awayTeam), fixtures:result.fixtures, lookup:'fixture-date' };
+  }
+  // Legacy callers without kickoff can only be resolved when the match is in
+  // the provider's current livescore window.
+  const live = await getLivescores();
+  if (!live.ok) return live;
+  return { ok:true, fixture:findMatch(live.fixtures,homeTeam,awayTeam), fixtures:live.fixtures, lookup:'livescores-fallback' };
 }
 
 function enrichMatches(matches, sportmonksFixtures) {
@@ -359,7 +388,7 @@ async function getLeagueFixturesBetween(leagueId,start,end){
   const windowEnd=new Date(Math.min(until.getTime(),cursor.getTime()+99*86400000));
   let page=1;
   while(page<=100){
-   const result=await request('/fixtures/between/'+iso(cursor)+'/'+iso(windowEnd),{include:'participants;scores;statistics.type',filters:'fixtureLeagues:'+leagueId,page,per_page:50});
+    const result=await request('/fixtures/between/'+iso(cursor)+'/'+iso(windowEnd),{include:'league;participants;scores;periods;statistics.type',filters:'fixtureLeagues:'+leagueId,page,per_page:50});
    if(!result.ok)return result;
    const body=result.data||{}, rows=Array.isArray(body.data)?body.data:[];
    all.push(...rows.map(transformFixture).filter(x=>String(x.leagueId)===String(leagueId)));
@@ -395,4 +424,4 @@ function toResultMatches(fixtures) {
   }));
 }
 
-module.exports = { toResultMatches, getLeagueFixturesByDate, getFixturesByDate, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+module.exports = { toResultMatches, getLeagueFixturesByDate, getFixturesByDate, getFixtureForMatch, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };

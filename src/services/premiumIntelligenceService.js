@@ -340,10 +340,13 @@ function buildPremiumIntelligence({
   if (!hasStandings) blockers.push('NO_STANDINGS');
   if (dataHealth.score < 55) blockers.push('LOW_DATA_HEALTH');
 
-  // Keep data-quality/sample issues as transparent warnings, but do not block
-  // the model's selection. The user decides whether to act on the probabilities.
-  let status = hasModel ? 'PICK' : 'UNAVAILABLE';
-  if (hasOdds && bestEdge?.edgePoints >= 3) status = 'VALUE';
+  // A commercial prediction product must not turn league priors or sparse
+  // evidence into a customer-facing pick. Keep the probabilities available for
+  // diagnostics, but require a minimum completed sample and data-health floor
+  // before publishing a selection.
+  const decisionReady = hasModel && minSample >= 5 && dataHealth.score >= 55;
+  let status = decisionReady ? 'PICK' : 'UNAVAILABLE';
+  if (decisionReady && hasOdds && bestEdge?.edgePoints >= 3) status = 'VALUE';
 
   const drivers = [];
   if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_XG_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
@@ -356,7 +359,7 @@ function buildPremiumIntelligence({
   return {
     version: 'premium-v2',
     status,
-    selection: bestEdge?.outcome || null,
+    selection: decisionReady ? (bestEdge?.outcome || null) : null,
     bestEdge,
     edges,
     dataHealth,
@@ -366,6 +369,8 @@ function buildPremiumIntelligence({
       edgeUsesModelOnly: true,
       minimumValueEdgePoints: 3,
       minimumFullSample: 5,
+      minimumDataHealth: 55,
+      insufficientDataBlocksSelection: true,
     },
   };
 }
