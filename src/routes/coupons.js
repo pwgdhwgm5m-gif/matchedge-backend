@@ -137,6 +137,30 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)
     || {source:null,match:null};
 }
+function bsdCornerTotal(payload){
+  const root=payload?.data?.data||payload?.data||payload;
+  const blocks=[root?.stats,root?.statistics,root?.team_stats,root?.teamStats,root];
+  const number=v=>v===null||v===undefined||v===''?null:(Number.isFinite(Number(v))?Number(v):null);
+  const cornerOf=side=>{
+    if(!side||typeof side!=='object')return null;
+    for(const k of ['corner_kicks','corners','cornerKicks']){
+      const n=number(side[k]);if(n!==null)return n;
+    }
+    return null;
+  };
+  for(const b of blocks){
+    if(!b||typeof b!=='object')continue;
+    for(const pair of [[b.home,b.away],[b.full_time?.home,b.full_time?.away],[b.fulltime?.home,b.fulltime?.away],[b.total?.home,b.total?.away]]){
+      const h=cornerOf(pair[0]),a=cornerOf(pair[1]);
+      if(h!==null&&a!==null)return h+a;
+    }
+    for(const k of ['corner_kicks','corners']){
+      const h=number(b[k]?.home),a=number(b[k]?.away);
+      if(h!==null&&a!==null)return h+a;
+    }
+  }
+  return null; // BSD null means unreported, never zero.
+}
 async function settlePending(userId) {
   // Resolve oldest pending slips first. A newest-first limit can permanently
   // starve older coupons when a user has many pending slips.
@@ -154,8 +178,8 @@ async function settlePending(userId) {
       let corners=null;
       if(coupon.selections.some(s=>String(s.key||'').startsWith('corners'))){
         const stats=await bsdService.getStatsForMatch(coupon.homeTeam,coupon.awayTeam,coupon.kickoff);
-        if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
-        if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
+        if(stats.available)corners=bsdCornerTotal(stats);
+        if(corners==null&&match?.statistics)corners=bsdCornerTotal(match.statistics);
       }
       for(const selection of coupon.selections){
         if(selection.result!=='pending')continue;
@@ -191,8 +215,8 @@ async function settlePending(userId) {
       let corners=null;
       if(leg.selection.key.startsWith('corners')){
         const stats=await bsdService.getStatsForMatch(leg.homeTeam,leg.awayTeam,leg.kickoff);
-        if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
-        if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
+        if(stats.available)corners=bsdCornerTotal(stats);
+        if(corners==null&&match?.statistics)corners=bsdCornerTotal(match.statistics);
       }
       leg.selection.result=settleSelectionWithAvailableData(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway);
       leg.finalScore={home:match.homeScore,away:match.awayScore};
