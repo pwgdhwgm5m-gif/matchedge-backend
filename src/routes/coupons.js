@@ -130,56 +130,13 @@ async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   return {source:'bsd',match:{fixtureId:String(bsd.eventId||fixtureId),homeTeam,awayTeam,homeScore:bsd.homeScore,awayScore:bsd.awayScore,halftimeHome:bsd.halftimeHome,halftimeAway:bsd.halftimeAway,statusShort:'FT',isFinished:true},date:matchDate};
 }
 async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null){
-  // BSD is the primary result source for every coupon league.
-  // Other providers are fallbacks only when BSD cannot confirm a final result.
+  // Only BSD is authoritative for coupon results and final scores.
+  // Never settle a slip using SportsDB, SportMonks or Football-Data scores.
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
-  const bsdFirst=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
-  if(bsdFirst)return bsdFirst;
-  const sportsdbId=providerIds.sportsdb||mappedIds.sportsdb||
-    (!providerIds.bsd&&!providerIds.sportmonks&&!providerIds.footballData?fixtureId:null);
-  if(sportsdbId){
-    const live=await sportsDb.getLiveScores().catch(()=>({ok:false}));
-    if(live.ok){
-      const raw=(live.data?.livescore||[]).find(e=>String(e.idEvent)===String(sportsdbId));
-      if(raw){
-        let v2=sportsDb.transformLiveEvent(raw);
-        v2=(await sportsDb.attachHalftimeScores([v2]))[0]||v2;
-        if(finalMatch(v2)) return {source:'sportsdb-v2',match:v2,date:matchDate};
-      }
-    }
-  }
-  // Most coupon fixture IDs originate from TheSportsDB. Resolve the exact
-  // event first; daily feeds can omit or lag completed matches.
-  if(sportsdbId){
-    const direct=await sportsDb.getEventById(sportsdbId).catch(()=>({ok:false}));
-    const event=direct.ok?(direct.data?.events||[])[0]:null;
-    if(event){
-      let exact=sportsDb.transformEvent(event);
-      exact=(await sportsDb.attachHalftimeScores([exact]))[0]||exact;
-      if(finalMatch(exact)) return {source:'sportsdb-id',match:exact,date:matchDate};
-    }
-  }
-  const base=new Date(matchDate+'T12:00:00Z'),dates=[-1,0,1].map(n=>new Date(base.getTime()+n*86400000).toISOString().slice(0,10));
-  for(const date of dates){
-    const [raw,verified,sm]=await Promise.all([sportsDb.getMatchesByDate(date).catch(()=>({ok:false})),footballDataOrg.getMatchesByDate(date).catch(()=>({ok:false,matches:[]})),sportmonks.getFixturesByDate(date).catch(()=>({ok:false,fixtures:[]}))]);
-    let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
-    if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);
-    fallback=await sportsDb.attachHalftimeScores(fallback);
-    const smRows=sm.ok?(sm.fixtures||[]):[];
-    let m=smRows.find(x=>String(x.sportmonksId||x.fixtureId)===String(fixtureId))||smRows.find(x=>teamPairMatch(x,homeTeam,awayTeam));
-    if(m&&[5,8,9].includes(Number(m.stateId))&&m.homeScore!=null&&m.awayScore!=null)return {source:'sportmonks',match:{...m,statusShort:'FT',isFinished:true},date};
-    m=fallback.find(x=>String(x.fixtureId)===String(fixtureId))||fallback.find(x=>teamPairMatch(x,homeTeam,awayTeam));
-    if(finalMatch(m))return {source:'fallback',match:m,date};
-  }
-  // Lower-league/cup fixtures are sometimes removed from TheSportsDB compact
-  // day/direct feeds after FT. BSD is already our primary non-SportMonks
-  // football source, so use its finished event as the final score fallback.
-  const bsdFallback=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
-  if(bsdFallback)return bsdFallback;
-  return {source:null,match:null};
+  return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)
+    || {source:null,match:null};
 }
-
 async function settlePending(userId) {
   // Resolve oldest pending slips first. A newest-first limit can permanently
   // starve older coupons when a user has many pending slips.
@@ -196,7 +153,7 @@ async function settlePending(userId) {
       if(!match)continue;
       let corners=null;
       if(coupon.selections.some(s=>String(s.key||'').startsWith('corners'))){
-        const stats=await sportsDb.getEventStatsFormatted(coupon.fixtureId);
+        const stats=await bsdService.getStatsForMatch(coupon.homeTeam,coupon.awayTeam,coupon.kickoff);
         if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
         if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
       }
@@ -233,7 +190,7 @@ async function settlePending(userId) {
       if(!match){console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam}));continue;}
       let corners=null;
       if(leg.selection.key.startsWith('corners')){
-        const stats=await sportsDb.getEventStatsFormatted(leg.fixtureId);
+        const stats=await bsdService.getStatsForMatch(leg.homeTeam,leg.awayTeam,leg.kickoff);
         if(stats.available&&stats.stats?.corners)corners=Number(stats.stats.corners.home||0)+Number(stats.stats.corners.away||0);
         if(corners==null&&match?.statistics?.corners){const ch=Number(match.statistics.corners.home),ca=Number(match.statistics.corners.away);if(Number.isFinite(ch)&&Number.isFinite(ca))corners=ch+ca}
       }
