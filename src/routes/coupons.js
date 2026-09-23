@@ -200,12 +200,14 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
     const exact=await resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff);
     if(exact)return exact;
   }
-  if(canonicalProvider==='sportsdb'){
-    const id=providerIds?.sportsdb;
-    const raw=id?await sportsDb.getEventById(id).catch(()=>({ok:false})):null;
+  // Try the stored SportsDB id and the legacy fixture id directly before
+  // scanning dates. Team and kickoff checks still gate every candidate.
+  const sportsDbIds=[providerIds?.sportsdb,fixtureId].filter(Boolean).map(String);
+  for(const id of [...new Set(sportsDbIds)]){
+    const raw=await sportsDb.getEventById(id).catch(()=>({ok:false}));
     const event=raw?.ok?(raw.data?.events||[])[0]:null;
     const match=event?sportsDb.transformEvent(event):null;
-    if(match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match))return {source:'sportsdb',match};
+    if(match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match))return {source:'sportsdb-direct-fallback',match};
   }
   // A provider-specific result may lag after FT. Every canonical provider,
   // including old/unknown provider namespaces, falls back only through
@@ -483,21 +485,17 @@ router.delete('/:id/legs/:fixtureId', async (req,res)=>{
 });
 
 router.delete('/:id', async (req, res) => {
-  const coupon = await Coupon.findOne({ _id: req.params.id, userId: req.user.userId }).lean();
-  if (!coupon) return res.status(404).json({ error: 'Kupon bulunamadı.' });
-  if(coupon.status==='pending'){
-    const allKickoffs=(coupon.legs||[]).map(l=>l.kickoff).filter(Boolean);
-    if(coupon.kickoff)allKickoffs.push(coupon.kickoff);
-    if(allKickoffs.some(k=>new Date(k).getTime()<=Date.now()))return res.status(409).json({error:'Başlamış maç içeren kupon silinemez.'});
-    const removed=await Coupon.findOneAndDelete({_id:req.params.id,userId:req.user.userId,status:'pending'});
-    if(!removed)return res.status(409).json({error:'Kupon aynı anda değiştirildi veya sonuçlandı.'});
-    const refund=removed.stakeCoins||COUPON_STAKE;
-    await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:refund,totalCoinsSpent:-refund}});
-    return res.json({deleted:true,refunded:refund});
+  // Deleting a slip is always allowed, including after kickoff. Only an
+  // unsettled slip gets its original stake refunded; settled slips never
+  // receive a second payout/refund.
+  const removed=await Coupon.findOneAndDelete({_id:req.params.id,userId:req.user.userId});
+  if(!removed)return res.status(404).json({error:'Kupon bulunamadı veya zaten silindi.'});
+  let refunded=0;
+  if(removed.status==='pending'&&!removed.rewardedAt){
+    refunded=removed.stakeCoins||COUPON_STAKE;
+    await User.findByIdAndUpdate(req.user.userId,{$inc:{edgeCoins:refunded,totalCoinsSpent:-refunded}});
   }
-  const removed=await Coupon.findOneAndDelete({_id:req.params.id,userId:req.user.userId,status:{$ne:'pending'}});
-  if(!removed)return res.status(409).json({error:'Kupon aynı anda değiştirildi.'});
-  res.json({ deleted: true });
+  res.json({deleted:true,refunded});
 });
 
 router.settleAllPendingCoupons = settleAllPendingCoupons;
