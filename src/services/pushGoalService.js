@@ -56,24 +56,42 @@ async function claimPushEvent(eventId, kind='coupon') {
 
 
 async function trackedUsersByFixture() {
-  const all = new Map(), coupons = new Map();
+  const all = new Map(), coupons = new Map(), matches = [];
   const add = (map, fixtureId, userId) => {
     if (!fixtureId || !userId) return;
     const id = String(fixtureId);
     if (!map.has(id)) map.set(id, new Set());
     map.get(id).add(String(userId));
   };
+  const addCoupon = (leg, userId) => {
+    const ids = [leg.fixtureId, ...Object.values(leg.providerIds || {})].filter(Boolean);
+    ids.forEach(id => { add(all, id, userId); add(coupons, id, userId); });
+    matches.push({ userId:String(userId), homeTeam:leg.homeTeam, awayTeam:leg.awayTeam, kickoff:leg.kickoff });
+  };
   const [favorites, couponRows] = await Promise.all([
     Favorite.find({}).select('userId fixtureId').lean(),
-    Coupon.find({ status: 'pending' }).select('userId fixtureId legs').lean()
+    Coupon.find({$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).select('userId fixtureId homeTeam awayTeam kickoff legs').lean()
   ]);
   favorites.forEach(x => add(all, x.fixtureId, x.userId));
   couponRows.forEach(c => {
-    if (c.legs && c.legs.length) c.legs.forEach(l => { add(all, l.fixtureId, c.userId); add(coupons, l.fixtureId, c.userId); });
-    else { add(all, c.fixtureId, c.userId); add(coupons, c.fixtureId, c.userId); }
+    if (c.legs && c.legs.length) c.legs.forEach(l => addCoupon(l, c.userId));
+    else addCoupon({fixtureId:c.fixtureId, homeTeam:c.homeTeam, awayTeam:c.awayTeam, kickoff:c.kickoff}, c.userId);
   });
-  return { all, coupons };
+  return { all, coupons, matches };
 }
+function normalizeTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
+function sameTrackedMatch(row, match){
+  const h=normalizeTeam(row.homeTeam),a=normalizeTeam(row.awayTeam),mh=normalizeTeam(match.homeTeam),ma=normalizeTeam(match.awayTeam);
+  const ka=new Date(row.kickoff||0).getTime(),kb=new Date(match.kickoff||0).getTime();
+  return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))&&Number.isFinite(ka)&&Number.isFinite(kb)&&Math.abs(ka-kb)<=6*60*60*1000;
+}
+function usersForTrackedMatch(tracked, match, fixtureId, couponsOnly=false){
+  const users=new Set((couponsOnly?tracked.coupons:tracked.all).get(String(fixtureId))||[]);
+  if(couponsOnly){for(const row of tracked.matches)if(sameTrackedMatch(row,match))users.add(row.userId)}
+  else for(const row of tracked.matches)if(sameTrackedMatch(row,match))users.add(row.userId);
+  return users;
+}
+
 
 async function checkGoals() {
   if (running || !configured()) return;
@@ -87,14 +105,16 @@ async function checkGoals() {
     const matches = (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(sportsDb.transformLiveEvent);
     for (const m of matches) {
       const id = String(m.fixtureId);
-      if (!tracked.all.has(id)) continue;
+      const couponUsers = usersForTrackedMatch(tracked, m, id, true);
+      const matchUsers = usersForTrackedMatch(tracked, m, id, false);
+      if (!matchUsers.size) continue;
       const home = Number(m.homeScore || 0), away = Number(m.awayScore || 0), total = home + away;
       const old = lastScores.get(id);
       const isLive = m.isLive === true || ['LIVE','1H','2H','HT'].includes(String(m.statusShort || '').toUpperCase());
       lastScores.set(id, { home, away, total, started: Boolean(old?.started || isLive) });
-      if (isLive && tracked.coupons.has(id) && !old?.started) {
+      if (isLive && couponUsers.size && !old?.started) {
         const eventId = 'coupon-start:' + id;
-        if (await claimPushEvent(eventId, 'coupon-start')) await sendToUsers([...tracked.coupons.get(id)], {
+        if (await claimPushEvent(eventId, 'coupon-start')) await sendToUsers([...couponUsers], {
           type:'match-start', eventId, fixtureId:id, title:'⚽ Maç başladı', body:m.homeTeam+' – '+m.awayTeam+' başladı.',
           homeTeam:m.homeTeam, awayTeam:m.awayTeam, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
         });
@@ -103,7 +123,7 @@ async function checkGoals() {
       const eventKey = goalEventKey(id, home, away);
       if (wasGoalAlreadySent(eventKey)) continue;
       markGoalSent(eventKey);
-      if (await claimPushEvent(eventKey, 'goal')) await sendToUsers([...tracked.all.get(id)], {
+      if (await claimPushEvent(eventKey, 'goal')) await sendToUsers([...matchUsers], {
         type:'goal', eventId:eventKey, fixtureId:id, title:'⚽ GOL!', body:m.homeTeam+' '+home+' – '+away+' '+m.awayTeam,
         homeTeam:m.homeTeam, awayTeam:m.awayTeam, homeScore:home, awayScore:away, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
       });
