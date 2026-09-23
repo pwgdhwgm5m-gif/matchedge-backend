@@ -335,9 +335,21 @@ router.post('/recompute', async (req,res)=>{
         if(changed){const rs=coupon.selections.map(s=>s.result);coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('selections');await coupon.save();couponsUpdated++}
       }
     }
-    // Then refresh unresolved slips from canonical providers once.
+    // Then refresh unresolved slips from BSD and return diagnostics so a 200
+    // response cannot hide provider/matching misses.
     await settlePending(req.user.userId);
-    res.json({ok:true,couponsUpdated,selectionsUpdated});
+    const remaining=await Coupon.find({userId:req.user.userId,$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).sort({createdAt:1}).limit(20).lean();
+    const pending=[];
+    for(const coupon of remaining){
+      const legs=coupon.legs?.length?coupon.legs:(coupon.selections||[]).map(selection=>({fixtureId:coupon.fixtureId,matchDate:coupon.matchDate,homeTeam:coupon.homeTeam,awayTeam:coupon.awayTeam,kickoff:coupon.kickoff,providerIds:{},selection}));
+      for(const leg of legs){
+        if(leg.selection?.result!=='pending')continue;
+        const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null);
+        pending.push({couponId:String(coupon._id),fixtureId:String(leg.fixtureId||''),home:leg.homeTeam,away:leg.awayTeam,key:leg.selection?.key,bsdResolved:!!resolved.match,bsdScore:resolved.match?{home:resolved.match.homeScore,away:resolved.match.awayScore,htHome:resolved.match.halftimeHome,htAway:resolved.match.halftimeAway}:null,source:resolved.source||null});
+      }
+    }
+    console.log('[coupons/recompute-diagnostic]',JSON.stringify(pending));
+    res.json({ok:true,couponsUpdated,selectionsUpdated,pending});
   }catch(error){console.error('[coupons/recompute]',error.message);res.status(500).json({error:'Kuponlar yeniden hesaplanamadı.'})}
 });
 
