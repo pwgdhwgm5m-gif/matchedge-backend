@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 const predictionSchema = new mongoose.Schema({
   fixtureId: { type: String, required: true },
-  canonicalFixtureKey: { type: String, default: null, index: true },
+  canonicalFixtureKey: { type: String },
   modelVersion: { type: String, required: true },
   calibrationVersion: { type: String, default: null },
   selectionVersion: { type: String, default: null },
@@ -31,5 +31,8 @@ const predictionSchema = new mongoose.Schema({
   actual: { type: mongoose.Schema.Types.Mixed, default: null },
   settledAt: Date,
 }, { minimize: false });
-predictionSchema.index({ canonicalFixtureKey: 1, modelVersion: 1 }, { unique: true, sparse: true });
+predictionSchema.index(
+  { canonicalFixtureKey: 1, modelVersion: 1 },
+  { unique: true, partialFilterExpression: { canonicalFixtureKey: { $type: 'string' } } }
+);
 module.exports = mongoose.model('PredictionSnapshot', predictionSchema);

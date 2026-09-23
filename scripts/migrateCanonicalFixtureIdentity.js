@@ -26,6 +26,12 @@ async function run(){
     if(id)await CommunityPick.updateOne({_id:row._id,canonicalFixtureKey:null},{$set:{canonicalFixtureKey:`${row.canonicalProvider}:${id}`}});
   }
 
+  // MongoDB sparse unique indexes still include an explicitly stored null.
+  // Remove unresolved null fields so legacy rows are excluded by the partial
+  // unique indexes while remaining available for safe legacy settlement.
+  await Prediction.updateMany({canonicalFixtureKey:null},{$unset:{canonicalFixtureKey:''}});
+  await CommunityPick.updateMany({canonicalFixtureKey:null},{$unset:{canonicalFixtureKey:''}});
+
   await dropIfPresent(Prediction.collection,'fixtureId_1_modelVersion_1');
   await dropIfPresent(CommunityPick.collection,'userId_1_fixtureId_1_key_1');
   await Prediction.syncIndexes();
