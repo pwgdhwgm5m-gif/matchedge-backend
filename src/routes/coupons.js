@@ -245,6 +245,7 @@ async function settlePending(userId) {
   // still pending; those legs must still be graded for the UI/history.
   const coupons=await Coupon.find({userId,$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).sort({createdAt:1}).limit(100);
   for(const coupon of coupons){
+   try{
     // Migrate/settle legacy one-match coupons created before multi-leg slips.
     if(!coupon.legs?.length){
       if(!coupon.fixtureId || !coupon.matchDate || !(coupon.selections||[]).length) continue;
@@ -316,6 +317,9 @@ async function settlePending(userId) {
         else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
       }
     }
+   }catch(error){
+    console.warn('[coupons/settle-coupon]',String(coupon._id),error.message);
+   }
   }
   return coupons.length;
 }
