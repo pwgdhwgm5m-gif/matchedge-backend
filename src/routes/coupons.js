@@ -128,8 +128,13 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   // transformLiveEvent's stale-match guard turn an expired live status into FT.
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
-  const sportsdbId=providerIds.sportsdb||mappedIds.sportsdb||fixtureId;
+  // The fixture ID may belong to another provider; only use it as a
+  // SportsDB ID when no explicit alternative provider ID was supplied.
+  const sportsdbId=providerIds.sportsdb||mappedIds.sportsdb||
+    (!providerIds.bsd&&!providerIds.sportmonks&&!providerIds.footballData?fixtureId:null);
   const useSportmonksFirst=sportmonksResultLeague(league);
+  // Match results by team/date as well as ID: coupons can carry a fixture
+  // identifier from a different provider than the results feed.
   if(!useSportmonksFirst){
     const bsdFirst=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
     if(bsdFirst)return bsdFirst;
