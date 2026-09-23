@@ -153,6 +153,14 @@ function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=n
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
 function kickoffMatch(m,kickoff,tolerance=6*60*60*1000){const a=new Date(m?.kickoff||m?.date||0).getTime(),b=new Date(kickoff||0).getTime();return Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=tolerance}
 function verifiedFixtureMatch(m,home,away,kickoff){return teamPairMatch(m,home,away)&&kickoffMatch(m,kickoff)}
+const TRUSTED_FINAL_SCORE_SOURCES=new Set(['bsd-results-pool','bsd','sportsdb-direct-fallback','sportsdb-results-fallback','sportmonks','football-data.org']);
+function trustedFinalScore(score,source){
+  const home=Number(score?.home),away=Number(score?.away);
+  if(!TRUSTED_FINAL_SCORE_SOURCES.has(String(source||''))||!Number.isFinite(home)||!Number.isFinite(away))return null;
+  const hh=score?.halftimeHome==null?null:Number(score.halftimeHome),ha=score?.halftimeAway==null?null:Number(score.halftimeAway);
+  return {home,away,halftimeHome:Number.isFinite(hh)?hh:null,halftimeAway:Number.isFinite(ha)?ha:null};
+}
+
 const SPORTMONKS_RESULT_LEAGUES=new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
 function sportmonksResultLeague(league){return SPORTMONKS_RESULT_LEAGUES.has(couponLeagueKey(league))}
 async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff){
@@ -287,7 +295,9 @@ async function settlePending(userId) {
       }
       const legacyResults=coupon.selections.map(s=>s.result);
       coupon.status=legacyResults.some(x=>x==='lost')?'lost':legacyResults.some(x=>x==='pending')?'pending':legacyResults.some(x=>x==='won')?'won':'void';
-      coupon.finalScore={home:match.homeScore,away:match.awayScore};
+      coupon.finalScore={home:match.homeScore,away:match.awayScore,halftimeHome:match.halftimeHome??null,halftimeAway:match.halftimeAway??null};
+      coupon.resultSource=resolved.source||null;
+      coupon.resultCheckedAt=new Date();
       coupon.settledAt=coupon.status==='pending'?null:new Date();
       coupon.markModified('selections');
       try { await coupon.save(); } catch (e) { if (e.name === 'VersionError') continue; throw e; }
@@ -309,8 +319,9 @@ async function settlePending(userId) {
       if(leg.kickoff&&new Date(leg.kickoff).getTime()>Date.now())continue;
       const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null,leg.canonicalProvider||null);
       const match=resolved.match;
-      if(!match && leg.finalScore?.home!=null && leg.finalScore?.away!=null){
-        const result=settleSelectionWithAvailableData(leg.selection.key,Number(leg.finalScore.home),Number(leg.finalScore.away),null,null,null);
+      const storedFinal=trustedFinalScore(leg.finalScore,leg.resultSource);
+      if(!match && storedFinal){
+        const result=settleSelectionWithAvailableData(leg.selection.key,storedFinal.home,storedFinal.away,null,storedFinal.halftimeHome,storedFinal.halftimeAway);
         if(result!=='pending'){leg.selection.result=result;continue;}
       }
       if(!match){console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam}));continue;}
@@ -322,7 +333,9 @@ async function settlePending(userId) {
       }
        const graceElapsed=leg.kickoff&&Date.now()-new Date(leg.kickoff).getTime()>=6*60*60*1000;
        leg.selection.result=settleSelectionWithAvailableData(leg.selection.key,match.homeScore,match.awayScore,corners,match.halftimeHome,match.halftimeAway,graceElapsed);
-      leg.finalScore={home:match.homeScore,away:match.awayScore};
+      leg.finalScore={home:match.homeScore,away:match.awayScore,halftimeHome:match.halftimeHome??null,halftimeAway:match.halftimeAway??null};
+      leg.resultSource=resolved.source||null;
+      leg.resultCheckedAt=new Date();
     }
     const results=coupon.legs.map(l=>l.selection.result);
     coupon.status=results.some(x=>x==='lost')?'lost':results.some(x=>x==='pending')?'pending':results.some(x=>x==='won')?'won':'void';
@@ -441,9 +454,9 @@ router.post('/recompute', async (req,res)=>{
       if(coupon.legs?.length){
         for(const leg of coupon.legs){
           if(leg.selection?.result!=='pending')continue;
-          const h=leg.finalScore?.home,a=leg.finalScore?.away;
-          if(h==null||a==null)continue;
-          const r=settleSelectionWithAvailableData(leg.selection.key,Number(h),Number(a),null,null,null);
+          const storedFinal=trustedFinalScore(leg.finalScore,leg.resultSource);
+          if(!storedFinal)continue;
+          const r=settleSelectionWithAvailableData(leg.selection.key,storedFinal.home,storedFinal.away,null,storedFinal.halftimeHome,storedFinal.halftimeAway);
           if(r!=='pending'){leg.selection.result=r;changed=true;selectionsUpdated++}
         }
         if(changed){
@@ -451,8 +464,9 @@ router.post('/recompute', async (req,res)=>{
           coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';
           coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('legs');await coupon.save();await notifyCouponSettlement(req.user.userId,coupon).catch(e=>console.warn('[push/coupon-settled]',e.message));couponsUpdated++;
         }
-      }else if(coupon.finalScore?.home!=null&&coupon.finalScore?.away!=null){
-        for(const s of coupon.selections||[]){if(s.result==='pending'){const r=settleSelectionWithAvailableData(s.key,Number(coupon.finalScore.home),Number(coupon.finalScore.away),null,null,null);if(r!=='pending'){s.result=r;changed=true;selectionsUpdated++}}}
+      }else if(trustedFinalScore(coupon.finalScore,coupon.resultSource)){
+        const storedFinal=trustedFinalScore(coupon.finalScore,coupon.resultSource);
+        for(const s of coupon.selections||[]){if(s.result==='pending'){const r=settleSelectionWithAvailableData(s.key,storedFinal.home,storedFinal.away,null,storedFinal.halftimeHome,storedFinal.halftimeAway);if(r!=='pending'){s.result=r;changed=true;selectionsUpdated++}}}
         if(changed){const rs=coupon.selections.map(s=>s.result);coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('selections');await coupon.save();await notifyCouponSettlement(req.user.userId,coupon).catch(e=>console.warn('[push/coupon-settled]',e.message));couponsUpdated++}
       }
     }
