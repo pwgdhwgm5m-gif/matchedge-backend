@@ -13,7 +13,7 @@ const legSchema = new mongoose.Schema({
   fixtureId:{type:String,required:true}, canonicalFixtureKey:{type:String,default:null}, homeTeam:{type:String,required:true}, awayTeam:{type:String,required:true},
   league:{type:String,default:''}, kickoff:{type:Date,default:null}, matchDate:{type:String,default:null},
   selection:{type:selectionSchema,required:true}, canonicalProvider:{type:String,enum:['sportmonks','bsd','sportsdb',null],default:null},
-  providerIds:{sportsdb:String,sportmonks:String,bsd:String,footballData:String}, finalScore:{home:Number,away:Number}
+  providerIds:{sportsdb:String,sportmonks:String,bsd:String,footballData:String}, finalScore:{home:Number,away:Number,halftimeHome:Number,halftimeAway:Number}, resultSource:{type:String,default:null}, resultCheckedAt:{type:Date,default:null}
 },{_id:false});
 
 const couponSchema = new mongoose.Schema({
@@ -31,7 +31,9 @@ const couponSchema = new mongoose.Schema({
   payoutMultiplier: { type: Number, default: 1 },
   potentialPayout: { type: Number, default: 0, min: 0 },
   rewardedAt: { type: Date, default: null },
-  finalScore: { home: Number, away: Number },
+  resultSource: { type: String, default: null },
+  resultCheckedAt: { type: Date, default: null },
+  finalScore: { home: Number, away: Number, halftimeHome: Number, halftimeAway: Number },
   settledAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
