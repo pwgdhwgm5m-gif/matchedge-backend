@@ -101,10 +101,18 @@ function sportmonksResultLeague(league){return SPORTMONKS_RESULT_LEAGUES.has(cou
 async function resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff){
   // Use the exact same BSD v2 finished-results pool that powers the scoreboard.
   // This prevents a match being visible as FT in Results while remaining pending in a coupon.
-  const pool=await bsdService.getResultMatchesForDate(matchDate).catch(()=>({ok:false,matches:[]}));
-  if(pool.ok){
-    const hit=(pool.matches||[]).find(m=>teamPairMatch(m,homeTeam,awayTeam));
-    if(hit&&finalMatch(hit)) return {source:'bsd-results-pool',match:hit,date:matchDate};
+  // Search adjacent UTC dates too: the stored kickoff date and the provider's
+  // local fixture date can differ around midnight. Match exact provider ID first.
+  const day=new Date(matchDate+'T12:00:00Z');
+  const dates=[0,-1,1].map(offset=>new Date(day.getTime()+offset*86400000).toISOString().slice(0,10));
+  const knownIds=[providerIds.bsd,mappedIds.bsd].filter(Boolean).map(String);
+  for(const date of dates){
+    const pool=await bsdService.getResultMatchesForDate(date).catch(()=>({ok:false,matches:[]}));
+    if(!pool.ok)continue;
+    const rows=pool.matches||[];
+    const hit=rows.find(m=>knownIds.includes(String(m.fixtureId||m.bsdId||m.eventId||''))&&finalMatch(m))
+      ||rows.find(m=>teamPairMatch(m,homeTeam,awayTeam)&&finalMatch(m));
+    if(hit)return {source:'bsd-results-pool',match:hit,date};
   }
   let bsdId=providerIds.bsd||mappedIds.bsd||null;
   if(!bsdId) bsdId=await bsdService.resolveBsdEventId(homeTeam,awayTeam,kickoff||matchDate+'T19:45:00Z').catch(()=>null);
@@ -214,6 +222,10 @@ async function settlePending(userId) {
       if(!leg.matchDate) continue;
       const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null);
       const match=resolved.match;
+      if(!match && leg.finalScore?.home!=null && leg.finalScore?.away!=null){
+        const result=settleSelectionWithAvailableData(leg.selection.key,Number(leg.finalScore.home),Number(leg.finalScore.away),null,null,null);
+        if(result!=='pending'){leg.selection.result=result;continue;}
+      }
       if(!match){console.log('[coupons/settle-miss]',JSON.stringify({fixtureId:leg.fixtureId,date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam}));continue;}
       let corners=null;
       if(leg.selection.key.startsWith('corners')){
