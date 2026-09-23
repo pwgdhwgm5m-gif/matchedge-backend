@@ -174,7 +174,7 @@ async function settlePending(userId) {
   // Keep grading every leg until every match has its own final result.
   // A coupon may already be LOST because one leg lost, while other legs are
   // still pending; those legs must still be graded for the UI/history.
-  const coupons=await Coupon.find({userId,$or:[{status:'pending'},{'legs.selection.result':'pending'}]}).sort({createdAt:1}).limit(100);
+  const coupons=await Coupon.find({userId,$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).sort({createdAt:1}).limit(100);
   for(const coupon of coupons){
     // Migrate/settle legacy one-match coupons created before multi-leg slips.
     if(!coupon.legs?.length){
@@ -254,7 +254,7 @@ async function cleanupFinishedCoupons(){
 }
 
 async function settleAllPendingCoupons() {
-  const userIds = await Coupon.distinct('userId', { $or:[{status:'pending'},{'legs.selection.result':'pending'}] });
+  const userIds = await Coupon.distinct('userId', { $or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}] });
   let usersChecked = 0;
   for (const userId of userIds) {
     try {
@@ -316,7 +316,7 @@ router.post('/recompute', async (req,res)=>{
   try{
     // Recompute pending selections from final scores already persisted on the coupon.
     // This is provider-independent and repairs old slips without changing settled/rewarded ones.
-    const coupons=await Coupon.find({userId:req.user.userId,$or:[{status:'pending'},{'legs.selection.result':'pending'}]}).sort({createdAt:1}).limit(250);
+    const coupons=await Coupon.find({userId:req.user.userId,$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).sort({createdAt:1}).limit(250);
     let couponsUpdated=0, selectionsUpdated=0;
     for(const coupon of coupons){
       let changed=false;
