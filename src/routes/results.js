@@ -48,6 +48,13 @@ router.get('/', async (req, res) => {
     cache.getOrFetch(`bsd:canonical-results:${date}`, 300, () => bsdService.getResultMatchesForDate(date))
   ]);
 
+  const todayKey = new Date().toISOString().slice(0,10);
+  const liveResult = date === todayKey
+    ? await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores())
+    : {ok:false,error:'not_today'};
+
+
+
   // Canonical ownership is intentionally strict:
   // six subscribed leagues => SportMonks; every other competition => BSD v2.
   const smRaw=[...(turkeySmResult?.ok?turkeySmResult.fixtures:[]),...(smResult?.ok?smResult.fixtures:[])];
@@ -67,12 +74,43 @@ router.get('/', async (req, res) => {
     providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
   }));
 
-  const matches=[...sportmonksMatches,...bsdMatches].sort((a,b)=>new Date(a.date||0)-new Date(b.date||0));
+  // The canonical result feeds intentionally omit some competitions that are
+  // present in the real-time TheSportsDB feed (notably women's cups). For
+  // today's page, add only genuinely live rows that are missing from the
+  // canonical list; existing rows keep their provider ownership and receive
+  // the live score/clock overlay.
+  const normTeam=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+  const teamKey=m=>normTeam(m.homeTeam)+'|'+normTeam(m.awayTeam);
+  const isCloseKickoff=(a,b)=>{
+    const at=new Date(a?.kickoff||a?.date||0).getTime(),bt=new Date(b?.kickoff||b?.date||0).getTime();
+    return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=6*60*60*1000;
+  };
+  const canonicalMatches=[...sportmonksMatches,...bsdMatches];
+  const liveRows=(liveResult?.ok?(liveResult.data?.livescore||[]):[])
+    .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
+    .map(e=>sportsDb.transformLiveEvent(e))
+    .filter(m=>m?.isLive)
+    .map(m=>({...m,canonicalProvider:'thesportsdb',providerIds:{thesportsdb:String(m.fixtureId)},dataSource:'thesportsdb'}));
+  for(const live of liveRows){
+    const index=canonicalMatches.findIndex(m=>
+      (String(m.canonicalProvider||'')==='thesportsdb' && String(m.fixtureId)===String(live.fixtureId)) ||
+      (teamKey(m)===teamKey(live) && isCloseKickoff(m,live))
+    );
+    if(index<0){canonicalMatches.push(live);continue;}
+    const old=canonicalMatches[index];
+    canonicalMatches[index]={...old,
+      homeScore:live.homeScore??old.homeScore, awayScore:live.awayScore??old.awayScore,
+      minute:live.minute??old.minute, statusShort:live.statusShort||old.statusShort,
+      isLive:true
+    };
+  }
+  const matches=canonicalMatches.sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   res.json({
     date,matches,
-    canonicalPolicy:'sportmonks-6-else-bsd',
+    canonicalPolicy:'sportmonks-6-else-bsd-plus-today-live',
     sportmonksCount:sportmonksMatches.length,
     bsdCount:bsdMatches.length,
+    liveCount:liveRows.length,
     bsdRegistryAvailable:!!bsdResult?.registryAvailable
   });
 })
