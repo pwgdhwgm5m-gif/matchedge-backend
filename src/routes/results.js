@@ -104,6 +104,8 @@ router.get('/', async (req, res) => {
       isLive:true
     };
   }
+  await sportsDb.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='thesportsdb'));
+  await bsdService.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='bsd'));
   const matches=canonicalMatches.sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   res.json({
     date,matches,
