@@ -256,6 +256,17 @@ async function settleAllPendingCoupons() {
   for (const userId of userIds) {
     try {
       await settlePending(userId);
+      const remaining=await Coupon.find({userId,$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).sort({createdAt:1}).limit(20).lean();
+      const diag=[];
+      for(const coupon of remaining){
+        const legs=coupon.legs?.length?coupon.legs:(coupon.selections||[]).map(selection=>({fixtureId:coupon.fixtureId,matchDate:coupon.matchDate,homeTeam:coupon.homeTeam,awayTeam:coupon.awayTeam,kickoff:coupon.kickoff,providerIds:{},selection}));
+        for(const leg of legs){
+          if(leg.selection?.result!=='pending')continue;
+          const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null);
+          diag.push({fixtureId:String(leg.fixtureId||''),date:leg.matchDate,home:leg.homeTeam,away:leg.awayTeam,key:leg.selection?.key,bsdResolved:!!resolved.match,score:resolved.match?{h:resolved.match.homeScore,a:resolved.match.awayScore,hh:resolved.match.halftimeHome,ha:resolved.match.halftimeAway}:null,source:resolved.source||null});
+        }
+      }
+      if(diag.length)console.log('[coupons/auto-diagnostic]',JSON.stringify(diag));
       usersChecked += 1;
     } catch (error) {
       console.warn('[coupons/auto-settle]', String(userId), error.message);
