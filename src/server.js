@@ -37,6 +37,7 @@ const defaultProductionOrigins = [
   'https://socceredgepro.com',
   'https://www.socceredgepro.com',
   'https://matchedge-frontend.onrender.com',
+  'https://matchedge-backend-kujb.onrender.com',
   'https://pwgdhwgm5m-gif.github.io'
 ];
 // Keep configured origins, but always include the actual deployed frontend
