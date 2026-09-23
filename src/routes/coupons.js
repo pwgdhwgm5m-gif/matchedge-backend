@@ -10,6 +10,7 @@ const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
 const fixtureIdentity = require('../services/fixtureIdentityService');
 const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require('../services/gamificationService');
+const { notifyCouponSettlement } = require('../services/pushGoalService');
 
 const router = express.Router();
 router.use(requireAuth);
@@ -299,6 +300,7 @@ async function settlePending(userId) {
           else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
         }
       }
+      await notifyCouponSettlement(userId,coupon).catch(e=>console.warn('[push/coupon-settled]',e.message));
       continue;
     }
     for(const leg of coupon.legs){
@@ -337,6 +339,7 @@ async function settlePending(userId) {
         else await User.findByIdAndUpdate(userId,{$inc:{edgeCoins:coupon.stakeCoins||COUPON_STAKE}});
       }
     }
+    await notifyCouponSettlement(userId,coupon).catch(e=>console.warn('[push/coupon-settled]',e.message));
    }catch(error){
     console.warn('[coupons/settle-coupon]',String(coupon._id),error.message);
    }
@@ -446,11 +449,11 @@ router.post('/recompute', async (req,res)=>{
         if(changed){
           const rs=coupon.legs.map(l=>l.selection.result);
           coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';
-          coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('legs');await coupon.save();couponsUpdated++;
+          coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('legs');await coupon.save();await notifyCouponSettlement(req.user.userId,coupon).catch(e=>console.warn('[push/coupon-settled]',e.message));couponsUpdated++;
         }
       }else if(coupon.finalScore?.home!=null&&coupon.finalScore?.away!=null){
         for(const s of coupon.selections||[]){if(s.result==='pending'){const r=settleSelectionWithAvailableData(s.key,Number(coupon.finalScore.home),Number(coupon.finalScore.away),null,null,null);if(r!=='pending'){s.result=r;changed=true;selectionsUpdated++}}}
-        if(changed){const rs=coupon.selections.map(s=>s.result);coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('selections');await coupon.save();couponsUpdated++}
+        if(changed){const rs=coupon.selections.map(s=>s.result);coupon.status=rs.some(x=>x==='lost')?'lost':rs.some(x=>x==='pending')?'pending':rs.some(x=>x==='won')?'won':'void';coupon.settledAt=coupon.status==='pending'?null:new Date();coupon.markModified('selections');await coupon.save();await notifyCouponSettlement(req.user.userId,coupon).catch(e=>console.warn('[push/coupon-settled]',e.message));couponsUpdated++}
       }
     }
     // Then refresh unresolved slips from BSD and return diagnostics so a 200
