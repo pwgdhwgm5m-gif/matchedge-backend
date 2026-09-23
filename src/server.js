@@ -73,7 +73,7 @@ app.use((req, res, next) => {
 
 // Keep-alive ping'in hedef aldigi endpoint - cok hafif olmali
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({ status: 'ok', timestamp: new Date().toISOString(), couponSettlement: 'provider-fallback-v3' });
 });
 
 app.use('/api/admin-passkey', adminPasskeyRoute);
