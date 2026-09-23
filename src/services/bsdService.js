@@ -631,7 +631,8 @@ async function attachHalftimeScores(matches){
     await Promise.all(candidates.slice(i,i+CONCURRENCY).map(async m=>{
       const detail=await getEventById(String(m.bsdEventId||m.fixtureId)).catch(()=>({available:false}));
       const ht=detail?.available?detail.match:null;
-      if(ht?.halftimeHome!=null&&ht?.halftimeAway!=null){m.halftimeHome=ht.halftimeHome;m.halftimeAway=ht.halftimeAway;m.halftimeSource='bsd-event-detail';}
+      if(m.statusShort==='HT'&&m.homeScore!=null&&m.awayScore!=null){m.halftimeHome=Number(m.homeScore);m.halftimeAway=Number(m.awayScore);m.halftimeSource='bsd-live-ht-state';}
+      else if(ht?.halftimeHome!=null&&ht?.halftimeAway!=null){m.halftimeHome=ht.halftimeHome;m.halftimeAway=ht.halftimeAway;m.halftimeSource='bsd-event-detail';}
     }));
   }
   return matches;
