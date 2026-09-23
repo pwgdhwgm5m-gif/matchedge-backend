@@ -356,14 +356,16 @@ function transformLiveEvent(e) {
   const status = String(e.strStatus || '').trim().toUpperCase();
   const kickoffIso = e.dateEvent && e.strEventTime ? toUtcIso(e.dateEvent + 'T' + e.strEventTime) : null;
   const stale = isStaleLiveStatus(kickoffIso, status);
+  const finished = FINISHED_STATUSES.has(status) || status === 'FT';
+  const isLive = !finished && !stale && (LIVE_STATUSES.has(status) || !status);
   return {
     fixtureId: e.idEvent,
     league: e.strLeague || '',
     leagueId: e.idLeague,
     kickoff: kickoffIso,
-    statusShort: stale ? 'FT' : (status || 'LIVE'),
+    statusShort: finished || stale ? 'FT' : (status || 'LIVE'),
     minute: e.strProgress ? parseInt(e.strProgress, 10) : null,
-    isLive: !stale,
+    isLive: isLive,
     homeTeam: e.strHomeTeam || '',
     awayTeam: e.strAwayTeam || '',
     homeBadge: e.strHomeTeamBadge || null,
