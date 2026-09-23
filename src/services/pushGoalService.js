@@ -49,25 +49,30 @@ async function sendToUsers(userIds, payload) {
     }
   }));
 }
+async function claimPushEvent(eventId, kind='coupon') {
+  try { await NotificationEvent.create({ eventId, kind }); return true; }
+  catch (e) { if (e && e.code === 11000) return false; throw e; }
+}
+
 
 async function trackedUsersByFixture() {
-  const map = new Map();
-  const add = (fixtureId, userId) => {
+  const all = new Map(), coupons = new Map();
+  const add = (map, fixtureId, userId) => {
     if (!fixtureId || !userId) return;
     const id = String(fixtureId);
     if (!map.has(id)) map.set(id, new Set());
     map.get(id).add(String(userId));
   };
-  const [favorites, coupons] = await Promise.all([
+  const [favorites, couponRows] = await Promise.all([
     Favorite.find({}).select('userId fixtureId').lean(),
     Coupon.find({ status: 'pending' }).select('userId fixtureId legs').lean()
   ]);
-  favorites.forEach(x => add(x.fixtureId, x.userId));
-  coupons.forEach(c => {
-    if (c.legs && c.legs.length) c.legs.forEach(l => add(l.fixtureId, c.userId));
-    else add(c.fixtureId, c.userId);
+  favorites.forEach(x => add(all, x.fixtureId, x.userId));
+  couponRows.forEach(c => {
+    if (c.legs && c.legs.length) c.legs.forEach(l => { add(all, l.fixtureId, c.userId); add(coupons, l.fixtureId, c.userId); });
+    else { add(all, c.fixtureId, c.userId); add(coupons, c.fixtureId, c.userId); }
   });
-  return map;
+  return { all, coupons };
 }
 
 async function checkGoals() {
@@ -76,30 +81,48 @@ async function checkGoals() {
   try {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     const tracked = await trackedUsersByFixture();
-    if (!tracked.size) return;
+    if (!tracked.all.size) return;
     const result = await sportsDb.getLiveScores();
     if (!result.ok) return;
     const matches = (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(sportsDb.transformLiveEvent);
     for (const m of matches) {
       const id = String(m.fixtureId);
-      if (!tracked.has(id)) continue;
+      if (!tracked.all.has(id)) continue;
       const home = Number(m.homeScore || 0), away = Number(m.awayScore || 0), total = home + away;
       const old = lastScores.get(id);
-      lastScores.set(id, { home, away, total });
+      const isLive = m.isLive === true || ['LIVE','1H','2H','HT'].includes(String(m.statusShort || '').toUpperCase());
+      lastScores.set(id, { home, away, total, started: Boolean(old?.started || isLive) });
+      if (isLive && tracked.coupons.has(id) && !old?.started) {
+        const eventId = 'coupon-start:' + id;
+        if (await claimPushEvent(eventId, 'coupon-start')) await sendToUsers([...tracked.coupons.get(id)], {
+          type:'match-start', eventId, fixtureId:id, title:'⚽ Maç başladı', body:m.homeTeam+' – '+m.awayTeam+' başladı.',
+          homeTeam:m.homeTeam, awayTeam:m.awayTeam, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
+        });
+      }
       if (!old || total <= old.total) continue;
       const eventKey = goalEventKey(id, home, away);
       if (wasGoalAlreadySent(eventKey)) continue;
-      // Mark before sending so concurrent/overlapping checks cannot enqueue
-      // the same score notification twice.
       markGoalSent(eventKey);
-      await sendToUsers([...tracked.get(id)], {
-        type: 'goal', eventId: eventKey, fixtureId: id, title: '⚽ GOAL!', homeTeam: m.homeTeam, awayTeam: m.awayTeam,
-        homeScore: home, awayScore: away, url: '/canli-simulator.html?fixtureId=' + encodeURIComponent(id)
+      if (await claimPushEvent(eventKey, 'goal')) await sendToUsers([...tracked.all.get(id)], {
+        type:'goal', eventId:eventKey, fixtureId:id, title:'⚽ GOL!', body:m.homeTeam+' '+home+' – '+away+' '+m.awayTeam,
+        homeTeam:m.homeTeam, awayTeam:m.awayTeam, homeScore:home, awayScore:away, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
       });
     }
-  } catch (e) {
-    console.warn('[push/goals]', e.message);
-  } finally { running = false; }
+  } catch (e) { console.warn('[push/goals]', e.message); }
+  finally { running = false; }
+}
+
+async function notifyCouponSettlement(userId, coupon) {
+  if (!configured() || !coupon || !userId || coupon.status === 'pending') return false;
+  const legs = coupon.legs?.length ? coupon.legs : (coupon.selections || []).map(s => ({ homeTeam:coupon.homeTeam, awayTeam:coupon.awayTeam, selection:s }));
+  if (legs.some(l => (l.selection?.result || l.result) === 'pending')) return false;
+  const result = coupon.status === 'won' ? 'kazandı' : coupon.status === 'void' ? 'iade edildi' : 'kaybetti';
+  const title = coupon.status === 'won' ? '✅ Kupon tuttu' : coupon.status === 'void' ? '↩ Kupon iade edildi' : '❌ Kupon sonucu';
+  const body = (legs[0]?.homeTeam || coupon.homeTeam || 'Maç') + (legs.length > 1 ? ' ve diğer maçlar' : '') + ' · Kupon ' + result + '.';
+  const eventId = 'coupon-settled:' + String(coupon._id) + ':' + String(coupon.status);
+  if (!await claimPushEvent(eventId, 'coupon-settled')) return false;
+  await sendToUsers([String(userId)], { type:'coupon-settled', eventId, fixtureId:String(legs[0]?.fixtureId || coupon.fixtureId || ''), title, body, url:'/kuponum.html' });
+  return true;
 }
 
 async function claimSmartEvent(eventId){try{await NotificationEvent.create({eventId,kind:'smart'});return true}catch(e){if(e&&e.code===11000)return false;throw e}}
@@ -122,4 +145,4 @@ function startPushGoalMonitor() {
   setInterval(checkSmartNotifications, 5 * 60 * 1000);
 }
 
-module.exports = { startPushGoalMonitor, sendToUsers, checkSmartNotifications };
+module.exports = { startPushGoalMonitor, sendToUsers, checkSmartNotifications, notifyCouponSettlement };
