@@ -11,12 +11,13 @@ const OUTCOMES = [
   { key: 'draw', modelKey: 'drawProbability', marketKey: 'draw', oddsKey: 'draw' },
   { key: 'away', modelKey: 'awayWinProbability', marketKey: 'away', oddsKey: 'away' },
 ];
+const marketEvidenceService = require('./marketEvidenceService');
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null, extendedOddsBoard=null, modelHealth=null }) {
+function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, halfMarkets, marketEvidence={}, dataHealth, premium, sportmonksIntel, sportmonksMarketEvidence, evidenceStrength=0.5, modelAgreementScore=50, marketOddsBoard=null, extendedOddsBoard=null, modelHealth=null }) {
   let health = Number(dataHealth?.score || 0);
   const verifiedStats = Number(sportmonksIntel?.verifiedStats || 0);
   const lineupComplete = sportmonksIntel?.lineupComplete === true || ((sportmonksIntel?.homeStarters || 0) >= 11 && (sportmonksIntel?.awayStarters || 0) >= 11);
@@ -27,8 +28,8 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     { key: 'away', market: '1X2', label: 'Deplasman', probability: Number(modelProbabilities?.awayWinProbability || 0) },
     { key: 'over25', market: 'GOL', label: '2.5 Üst', probability: Number(goalMarkets?.over25GoalsPercent || 0) },
     { key: 'under25', market: 'GOL', label: '2.5 Alt', probability: 100 - Number(goalMarkets?.over25GoalsPercent || 0) },
-    { key: 'bttsYes', market: 'KG', label: 'KG Var', probability: Number(goalMarkets?.bttsPercent || 0) },
-    { key: 'bttsNo', market: 'KG', label: 'KG Yok', probability: 100 - Number(goalMarkets?.bttsPercent || 0) },
+    { key: 'bttsYes', market: 'KG', label: 'KG Var', direction:'YES', probability: Number(goalMarkets?.bttsPercent || 0) },
+    { key: 'bttsNo', market: 'KG', label: 'KG Yok', direction:'NO', probability: 100 - Number(goalMarkets?.bttsPercent || 0) },
     { key: 'over15', market: 'GOL', label: '1.5 Üst', probability: Number(goalMarkets?.totalGoals?.['1.5']?.over || 0) },
     { key: 'over35', market: 'GOL', label: '3.5 Üst', probability: Number(goalMarkets?.totalGoals?.['3.5']?.over || 0) },
     { key: 'under35', market: 'GOL', label: '3.5 Alt', probability: Number(goalMarkets?.totalGoals?.['3.5']?.under || 0) },
@@ -60,6 +61,19 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   ].filter(item => Number.isFinite(item.probability) && item.probability >= 0 && item.probability <= 100)
     .map(item => {
       const ev=sportmonksMarketEvidence||{};
+      const assessment=marketEvidence?.[item.key]||{
+        evidenceLevel:'INSUFFICIENT',
+        effectiveSample:0,
+        evidenceSource:['NO_DATA'],
+        priorUsed:true,
+        strongPickEligible:false,
+      };
+      item.evidenceLevel=assessment.evidenceLevel||'INSUFFICIENT';
+      item.effectiveSample=Number(assessment.effectiveSample)||0;
+      item.evidenceSource=Array.isArray(assessment.evidenceSource)?assessment.evidenceSource:[];
+      item.priorUsed=assessment.priorUsed===true;
+      item.strongPickEligible=assessment.strongPickEligible===true &&
+        item.evidenceLevel==='SUFFICIENT' && item.effectiveSample>=8;
       let evidence=null;
       if(item.market==='1X2') evidence=item.key==='home'?ev.homeThreat:item.key==='away'?ev.awayThreat:(ev.homeThreat!=null&&ev.awayThreat!=null?1-Math.min(.25,Math.abs(ev.homeThreat-ev.awayThreat)*.35):null);
       else if(item.key==='over25') evidence=ev.goalQuality;
@@ -75,9 +89,9 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       // should not outrank a better-supported market merely because it is more
       // extreme. 1X2 may use 1X2 agreement; binary/corner markets do not inherit it.
       const baseEvidence=clamp(Number(evidenceStrength)||0,.25,1);
-      const marketEvidence=evidence==null?baseEvidence:clamp(baseEvidence*(.75+.25*clamp(evidence,.65,1.35)),.25,1);
+      const marketEvidenceReliability=evidence==null?baseEvidence:clamp(baseEvidence*(.75+.25*clamp(evidence,.65,1.35)),.25,1);
       const agreementFactor=item.market==='1X2'?clamp(Number(modelAgreementScore)||0,0,100)/100:1;
-      const reliability=clamp(marketEvidence*(item.market==='1X2'?(.75+.25*agreementFactor):1),.25,1);
+      const reliability=clamp(marketEvidenceReliability*(item.market==='1X2'?(.75+.25*agreementFactor):1),.25,1);
       const confidenceEdge=Math.max(0,item.probability-50);
       return {
         ...item,
@@ -168,8 +182,8 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     const excludedFromTopPicks = item.key === 'shOver05' || !cornerTopPickReady;
     const healthMarket=item.key==='bttsYes'||item.key==='bttsNo'?'btts':item.key==='under25'?'over25':item.key;
     const degraded=healthGate&&(driftMarkets.has(healthMarket)||bucketMarkets.has(healthMarket));
-    item.isBettingValue=Boolean(!excludedFromTopPicks && !degraded && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
-    item.topPickExclusion = !cornerTopPickReady ? 'INSUFFICIENT_REAL_CORNER_EVIDENCE' : (item.key==='shOver05' ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : (degraded ? 'MODEL_HEALTH_GATE' : null));
+    item.isBettingValue=Boolean(!excludedFromTopPicks && !degraded && item.strongPickEligible && px && item.expectedValuePercent>0 && item.edgePoints>=uncertaintyBuffer && item.evidenceReliability>=.50 && health>=55);
+    item.topPickExclusion = !cornerTopPickReady ? 'INSUFFICIENT_REAL_CORNER_EVIDENCE' : (item.key==='shOver05' ? 'HIGH_BASE_RATE_INFORMATIONAL_MARKET' : (degraded ? 'MODEL_HEALTH_GATE' : (!item.strongPickEligible ? 'INSUFFICIENT_MARKET_EVIDENCE' : null)));
     item.valueScore=item.isBettingValue
       ? +(item.expectedValuePercent*.45 + item.edgePoints*.35 + item.evidenceReliability*20).toFixed(2)
       : null;
@@ -192,6 +206,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   const topEligible=candidates.filter(x=>
     coreTopPickKeys.has(x.key) &&
     !x.topPickExclusion &&
+    x.strongPickEligible === true &&
     x.probability>=50 &&
     x.evidenceReliability>=.45 &&
     health>=45
@@ -230,6 +245,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     allMarkets: candidates,
     topPredictions,
     best: topPredictions[0] || null,
+    bttsDirection: marketEvidenceService.bttsDirection(goalMarkets?.bttsPercent),
     valuePicks: valueEligible,
     selectionPolicy: {
       mode:'analysis-first-with-verified-value-overlay',
@@ -239,6 +255,7 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       topPicksMinimumProbability:50,
       topPicksMinimumEvidenceReliability:.45,
       topPicksMinimumDataHealth:45,
+      topPicksMinimumEffectiveSample:8,
       valueRequiresVerifiedOdds:true,
       valueRequiresFreshOdds:true,
       valueRequiresPositiveExpectedValue:true,
@@ -280,6 +297,7 @@ function buildDataHealth({ homePlayed, awayPlayed, hasOdds, hasStandings, injuri
 function buildPremiumIntelligence({
   modelProbabilities,
   marketProbabilities,
+  marketEvidence = {},
   matchOdds,
   homePlayed = 0,
   awayPlayed = 0,
@@ -336,6 +354,9 @@ function buildPremiumIntelligence({
   const minSample = Math.min(homePlayed, awayPlayed);
   const blockers = [];
   if (homePlayed < 5 || awayPlayed < 5) blockers.push('SMALL_SAMPLE');
+  const selectionEvidence = bestEdge ? marketEvidence?.[bestEdge.outcome] : null;
+  const evidenceReady = marketEvidenceService.hasStrongEvidence(selectionEvidence);
+  if (!evidenceReady) blockers.push('INSUFFICIENT_MARKET_EVIDENCE');
   if (!hasOdds) blockers.push('NO_MARKET_ODDS');
   if (!hasStandings) blockers.push('NO_STANDINGS');
   if (dataHealth.score < 55) blockers.push('LOW_DATA_HEALTH');
@@ -344,13 +365,13 @@ function buildPremiumIntelligence({
   // evidence into a customer-facing pick. Keep the probabilities available for
   // diagnostics, but require a minimum completed sample and data-health floor
   // before publishing a selection.
-  const decisionReady = hasModel && minSample >= 5 && dataHealth.score >= 55;
+  const decisionReady = hasModel && minSample >= 8 && evidenceReady && dataHealth.score >= 55;
   let status = decisionReady ? 'PICK' : 'UNAVAILABLE';
   if (decisionReady && hasOdds && bestEdge?.edgePoints >= 3) status = 'VALUE';
 
   const drivers = [];
-  if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_XG_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
-  if (awayLambda > homeLambda + 0.35) drivers.push({ code: 'AWAY_XG_EDGE', strength: +(awayLambda - homeLambda).toFixed(2) });
+  if (homeLambda > awayLambda + 0.35) drivers.push({ code: 'HOME_EXPECTED_GOALS_EDGE', strength: +(homeLambda - awayLambda).toFixed(2) });
+  if (awayLambda > homeLambda + 0.35) drivers.push({ code: 'AWAY_EXPECTED_GOALS_EDGE', strength: +(awayLambda - homeLambda).toFixed(2) });
   if ((homeForm?.avgGoalsFor || 0) >= 1.5) drivers.push({ code: 'HOME_ATTACK_FORM', strength: homeForm.avgGoalsFor });
   if ((awayForm?.avgGoalsFor || 0) >= 1.5) drivers.push({ code: 'AWAY_ATTACK_FORM', strength: awayForm.avgGoalsFor });
   if ((homeForm?.avgGoalsAgainst || 0) >= 1.5) drivers.push({ code: 'HOME_DEFENCE_RISK', strength: homeForm.avgGoalsAgainst });
@@ -368,7 +389,9 @@ function buildPremiumIntelligence({
     methodology: {
       edgeUsesModelOnly: true,
       minimumValueEdgePoints: 3,
-      minimumFullSample: 5,
+      minimumFullSample: 8,
+      minimumMarketEvidenceLevel: 'SUFFICIENT',
+      minimumEffectiveSample: 8,
       minimumDataHealth: 55,
       insufficientDataBlocksSelection: true,
     },

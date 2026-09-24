@@ -7,6 +7,7 @@ const ledger = require('../services/predictionLedgerService');
 const sportmonks = require('../services/sportmonksService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const premiumLab = require('../services/premiumLabService');
+const { hasStrongEvidence } = require('../services/marketEvidenceService');
 const { requireAuth } = require('../middleware/authMiddleware');
 
 /**
@@ -51,8 +52,82 @@ router.get('/sportmonks/diagnostic/:fixtureId', async (req, res) => {
   } catch(e) { res.status(500).json({ok:false,error:e.message}); }
 });
 
-router.get('/:fixtureId/v4-intelligence',requireAuth,async(req,res)=>{try{const fixtureId=String(req.params.fixtureId);const [sim,similar,patterns]=await Promise.all([premiumLab.simulateFixture(fixtureId).catch(e=>({unavailable:true,error:e.message})),premiumLab.similarMatches(fixtureId,{limit:20}).catch(e=>({unavailable:true,error:e.message})),premiumLab.patternFinder({}).catch(e=>({unavailable:true,error:e.message}))]);let value={unavailable:true};try{const vf=await premiumLab.valueFinder({limit:80});const m=(vf.matches||[]).find(x=>String(x.fixtureId)===fixtureId);value=m||{unavailable:true,providerAvailable:vf.providerAvailable,note:vf.note}}catch(e){value={unavailable:true,error:e.message}}const row=await ledger.reportCard(fixtureId);const lockedV4=await premiumLab.fixtureValidation(fixtureId);const pick=row.strongestPick||null,mc=sim.simulation&&pick?premiumLab.monteCarlo50k({fixtureId,homeLambda:sim.simulation.expectedGoals?.home,awayLambda:sim.simulation.expectedGoals?.away}):null;let simProb=null;if(mc&&pick){const k=pick.key;simProb=k==='home'?mc.home:k==='draw'?mc.draw:k==='away'?mc.away:k==='over25'?mc.over25:k==='under25'?mc.under25:k==='bttsYes'?mc.bttsYes:k==='bttsNo'?mc.bttsNo:null}const modelProb=Number(pick?.probability);const gap=Number.isFinite(modelProb)&&simProb!=null?+Math.abs(modelProb-simProb).toFixed(1):null;const agreement=lockedV4?.agreement||(gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict');const health=Number((await require('../models/PredictionSnapshot').findOne({fixtureId}).select('dataQualityScore').lean())?.dataQualityScore||0);const activation=await ledger.v4ActivationStatus();const baseStrong=!!pick&&modelProb>=60&&health>=55;const strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));const edgeClass=!pick?'NO_EDGE':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH';res.json({engine:'premium-v4-intelligence',fixtureId,edgeId:row.edgeId,strongestPick:pick,edgeDecision:{classification:edgeClass,strongEdge,modelProbability:modelProb,dataQualityScore:health,v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated,rule:activation.validated?'AI >=60 + data health >=55 + validated V4 strong/aligned':'AI >=60 + data health >=55; V4 shadow only'},v4Activation:activation,lockedValidation:lockedV4,simulation:mc?{runs:mc.runs,probability:simProb,gap,agreement:gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict',expectedGoals:sim.simulation.expectedGoals,mostLikelyScores:sim.simulation.mostLikelyScores}:sim,similarMatches:similar,patterns,value,policy:{primaryModel:'socceredge-ai',v4Role:'cross-check-and-evidence',weakFillerAllowed:false,noValueClaimWithoutVerifiedOdds:true}})}catch(e){res.status(e.status||500).json({error:'v4_intelligence_unavailable',detail:e.message})}});
-router.post('/v4-decisions',requireAuth,async(req,res)=>{try{const activation=await ledger.v4ActivationStatus();const ids=[...new Set((req.body?.fixtureIds||[]).map(String))].slice(0,60);const Prediction=require('../models/PredictionSnapshot');const rows=await Prediction.find({fixtureId:{$in:ids},status:'pending'}).select('fixtureId strongestPick dataQualityScore v4Validation').lean();res.json({v4Activation:activation,items:rows.map(x=>{const v=(x.v4Validation||[]).find(z=>z?.kind==='fixture-cross-check'),p=Number(x.strongestPick?.probability),health=Number(x.dataQualityScore||0),agreement=v?.agreement||'unavailable',baseStrong=!!x.strongestPick&&p>=60&&health>=55,strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));return{fixtureId:x.fixtureId,strongestPick:x.strongestPick,classification:!x.strongestPick?'NO_EDGE':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH',strongEdge,dataQualityScore:health,v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated}})});}catch(e){res.status(500).json({error:'v4_decisions_unavailable'})}});
+router.get('/:fixtureId/v4-intelligence',requireAuth,async(req,res)=>{
+  try{
+    const fixtureId=String(req.params.fixtureId);
+    const [sim,similar,patterns]=await Promise.all([
+      premiumLab.simulateFixture(fixtureId).catch(e=>({unavailable:true,error:e.message})),
+      premiumLab.similarMatches(fixtureId,{limit:20}).catch(e=>({unavailable:true,error:e.message})),
+      premiumLab.patternFinder({}).catch(e=>({unavailable:true,error:e.message}))
+    ]);
+    let value={unavailable:true};
+    try{
+      const vf=await premiumLab.valueFinder({limit:80});
+      const match=(vf.matches||[]).find(x=>String(x.fixtureId)===fixtureId);
+      value=match||{unavailable:true,providerAvailable:vf.providerAvailable,note:vf.note};
+    }catch(e){value={unavailable:true,error:e.message}}
+    const row=await ledger.reportCard(fixtureId);
+    const lockedV4=await premiumLab.fixtureValidation(fixtureId);
+    const pick=row.strongestPick||null;
+    const mc=sim.simulation&&pick
+      ? premiumLab.monteCarlo50k({fixtureId,homeLambda:sim.simulation.expectedGoals?.home,awayLambda:sim.simulation.expectedGoals?.away})
+      : null;
+    let simProb=null;
+    if(mc&&pick){
+      const k=pick.key;
+      simProb=k==='home'?mc.home:k==='draw'?mc.draw:k==='away'?mc.away:k==='over25'?mc.over25:k==='under25'?mc.under25:k==='bttsYes'?mc.bttsYes:k==='bttsNo'?mc.bttsNo:null;
+    }
+    const modelProb=Number(pick?.probability);
+    const gap=Number.isFinite(modelProb)&&simProb!=null?+Math.abs(modelProb-simProb).toFixed(1):null;
+    const agreement=lockedV4?.agreement||(gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict');
+    const health=Number((await require('../models/PredictionSnapshot').findOne({fixtureId}).select('dataQualityScore').lean())?.dataQualityScore||0);
+    const activation=await ledger.v4ActivationStatus();
+    const evidenceReady=hasStrongEvidence(pick);
+    const baseStrong=!!pick&&evidenceReady&&modelProb>=60&&health>=55;
+    const strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));
+    const edgeClass=!pick?'NO_EDGE':!evidenceReady?'WATCH':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH';
+    res.json({
+      engine:'premium-v4-intelligence',fixtureId,edgeId:row.edgeId,strongestPick:pick,
+      edgeDecision:{
+        classification:edgeClass,strongEdge,modelProbability:modelProb,dataQualityScore:health,
+        evidenceLevel:pick?.evidenceLevel||'INSUFFICIENT',effectiveSample:pick?.effectiveSample||0,
+        v4Agreement:agreement,v4Mode:activation.mode,v4Validated:activation.validated,
+        rule:activation.validated
+          ? 'AI >=60 + data health >=55 + sufficient market evidence (effective sample >=8) + validated V4 strong/aligned'
+          : 'AI >=60 + data health >=55 + sufficient market evidence (effective sample >=8); V4 shadow only'
+      },
+      v4Activation:activation,lockedValidation:lockedV4,
+      simulation:mc?{runs:mc.runs,probability:simProb,gap,agreement:gap==null?'unavailable':gap<=4?'strong':gap<=8?'aligned':gap<=15?'mixed':'conflict',expectedGoals:sim.simulation.expectedGoals,mostLikelyScores:sim.simulation.mostLikelyScores}:sim,
+      similarMatches:similar,patterns,value,
+      policy:{primaryModel:'socceredge-ai',v4Role:'cross-check-and-evidence',weakFillerAllowed:false,noValueClaimWithoutVerifiedOdds:true}
+    });
+  }catch(e){res.status(e.status||500).json({error:'v4_intelligence_unavailable',detail:e.message})}
+});
+router.post('/v4-decisions',requireAuth,async(req,res)=>{
+  try{
+    const activation=await ledger.v4ActivationStatus();
+    const ids=[...new Set((req.body?.fixtureIds||[]).map(String))].slice(0,60);
+    const Prediction=require('../models/PredictionSnapshot');
+    const rows=await Prediction.find({fixtureId:{$in:ids},status:'pending'}).select('fixtureId strongestPick dataQualityScore v4Validation').lean();
+    res.json({
+      v4Activation:activation,
+      items:rows.map(x=>{
+        const v=(x.v4Validation||[]).find(z=>z?.kind==='fixture-cross-check');
+        const p=Number(x.strongestPick?.probability),health=Number(x.dataQualityScore||0);
+        const agreement=v?.agreement||'unavailable',evidenceReady=hasStrongEvidence(x.strongestPick);
+        const baseStrong=!!x.strongestPick&&evidenceReady&&p>=60&&health>=55;
+        const strongEdge=baseStrong&&(!activation.validated||(agreement==='strong'||agreement==='aligned'));
+        return{
+          fixtureId:x.fixtureId,strongestPick:x.strongestPick,
+          classification:!x.strongestPick?'NO_EDGE':!evidenceReady?'WATCH':strongEdge?'STRONG_EDGE':health<45?'RISKY':'WATCH',
+          strongEdge,dataQualityScore:health,evidenceLevel:x.strongestPick?.evidenceLevel||'INSUFFICIENT',
+          effectiveSample:x.strongestPick?.effectiveSample||0,v4Agreement:agreement,
+          v4Mode:activation.mode,v4Validated:activation.validated
+        };
+      })
+    });
+  }catch(e){res.status(500).json({error:'v4_decisions_unavailable'})}
+});
 router.get('/model/v4-performance',async(req,res)=>{try{res.json({activation:await ledger.v4ActivationStatus(),rows:await ledger.v4CrossCheckPerformance()})}catch(e){res.status(500).json({error:'v4_performance_unavailable'})}});
 router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.reportCard(req.params.fixtureId))}catch(e){res.status(500).json({error:'report_card_unavailable'})}});
 router.get('/:fixtureId', async (req, res) => {
@@ -142,23 +217,41 @@ router.get('/:fixtureId', async (req, res) => {
         // Only a complete XI for both teams is allowed to improve confidence.
         const lineupStatus = lineupComplete ? 'CONFIRMED' : (homeStarterCount || awayStarterCount ? 'PARTIAL' : 'UNAVAILABLE');
         const lineupEvidence = { confirmed: lineupComplete, status: lineupStatus, homeCount: homeStarterCount, awayCount: awayStarterCount, affectsProbabilities: false, policy: lineupComplete ? 'confirmed-xi-confidence-only' : 'no-lineup-effect' };
-        const verifiedStats = Object.values(intel.rawStatistics || {}).filter(v => v != null).length;
-        const smQualityBonus = Math.min(13, (verifiedStats >= 2 ? 3 : 0) + (verifiedStats >= 6 ? 3 : 0) + (verifiedStats >= 10 ? 2 : 0) + (lineupComplete ? 5 : 0));
+        const availableFixtureStats = Object.entries(intel.rawStatistics || {}).filter(([,value]) => value != null).map(([key]) => key);
+        const verifiedStats = availableFixtureStats.length;
+        const qualityDimensions = result.qualityDimensions ? {
+          ...result.qualityDimensions,
+          sourceHealth: {
+            ...(result.qualityDimensions.sourceHealth || {}),
+            providers: {
+              ...(result.qualityDimensions.sourceHealth?.providers || {}),
+              sportmonks: {
+                ...(result.qualityDimensions.sourceHealth?.providers?.sportmonks || {}),
+                currentFixtureStatsAvailable: verifiedStats > 0,
+                currentFixtureStatsCount: verifiedStats,
+              },
+            },
+          },
+          metricCoverage: {
+            ...(result.qualityDimensions.metricCoverage || {}),
+            sportmonksCurrentFixture: {
+              availableFields: verifiedStats,
+              fields: availableFixtureStats,
+              consumedByPreMatchModel: false,
+              note: 'Current-fixture statistics and lineups are diagnostics, not pre-match historical evidence.',
+            },
+          },
+        } : result.qualityDimensions;
         result = { ...result,
-          dataQualityScore: Math.min(100, Number(result.dataQualityScore || 0) + smQualityBonus),
+          qualityDimensions,
           sportmonks: { fixtureId: sm.sportmonksId, verified: verifiedStats > 0 || lineupComplete || !!smHistory, verifiedStats, lineupComplete, lineupStatus, lineupEvidence, lineupCounts:{home:homeStarterCount,away:awayStarterCount}, homeStarters: lineupComplete ? intel.homeStarters : [], awayStarters: lineupComplete ? intel.awayStarters : [], homeRedCards: intel.homeRedCards, awayRedCards: intel.awayRedCards, statistics: intel.rawStatistics, historical: smHistory },
           enhancedDataSource: 'sportmonks'
         };
         if (result.marketBoard) {
-          // Keep the strongest-selection pool focused on the four core betting markets.
-          // Sportmonks fixture stats improve data quality here; they do not rewrite
-          // pre-match probabilities with in-play/single-fixture numbers.
-          const health = Math.min(100, Number(result.premium?.dataHealth?.score || 0) + smQualityBonus);
-          const sample = result.premium?.dataHealth?.sample || {};
-          const fullSample = Number(sample.home || 0) >= 5 && Number(sample.away || 0) >= 5;
+          // Current-fixture stats and lineups are visible diagnostics only. They
+          // must not raise historical evidence health or Strong Pick eligibility.
+          const health = Number(result.premium?.dataHealth?.score || 0);
           if (result.premium?.dataHealth) {
-            result.premium.dataHealth.score = health;
-            result.premium.dataHealth.level = health >= 80 ? 'high' : health >= 55 ? 'medium' : 'low';
             result.premium.dataHealth.checks = { ...(result.premium.dataHealth.checks || {}), confirmedLineups: lineupComplete };
             if (lineupStatus === 'PARTIAL' && !result.premium.blockers?.includes('LINEUPS_PARTIAL')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_PARTIAL'];
             if (lineupStatus === 'UNAVAILABLE' && !result.premium.blockers?.includes('LINEUPS_UNAVAILABLE')) result.premium.blockers = [...(result.premium.blockers || []), 'LINEUPS_UNAVAILABLE'];
@@ -169,13 +262,9 @@ router.get('/:fixtureId', async (req, res) => {
               result.premium.blockers = [...new Set([...(result.premium.blockers || []), lineupStatus === 'PARTIAL' ? 'LINEUPS_PARTIAL' : 'LINEUPS_UNAVAILABLE'])];
             }
           }
-          result.dataQualityScore = health;
           result.marketBoard.allMarkets = (result.marketBoard.allMarkets || []).map(x => ({...x, dataHealth: health}));
-          // Preserve the value-aware selector produced by the engine. Sportmonks
-          // enrichment may improve data health, but must never replace Top Picks
-          // with the highest raw-probability core markets.
           result.marketBoard.topPredictions = (result.marketBoard.topPredictions || [])
-            .filter(x => x.isBettingValue === true)
+            .filter(x => x.isBettingValue === true && x.strongPickEligible === true)
             .slice(0,3);
           result.marketBoard.best = result.marketBoard.topPredictions[0] || null;
         }

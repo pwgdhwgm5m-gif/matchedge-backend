@@ -82,7 +82,7 @@ const COMPETITIONS = Object.freeze([
     'verified', { fixtureCoverage: 'fixture-producing', resultCoverage: 'result-producing' }),
   makeCompetition('turkey-super-lig', 'Turkey Süper Lig', 'Turkey', 'league', 1, 1,
     { sportmonks: '600', sportsdb: '4339', oddsApi: 'soccer_turkey_super_league' },
-    ['Süper Lig', 'Super Lig', 'Turkish Super Lig', 'Turkey Super League'],
+    ['Süper Lig', 'Super Lig', 'Turkish Super Lig', 'Turkey Super League', 'Trendyol Süper Lig', 'Trendyol Super Lig'],
     'verified', { fixtureCoverage: 'fixture-producing', resultCoverage: 'result-producing' }),
 
   // Requested European first divisions with verified TheSportsDB IDs.

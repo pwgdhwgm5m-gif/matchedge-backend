@@ -16,6 +16,7 @@ const sourcePolicy = require('./sourcePolicyService');
 const bsd = require('./bsdService');
 const powerRating = require('./powerRatingService');
 const predictionLedger = require('./predictionLedgerService');
+const marketEvidenceService = require('./marketEvidenceService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -137,6 +138,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const awayTeamIdForStats = useOwnSource && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
     ? awayFixturesResult.value.teamId
     : away;
+  const homeOverallHistory = stats.summarizeMatches(homeFixtures, homeTeamIdForStats);
+  const awayOverallHistory = stats.summarizeMatches(awayFixtures, awayTeamIdForStats);
+  const homeFixtureHalfHistory = stats.calculateHalfHistory(homeFixtures, homeTeamIdForStats);
+  const awayFixtureHalfHistory = stats.calculateHalfHistory(awayFixtures, awayTeamIdForStats);
 
   // V2 Elo power rating: construct a chronological league/team evidence pool
   // from already-fetched completed fixtures. This is fail-open and bounded.
@@ -267,6 +272,24 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     accuracy.teamAdvancedForm(advancedHomeFixtures, advancedHomeId, 8),
     accuracy.teamAdvancedForm(advancedAwayFixtures, advancedAwayId, 8),
   ]);
+  const xgEffectiveSample = Math.min(Number(homeAdvanced?.xgSample || 0), Number(awayAdvanced?.xgSample || 0));
+  const xgProvenance = {
+    status: Number(homeAdvanced?.xgSample || 0) > 0 || Number(awayAdvanced?.xgSample || 0) > 0 ? 'PROVIDER_XG' : 'NO_XG',
+    provider: 'TheSportsDB event statistics',
+    samples: {
+      home: Number(homeAdvanced?.xgSample || 0),
+      away: Number(awayAdvanced?.xgSample || 0),
+      effective: xgEffectiveSample,
+    },
+    usedByModel: xgEffectiveSample >= 3 &&
+      Number.isFinite(homeAdvanced?.avgXgFor) && Number.isFinite(awayAdvanced?.avgXgAgainst) &&
+      Number.isFinite(awayAdvanced?.avgXgFor) && Number.isFinite(homeAdvanced?.avgXgAgainst),
+    derivedAttackingMetric: {
+      name: 'expected-goals lambda',
+      provenance: 'DERIVED_METRIC',
+      source: 'goal, form, strength, and available provider-xG ensemble',
+    },
+  };
   homeLambda = accuracy.blendLambda(homeLambda, homeAdvanced, awayAdvanced, leagueHomeGoals);
   awayLambda = accuracy.blendLambda(awayLambda, awayAdvanced, homeAdvanced, leagueAwayGoals);
 
@@ -421,14 +444,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const disagreement=vectors.length?vectors.reduce((s,v)=>s+v.reduce((z,x,i)=>z+Math.abs(x-consensus[i]),0)/3,0)/vectors.length:0;
   const agreementScore=Math.max(0,Math.min(100,100-disagreement*3.2));
   const analysisStrength=Math.round(Math.max(25,Math.min(100,evidenceStrength*75+agreementScore*.25)));
-  const shrink3 = probs => {
-    const h=Number(probs?.homeWinProbability), d=Number(probs?.drawProbability), a=Number(probs?.awayWinProbability);
-    if (![h,d,a].every(Number.isFinite)) return probs;
-    const effectiveStrength=Math.max(.30,Math.min(1,evidenceStrength*(.65+.35*agreementScore/100)));
-    const vals=[h,d,a].map(p => 33.333 + effectiveStrength * (p - 33.333));
-    const sum=vals.reduce((s,x)=>s+x,0) || 100;
-    return { ...probs, homeWinProbability:+(vals[0]*100/sum).toFixed(1), drawProbability:+(vals[1]*100/sum).toFixed(1), awayWinProbability:+(vals[2]*100/sum).toFixed(1) };
-  };
+  const shrink3 = probs => marketEvidenceService.shrinkMatchProbabilities(probs,evidenceStrength,agreementScore);
   // Binary markets (O/U, BTTS) must not inherit the 1X2 agreement score.
   // Until each binary market has its own independent agreement model, shrink
   // only by evidence/data strength.
@@ -474,10 +490,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     smExpectedAway = +(baseAway * Math.max(.90, Math.min(1.10, cornerPressure(aa)))).toFixed(2);
   }
   let cornerMetrics = smCornerReady
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', expectedHome:smExpectedHome, expectedAway:smExpectedAway, lowEvidence:Math.min(smHome.sample,smAway.sample)<8 })
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', provenance:'REAL_PROVIDER_CORNERS', expectedHome:smExpectedHome, expectedAway:smExpectedAway, lowEvidence:Math.min(smHome.sample,smAway.sample)<8 })
     : cornerProjection
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample, source:'historical-corners', lowEvidence:Number(cornerProjection.sample||0)<8 })
-    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { sample:0, source: 'league-prior-bounded-tempo', lowEvidence:true });
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample, source:'historical-corners', provenance:'REAL_PROVIDER_CORNERS', lowEvidence:Number(cornerProjection.sample||0)<8 })
+    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { sample:0, source: 'league-prior-bounded-tempo', provenance:'LEAGUE_PRIOR', lowEvidence:true });
 
   // Corner percentages need their own evidence shrinkage. A Poisson projection
   // from a league prior is not match-specific evidence and must not look like a
@@ -498,20 +514,59 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     };
   }
   const halfEvidence = (() => {
-    if (!sportmonksHistorical) return null;
-    const H=sportmonksHistorical.home?.averages||{}, A=sportmonksHistorical.away?.averages||{};
+    const smHome=sportmonksHistorical?.rawHome;
+    const smAway=sportmonksHistorical?.rawAway;
+    const homeUsesSportmonks=Number(smHome?.halftimeSamples||0)>0;
+    const awayUsesSportmonks=Number(smAway?.halftimeSamples||0)>0;
+    const home=homeUsesSportmonks ? {
+      halftimeSamples:smHome.halftimeSamples,
+      firstHalfScoringSamples:smHome.firstHalfScoringSamples,
+      firstHalfConcedingSamples:smHome.firstHalfConcedingSamples,
+      secondHalfSamples:smHome.secondHalfSamples,
+      firstHalfGoalsFor:smHome.averages?.firstHalfScored,
+      firstHalfGoalsAgainst:smHome.averages?.firstHalfConceded,
+      secondHalfGoalsFor:smHome.averages?.secondHalfScored,
+      secondHalfGoalsAgainst:smHome.averages?.secondHalfConceded,
+    } : homeFixtureHalfHistory;
+    const away=awayUsesSportmonks ? {
+      halftimeSamples:smAway.halftimeSamples,
+      firstHalfScoringSamples:smAway.firstHalfScoringSamples,
+      firstHalfConcedingSamples:smAway.firstHalfConcedingSamples,
+      secondHalfSamples:smAway.secondHalfSamples,
+      firstHalfGoalsFor:smAway.averages?.firstHalfScored,
+      firstHalfGoalsAgainst:smAway.averages?.firstHalfConceded,
+      secondHalfGoalsFor:smAway.averages?.secondHalfScored,
+      secondHalfGoalsAgainst:smAway.averages?.secondHalfConceded,
+    } : awayFixtureHalfHistory;
     const avg=(x,y)=>Number.isFinite(x)&&Number.isFinite(y)?(x+y)/2:(Number.isFinite(x)?x:(Number.isFinite(y)?y:null));
-    const homeFirst=avg(H.firstHalfScored,A.firstHalfConceded);
-    const homeSecond=avg(H.secondHalfScored,A.secondHalfConceded);
-    const awayFirst=avg(A.firstHalfScored,H.firstHalfConceded);
-    const awaySecond=avg(A.secondHalfScored,H.secondHalfConceded);
-    if (![homeFirst,homeSecond,awayFirst,awaySecond].some(Number.isFinite)) return null;
+    const homeFirst=avg(home.firstHalfGoalsFor,away.firstHalfGoalsAgainst);
+    const homeSecond=avg(home.secondHalfGoalsFor,away.secondHalfGoalsAgainst);
+    const awayFirst=avg(away.firstHalfGoalsFor,home.firstHalfGoalsAgainst);
+    const awaySecond=avg(away.secondHalfGoalsFor,home.secondHalfGoalsAgainst);
+    const homeHTSamples=Number(home.halftimeSamples||0);
+    const awayHTSamples=Number(away.halftimeSamples||0);
+    const homeSecondHalfSamples=Number(home.secondHalfSamples||0);
+    const awaySecondHalfSamples=Number(away.secondHalfSamples||0);
+    const source=homeUsesSportmonks&&awayUsesSportmonks
+      ? 'sportmonks-verified-halftime'
+      : homeUsesSportmonks||awayUsesSportmonks ? 'mixed-real-halftime' : 'team-fixture-history';
     return {
-      source:'sportmonks-verified-halftime',
+      source,
       homeFirstRate:homeFirst, homeSecondRate:homeSecond,
       awayFirstRate:awayFirst, awaySecondRate:awaySecond,
-      homeSample:sportmonksHistorical.home?.sample||0,
-      awaySample:sportmonksHistorical.away?.sample||0
+      homeSample:homeHTSamples,
+      awaySample:awayHTSamples,
+      homeHTSamples,
+      awayHTSamples,
+      homeFirstHalfScoringSamples:Number(home.firstHalfScoringSamples||0),
+      awayFirstHalfScoringSamples:Number(away.firstHalfScoringSamples||0),
+      homeFirstHalfConcedingSamples:Number(home.firstHalfConcedingSamples||0),
+      awayFirstHalfConcedingSamples:Number(away.firstHalfConcedingSamples||0),
+      homeSecondHalfSamples,
+      awaySecondHalfSamples,
+      firstHalfPriorUsed:Math.min(homeHTSamples,awayHTSamples)<8,
+      secondHalfPriorUsed:Math.min(homeSecondHalfSamples,awaySecondHalfSamples)<8,
+      priorUsed:Math.min(homeHTSamples,awayHTSamples)<8,
     };
   })();
   let halfMarkets = poisson.calculateHalfMarkets(homeLambda, awayLambda, halfEvidence);
@@ -604,11 +659,25 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const successCount = [oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult].filter(
     r => r.status === 'fulfilled' && r.value.ok !== false
   ).length + (h2hSucceeded ? 1 : 0);
-  const dataQualityScore = poisson.calculateDataQualityScore(successCount, 5, 0);
-
+  const marketEvidence = marketEvidenceService.buildMarketEvidence({
+    matchProbabilities,
+    goalMarkets: marketProbabilities,
+    cornerMetrics,
+    halfMarkets,
+    homeHistory: homeOverallHistory,
+    awayHistory: awayOverallHistory,
+    homeAdvanced,
+    awayAdvanced,
+    hasStandings: standingsTable.length > 0,
+    hasOdds: Boolean(marketImpliedProbabilities),
+    homePowerGames: homeEloGames,
+    awayPowerGames: awayEloGames,
+    h2hCount: h2hFixturesRaw.length,
+  });
   const premium = premiumIntelligence.buildPremiumIntelligence({
     modelProbabilities: matchProbabilities,
     marketProbabilities: marketImpliedProbabilities,
+    marketEvidence,
     matchOdds,
     homePlayed: homeForm.played,
     awayPlayed: awayForm.played,
@@ -651,6 +720,58 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     return { homeThreat, awayThreat, goalQuality, bttsQuality, cornerQuality, sample, venueSplit:true };
   })();
 
+  const metricAvailability = {
+    goalsHistory: homeOverallHistory.played > 0 && awayOverallHistory.played > 0,
+    halftimeHistory: Number(halfMarkets.evidence?.effectiveSample || 0) > 0,
+    providerXg: xgEffectiveSample > 0,
+    providerCorners: cornerMetrics.provenance === 'REAL_PROVIDER_CORNERS',
+    standings: standingsTable.length > 0,
+    headToHead: h2hFixturesRaw.length > 0,
+    marketOdds: Boolean(marketImpliedProbabilities),
+  };
+  const qualityDimensions = marketEvidenceService.buildQualityDimensions({
+    sourceSuccessCount: successCount,
+    totalSources: 5,
+    homeHistorySample: homeOverallHistory.played,
+    awayHistorySample: awayOverallHistory.played,
+    metricAvailability,
+    marketEvidence,
+  });
+  qualityDimensions.dataQualityScoreBasis = 'historical-sample-coverage';
+  const historicalSampleCoverageScore=qualityDimensions.historicalSampleCoverage.score;
+  const bttsDirection = marketEvidenceService.bttsDirection(marketProbabilities.bttsPercent);
+  const smRawHomeAverages=sportmonksHistorical?.rawHome?.averages||{};
+  const smRawAwayAverages=sportmonksHistorical?.rawAway?.averages||{};
+  const smHalfUsed=Number(halfMarkets.evidence?.effectiveSample||0)>0;
+  const smChanceUsed=useSportmonksPrimary&&smOverallSample>=5&&Boolean(sportmonksMarketEvidence?.homeThreat||sportmonksMarketEvidence?.awayThreat);
+  const hasSmMetric=(homeValue,awayValue)=>Number.isFinite(homeValue)||Number.isFinite(awayValue);
+  const smShotsAvailable=hasSmMetric(smRawHomeAverages.shots,smRawAwayAverages.shots);
+  const smInsideBoxAvailable=hasSmMetric(smRawHomeAverages.shotsInsideBox,smRawAwayAverages.shotsInsideBox);
+  const smSotAvailable=hasSmMetric(smRawHomeAverages.shotsOnTarget,smRawAwayAverages.shotsOnTarget);
+  const smThreatRankingUsed=Boolean(sportmonksMarketEvidence&&[
+    sportmonksMarketEvidence.homeThreat,sportmonksMarketEvidence.awayThreat,
+    sportmonksMarketEvidence.goalQuality,sportmonksMarketEvidence.bttsQuality,
+  ].some(Number.isFinite));
+  const smCornerRankingUsed=Number.isFinite(sportmonksMarketEvidence?.cornerQuality);
+  const sportmonksConsumedInputs=useSportmonksPrimary?{
+    form:{available:{home:Number(sportmonksHistorical?.rawHome?.sample||0)>0,away:Number(sportmonksHistorical?.rawAway?.sample||0)>0},consumedByExpectedGoals:smChanceUsed,source:'SportMonks completed team history'},
+    shots:{available:{home:Number.isFinite(smRawHomeAverages.shots),away:Number.isFinite(smRawAwayAverages.shots)},consumedByExpectedGoals:smChanceUsed&&smShotsAvailable,consumedByMarketRanking:smThreatRankingUsed&&smShotsAvailable},
+    shotsInsideBox:{available:{home:Number.isFinite(smRawHomeAverages.shotsInsideBox),away:Number.isFinite(smRawAwayAverages.shotsInsideBox)},consumedByExpectedGoals:smChanceUsed&&smInsideBoxAvailable,consumedByMarketRanking:smThreatRankingUsed&&smInsideBoxAvailable},
+    shotsOnTarget:{available:{home:Number.isFinite(smRawHomeAverages.shotsOnTarget),away:Number.isFinite(smRawAwayAverages.shotsOnTarget)},consumedByExpectedGoals:smChanceUsed&&smSotAvailable,consumedByMarketRanking:smThreatRankingUsed&&smSotAvailable},
+    corners:{available:{home:Number.isFinite(smRawHomeAverages.corners),away:Number.isFinite(smRawAwayAverages.corners)},consumedByCornerMarkets:cornerMetrics.source==='sportmonks-history-pressure',consumedByMarketRanking:smCornerRankingUsed,provenance:cornerMetrics.provenance},
+    halftime:{available:{home:Number.isFinite(smRawHomeAverages.firstHalfScored),away:Number.isFinite(smRawAwayAverages.firstHalfScored)},consumedByHalfMarkets:smHalfUsed,source:halfMarkets.evidence?.source||'league-prior-45-55'},
+    xg:{available:false,consumedByExpectedGoals:false,source:'SportMonks history does not supply xG in this path'},
+  }:null;
+  qualityDimensions.sourceHealth.providers={
+    ...(qualityDimensions.sourceHealth.providers||{}),
+    sportmonks:{requested:useSportmonksPrimary,historyAvailable:Boolean(sportmonksHistorical),fixtureId:sportmonksFixtureId||null},
+  };
+  qualityDimensions.metricCoverage.sportmonksCurrentFixture={
+    availableFields:0,
+    consumedByPreMatchModel:false,
+    note:'Current-fixture stats are diagnostic only; they are not pre-match evidence.',
+  };
+
   const modelHealth = await predictionLedger.calibrationHealth({cached:true}).catch(()=>null);
 
   const marketBoard = premiumIntelligence.buildMarketBoard({
@@ -661,6 +782,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     dataHealth: premium.dataHealth,
     premium,
     halfMarkets,
+    marketEvidence,
     sportmonksMarketEvidence: smMarketEvidence,
     evidenceStrength,
     modelAgreementScore: agreementScore,
@@ -686,7 +808,11 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     halfMarkets,
     rawHalfMarkets,
     firstHalfProximity,
-    dataQualityScore,
+    dataQualityScore: historicalSampleCoverageScore,
+    qualityDimensions,
+    marketEvidence,
+    bttsDirection,
+    xgProvenance,
     strongestSignal,
     marketBoard,
     premium,
@@ -735,6 +861,20 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       standings: { homeRank: standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats))?.rank ?? null, awayRank: standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats))?.rank ?? null },
       multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
       sportmonks: smMarketEvidence,
+      xgProvenance,
+      consumedInputs: {
+        sportmonks: sportmonksConsumedInputs,
+        providerXg: {
+          ...xgProvenance,
+          consumedByExpectedGoals: xgProvenance.usedByModel,
+        },
+        history: {
+          home: homeOverallHistory.played,
+          away: awayOverallHistory.played,
+          halftimeHome: halfMarkets.evidence?.homeHTSamples || 0,
+          halftimeAway: halfMarkets.evidence?.awayHTSamples || 0,
+        },
+      },
       bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v3-market-ensemble',

@@ -42,14 +42,18 @@ async function capture(a, fixture) {
       providerIds: fixture.providerIds || {},
       publicationStatus: a.premium?.status || 'UNAVAILABLE',
       publishedSelections: ['PICK','VALUE'].includes(a.premium?.status)
-        ? (a.marketBoard?.topPredictions||[]).map(x=>({key:x.key,market:x.market,label:x.label,probability:x.probability}))
+        ? (a.marketBoard?.topPredictions||[]).map(x=>({key:x.key,market:x.market,label:x.label,direction:x.direction,probability:x.probability,evidenceLevel:x.evidenceLevel,effectiveSample:x.effectiveSample,evidenceSource:x.evidenceSource,priorUsed:x.priorUsed,strongPickEligible:x.strongPickEligible}))
         : [],
       capturedAt: new Date(), homeLambda: a.homeLambda, awayLambda: a.awayLambda,
       dataQualityScore: a.dataQualityScore, probabilities: values,
+      qualityDimensions: a.qualityDimensions || null,
+      marketEvidence: a.marketEvidence || null,
+      xgProvenance: a.xgProvenance || null,
+      bttsDirection: a.bttsDirection || null,
       sportmonksEvidence: a.sportmonksMarketEvidence || null,
-      marketBoardSnapshot: Array.isArray(a.marketBoard?.allMarkets) ? a.marketBoard.allMarkets.map(x => ({ key:x.key, market:x.market, label:x.label, probability:x.probability, score:x.score, sportmonksEvidence:x.sportmonksEvidence, sportmonksEvidenceBonus:x.sportmonksEvidenceBonus })) : null,
-      strongestPick: a.marketBoard?.best ? { key:a.marketBoard.best.key, market:a.marketBoard.best.market, label:a.marketBoard.best.label, probability:a.marketBoard.best.probability, score:a.marketBoard.best.score } : null,
-      topPicksSnapshot: (a.marketBoard?.topPredictions||[]).map(x=>({key:x.key,market:x.market,label:x.label,probability:x.probability,odds:x.verifiedOdds,bookmaker:x.bookmaker,oddsFresh:x.oddsFresh===true,marketImpliedProbability:x.marketImpliedProbability,edgePoints:x.edgePoints,expectedValuePercent:x.expectedValuePercent,valueScore:x.valueScore})),
+      marketBoardSnapshot: Array.isArray(a.marketBoard?.allMarkets) ? a.marketBoard.allMarkets.map(x => ({ key:x.key, market:x.market, label:x.label, direction:x.direction, probability:x.probability, score:x.score, evidenceLevel:x.evidenceLevel,effectiveSample:x.effectiveSample,evidenceSource:x.evidenceSource,priorUsed:x.priorUsed,strongPickEligible:x.strongPickEligible,sportmonksEvidence:x.sportmonksEvidence, sportmonksEvidenceBonus:x.sportmonksEvidenceBonus })) : null,
+      strongestPick: a.marketBoard?.best ? { key:a.marketBoard.best.key, market:a.marketBoard.best.market, label:a.marketBoard.best.label, direction:a.marketBoard.best.direction, probability:a.marketBoard.best.probability, score:a.marketBoard.best.score,evidenceLevel:a.marketBoard.best.evidenceLevel,effectiveSample:a.marketBoard.best.effectiveSample,evidenceSource:a.marketBoard.best.evidenceSource,priorUsed:a.marketBoard.best.priorUsed,strongPickEligible:a.marketBoard.best.strongPickEligible } : null,
+      topPicksSnapshot: (a.marketBoard?.topPredictions||[]).map(x=>({key:x.key,market:x.market,label:x.label,direction:x.direction,probability:x.probability,odds:x.verifiedOdds,bookmaker:x.bookmaker,oddsFresh:x.oddsFresh===true,marketImpliedProbability:x.marketImpliedProbability,edgePoints:x.edgePoints,expectedValuePercent:x.expectedValuePercent,valueScore:x.valueScore,evidenceLevel:x.evidenceLevel,effectiveSample:x.effectiveSample,evidenceSource:x.evidenceSource,priorUsed:x.priorUsed,strongPickEligible:x.strongPickEligible})),
       rawProbabilities: a.rawModelProbabilities ? {
         home: percent(a.rawModelProbabilities.homeWinProbability), draw: percent(a.rawModelProbabilities.drawProbability),
         away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),

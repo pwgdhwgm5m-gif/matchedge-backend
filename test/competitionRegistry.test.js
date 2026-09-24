@@ -58,6 +58,15 @@ test('verified provider IDs resolve to the same canonical competition', () => {
   }
 });
 
+test('the exact Trendyol Süper Lig provider label resolves to Turkey Super Lig', () => {
+  for (const leagueName of ['Trendyol Süper Lig', 'Trendyol Super Lig']) {
+    assert.equal(
+      registry.resolveCompetition({ provider: 'sportsdb', leagueName })?.canonicalCompetitionKey,
+      'turkey-super-lig'
+    );
+  }
+});
+
 test('coverage metadata separates mapping, fixture, result, filter and home states', () => {
   const china = registry.resolveCompetition({ provider: 'bsd', leagueId: '52' });
   assert.equal(china.mappingStatus, 'verified');

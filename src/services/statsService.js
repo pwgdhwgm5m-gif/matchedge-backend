@@ -6,12 +6,17 @@
 
 function summarizeMatches(matches, teamId) {
   let wins = 0, draws = 0, losses = 0, goalsFor = 0, goalsAgainst = 0;
+  let played = 0;
 
   matches.forEach(m => {
-    const isHome = String(m.teams.home.id) === String(teamId);
-    const gf = isHome ? m.goals.home : m.goals.away;
-    const ga = isHome ? m.goals.away : m.goals.home;
-    if (gf === null || ga === null) return; // henuz oynanmamis mac
+    const homeScore = validScore(m?.goals?.home);
+    const awayScore = validScore(m?.goals?.away);
+    if (homeScore === null || awayScore === null) return;
+    const isHome = String(m?.teams?.home?.id) === String(teamId);
+    if (!isHome && String(m?.teams?.away?.id) !== String(teamId)) return;
+    const gf = isHome ? homeScore : awayScore;
+    const ga = isHome ? awayScore : homeScore;
+    played++;
 
     goalsFor += gf;
     goalsAgainst += ga;
@@ -20,14 +25,66 @@ function summarizeMatches(matches, teamId) {
     else losses++;
   });
 
-  const played = matches.length || 1;
+  const denominator = played || 1;
   return {
-    played: matches.length,
+    played,
     wins,
     draws,
     losses,
-    avgGoalsFor: +(goalsFor / played).toFixed(2),
-    avgGoalsAgainst: +(goalsAgainst / played).toFixed(2),
+    avgGoalsFor: +(goalsFor / denominator).toFixed(2),
+    avgGoalsAgainst: +(goalsAgainst / denominator).toFixed(2),
+  };
+}
+
+function validScore(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function calculateHalfHistory(fixtures, teamId) {
+  let halftimeSamples = 0;
+  let secondHalfSamples = 0;
+  let firstHalfGoalsFor = 0;
+  let firstHalfGoalsAgainst = 0;
+  let secondHalfGoalsFor = 0;
+  let secondHalfGoalsAgainst = 0;
+
+  for (const fixture of fixtures || []) {
+    const homeId = fixture?.teams?.home?.id;
+    const awayId = fixture?.teams?.away?.id;
+    const isHome = String(homeId) === String(teamId);
+    const isAway = String(awayId) === String(teamId);
+    if (!isHome && !isAway) continue;
+
+    const htHome = validScore(fixture?.score?.halftime?.home);
+    const htAway = validScore(fixture?.score?.halftime?.away);
+    if (htHome === null || htAway === null) continue;
+
+    halftimeSamples++;
+    firstHalfGoalsFor += isHome ? htHome : htAway;
+    firstHalfGoalsAgainst += isHome ? htAway : htHome;
+
+    const ftHome = validScore(fixture?.goals?.home);
+    const ftAway = validScore(fixture?.goals?.away);
+    if (ftHome === null || ftAway === null || ftHome < htHome || ftAway < htAway) continue;
+
+    secondHalfSamples++;
+    secondHalfGoalsFor += isHome ? ftHome - htHome : ftAway - htAway;
+    secondHalfGoalsAgainst += isHome ? ftAway - htAway : ftHome - htHome;
+  }
+
+  return {
+    halftimeSamples,
+    firstHalfScoringSamples: halftimeSamples,
+    firstHalfConcedingSamples: halftimeSamples,
+    secondHalfSamples,
+    secondHalfScoringSamples: secondHalfSamples,
+    secondHalfConcedingSamples: secondHalfSamples,
+    firstHalfGoalsFor: halftimeSamples ? +(firstHalfGoalsFor / halftimeSamples).toFixed(2) : null,
+    firstHalfGoalsAgainst: halftimeSamples ? +(firstHalfGoalsAgainst / halftimeSamples).toFixed(2) : null,
+    secondHalfGoalsFor: secondHalfSamples ? +(secondHalfGoalsFor / secondHalfSamples).toFixed(2) : null,
+    secondHalfGoalsAgainst: secondHalfSamples ? +(secondHalfGoalsAgainst / secondHalfSamples).toFixed(2) : null,
   };
 }
 
@@ -44,7 +101,7 @@ function summarizeMatches(matches, teamId) {
 function calculateWeightedGoalAverages(matches, teamId, decayFactor = 0.85) {
   // Once tarihe gore eskiden yeniye sirala, boylece agirliklandirma dogru calisir
   const sorted = [...matches]
-    .filter(m => m.goals.home !== null && m.goals.away !== null)
+    .filter(m => validScore(m?.goals?.home) !== null && validScore(m?.goals?.away) !== null)
     .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
 
   if (sorted.length === 0) {
@@ -109,8 +166,7 @@ function calculateFirstHalfTendency(fixtures, teamId) {
 
   fixtures.forEach(f => {
     const ht = f.score?.halftime;
-    if (!ht || ht.home === null || ht.home === undefined) return; // veri yoksa atla
-
+    if (!ht || validScore(ht.home) === null || validScore(ht.away) === null) return; // veri yoksa atla
     const isHome = String(f.teams.home.id) === String(teamId);
     const teamHtGoals = isHome ? ht.home : ht.away;
     total++;
@@ -119,6 +175,7 @@ function calculateFirstHalfTendency(fixtures, teamId) {
 
   return {
     matchesConsidered: total,
+    firstHalfScoringSamples: total,
     firstHalfScoringRate: total ? +((scored / total) * 100).toFixed(1) : null,
   };
 }
@@ -131,7 +188,7 @@ function calculateFirstHalfTendency(fixtures, teamId) {
  */
 function calculateH2HFirstHalfTendency(h2hFixtures, homeTeamId, awayTeamId, decayFactor = 0.85) {
   const sorted = [...h2hFixtures]
-    .filter(f => f.score?.halftime?.home !== null && f.score?.halftime?.home !== undefined)
+    .filter(f => validScore(f.score?.halftime?.home) !== null && validScore(f.score?.halftime?.away) !== null)
     .sort((a, b) => new Date(a.fixture.date) - new Date(b.fixture.date));
 
   const total = sorted.length;
@@ -317,6 +374,7 @@ function calculateTeamHomeAdvantageMultiplier(fullSplit, leagueAdvantageRatio = 
 
 module.exports = {
   summarizeMatches,
+  calculateHalfHistory,
   calculateWeightedGoalAverages,
   splitHomeAwayForm,
   calculateFirstHalfTendency,
