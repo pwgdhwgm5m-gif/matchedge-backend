@@ -377,6 +377,7 @@ function decorateMatch(match, provider) {
 function normalizeTeamIdentity(value) {
   let key = String(value || '').trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\b(?:c|u|a|s|f|p)\.\s*(?:d|e|c|f|s|a|t)\.?\b/g, ' ')
     .replace(/\b(fc|cf|sc|afc|fk|sk|cd|ud|cp|ad|sd|ue|ae|ca|ft|calcio|football|club)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, '');
   const aliases = {
@@ -385,7 +386,8 @@ function normalizeTeamIdentity(value) {
     ublebrijana: 'lebrijana',
     '6dejunio': 'ceuta6dejunio',
     sportinghortaleza: 'sportingdehortaleza',
-    tavernes: 'tavernesdelavalldigna'
+    tavernes: 'tavernesdelavalldigna',
+    sanjosedesoria: 'sanjose'
   };
   return aliases[key] || key;
 }

@@ -120,7 +120,8 @@ test('observed MLS, Taça, and Ireland naming aliases share stable identities', 
     ['Prat', 'AE Prat'],
     ['Talayuela', 'CP Talayuela'],
     ['Maracena', 'UD Maracena'],
-    ['Tavernes de la Valldigna', 'UE Tavernes']
+    ['Tavernes de la Valldigna', 'UE Tavernes'],
+    ['San José de Soria', 'C.D. San José']
   ]) {
     assert.equal(registry.normalizeTeamIdentity(providerName), registry.normalizeTeamIdentity(bsdName));
   }
@@ -149,7 +150,8 @@ test('observed Copa del Rey provider aliases collapse without losing source IDs'
     [['Sporting de Hortaleza', 'Atlético Unión Güímar'], ['Sporting Hortaleza', 'Atlético Unión Güímar']],
     [['Sant Rafel', 'Prat'], ['CF Sant Rafel', 'AE Prat']],
     [['Talayuela', 'Sporting de Alcázar'], ['CP Talayuela', 'Sporting de Alcazar CF']],
-    [['Maracena', 'Tavernes de la Valldigna'], ['UD Maracena', 'UE Tavernes']]
+    [['Maracena', 'Tavernes de la Valldigna'], ['UD Maracena', 'UE Tavernes']],
+    [['Auriense', 'San José de Soria'], ['Auriense CA', 'C.D. San José']]
   ];
   const rows = pairs.flatMap(([providerTeams, bsdTeams], index) => [
     registry.decorateMatch({
