@@ -62,7 +62,7 @@ router.get('/', async (req, res) => {
   }
   const matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{
     toleranceMs:6*60*60*1000
-  });
+  }).filter(match => match?.visibleInCompetitionFilter === true && match?.eligibleForHomePriority === true);
   return res.json({matches,source:'canonical-live-merged',counts:{thesportsdb:tsdbLive.ok?(tsdbLive.data?.livescore||[]).length:0,sportmonks:smLive.ok?(smLive.fixtures||[]).filter(x=>x.isLive).length:0,bsd:bsdLive.ok?bsdService.extractList(bsdLive.data).length:0}});
 });
 
