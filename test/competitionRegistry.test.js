@@ -3,6 +3,7 @@ const test = require('node:test');
 const registry = require('../src/services/competitionRegistryService');
 const sourcePolicy = require('../src/services/sourcePolicyService');
 const config = require('../src/config/config');
+const sportsDb = require('../src/services/sportsDbService');
 
 test('registry preserves the six existing SportMonks primary IDs', () => {
   assert.equal(registry.assertPrimaryMappingsUnchanged(), true);
@@ -23,7 +24,31 @@ test('verified provider IDs resolve to the same canonical competition', () => {
     ['sportsdb', '4346', 'American Major League Soccer', 'usa-mls'],
     ['bsd', '18', 'MLS', 'usa-mls'],
     ['bsd', '50', 'K League 1', 'south-korea-k-league-1'],
-    ['sportsdb', '4689', 'K League 1', 'south-korea-k-league-1']
+    ['sportsdb', '4689', 'K League 1', 'south-korea-k-league-1'],
+    ['sportsdb', '4631', 'Czech First League', 'czechia-first-league'],
+    ['sportsdb', '4671', 'Serbian Super Liga', 'serbia-superliga'],
+    ['sportsdb', '4354', 'Ukrainian Premier League', 'ukraine-premier-league'],
+    ['sportsdb', '4690', 'Hungarian NB I', 'hungary-nb-i'],
+    ['sportsdb', '4643', 'League of Ireland Premier Division', 'ireland-premier-division'],
+    ['sportsdb', '4359', 'Chinese Super League', 'china-super-league'],
+    ['sportsdb', '5831', 'Belgian Cup', 'belgium-cup'],
+    ['sportsdb', '5830', 'Greek Football Cup', 'greece-cup'],
+    ['sportsdb', '4723', 'Scottish FA Cup', 'scotland-cup'],
+    ['sportsdb', '5489', 'Swiss Cup', 'switzerland-cup'],
+    ['sportsdb', '5883', 'Austrian Cup', 'austria-cup'],
+    ['sportsdb', '5838', 'Puchar Polski', 'poland-cup'],
+    ['sportsdb', '5193', 'Russian Cup', 'russia-cup'],
+    ['sportsdb', '5199', 'US Open Cup', 'usa-us-open-cup'],
+    ['sportsdb', '5637', 'Emperor Cup', 'japan-emperors-cup'],
+    ['sportsdb', '5635', 'Korea Cup', 'south-korea-korea-cup'],
+    ['sportsdb', '5525', 'China FA Cup', 'china-fa-cup'],
+    ['sportsdb', '5180', 'Australia Cup', 'australia-cup'],
+    ['sportsdb', '4756', 'Svenska Cupen', 'sweden-cup'],
+    ['sportsdb', '5634', 'Norwegian Cup', 'norway-cup'],
+    ['bsd', '52', 'Chinese Super League', 'china-super-league'],
+    ['bsd', '51', 'Emperor Cup', 'japan-emperors-cup'],
+    ['bsd', '46', 'Puchar Polski', 'poland-cup'],
+    ['bsd', '90', 'UEFA Super Cup', 'uefa-super-cup']
   ];
   for (const [provider, leagueId, leagueName, expected] of cases) {
     assert.equal(
@@ -31,6 +56,70 @@ test('verified provider IDs resolve to the same canonical competition', () => {
       expected
     );
   }
+});
+
+test('coverage metadata separates mapping, fixture, result, filter and home states', () => {
+  const china = registry.resolveCompetition({ provider: 'bsd', leagueId: '52' });
+  assert.equal(china.mappingStatus, 'verified');
+  assert.equal(china.configured, true);
+  assert.equal(china.fixtureCoverage, 'fixture-producing');
+  assert.equal(china.resultCoverage, 'result-producing');
+  assert.equal(china.active, true);
+  assert.equal(china.visibleInCompetitionFilter, true);
+  assert.equal(china.eligibleForHomePriority, true);
+
+  const australia = registry.resolveCompetition({ provider: 'oddsApi', sportKey: 'soccer_australia_aleague' });
+  assert.equal(australia.mappingStatus, 'configured');
+  assert.equal(australia.configured, true);
+  assert.equal(australia.fixtureCoverage, 'not-observed');
+  assert.equal(australia.resultCoverage, 'not-observed');
+  assert.equal(australia.active, false);
+  assert.equal(australia.visibleInCompetitionFilter, false);
+  assert.equal(australia.eligibleForHomePriority, false);
+
+  for (const key of ['uefa-nations-league', 'concacaf-nations-league', 'mexico-liga-mx']) {
+    const legacy = registry.getCompetitionRegistry().find(item => item.canonicalCompetitionKey === key);
+    assert.ok(legacy);
+    assert.equal(legacy.visibleInCompetitionFilter, false);
+    assert.equal(legacy.eligibleForHomePriority, false);
+  }
+  assert.equal(registry.resolveCompetition({ provider: 'sportsdb', leagueId: '4490' })?.canonicalCompetitionKey,
+    'uefa-nations-league');
+  assert.equal(registry.resolveCompetition({ provider: 'bsd', leagueId: '65' })?.canonicalCompetitionKey,
+    'concacaf-nations-league');
+  assert.equal(registry.resolveCompetition({ provider: 'sportsdb', leagueId: '4350' })?.canonicalCompetitionKey,
+    'mexico-liga-mx');
+  assert.ok(registry.getCompetitionRegistry({ includeInactive: false })
+    .every(item => item.fixtureCoverage === 'fixture-producing'));
+});
+
+test('TheSportsDB whitelist IDs require consistent league identity', () => {
+  for (const [id, name] of [
+    ['4631', 'Czech First League'],
+    ['4671', 'Serbian Super Liga'],
+    ['4354', 'Ukrainian Premier League'],
+    ['4690', 'Hungarian NB I'],
+    ['4643', 'Irish Premier Division'],
+    ['4359', 'Chinese Super League'],
+    ['5831', 'Belgian Cup'],
+    ['5830', 'Greek Football Cup'],
+    ['4723', 'Scottish FA Cup'],
+    ['5489', 'Swiss Cup'],
+    ['5883', 'Austrian Cup'],
+    ['5634', 'Norwegian Cupen'],
+    ['4756', 'Svenska Cupen'],
+    ['5838', 'Polish Cup'],
+    ['5193', 'Russian Cup'],
+    ['5199', 'US Open Cup'],
+    ['5637', 'Japan Emperors Cup'],
+    ['5635', 'Korea Cup'],
+    ['5525', 'China FA Cup'],
+    ['5180', 'Australia Cup']
+  ]) {
+    assert.equal(sportsDb.isWhitelistedLeague(id), true, `ID ${id} is whitelisted`);
+    assert.equal(sportsDb.isLeagueIdentityConsistent(id, name), true, `${id} accepts ${name}`);
+  }
+  assert.equal(sportsDb.isLeagueIdentityConsistent('5831', 'English League One'), false);
 });
 
 test('registry maps every existing Odds API tracked sport key without adding new keys', () => {
@@ -74,10 +163,11 @@ test('UEFA qualification and knockout labels resolve to their parent competition
 });
 
 test('unverified requested competitions contain no invented provider IDs', () => {
-  const czechia = registry.resolveCompetition({ leagueName: 'Czech Republic First League' });
-  assert.equal(czechia?.canonicalCompetitionKey, 'czechia-first-league');
-  assert.equal(czechia?.active, false);
-  assert.deepEqual(czechia?.providerIds, {
+  const czechCup = registry.resolveCompetition({ leagueName: 'MOL Cup' });
+  assert.equal(czechCup?.canonicalCompetitionKey, 'czechia-cup');
+  assert.equal(czechCup?.mappingStatus, 'unverified');
+  assert.equal(czechCup?.active, false);
+  assert.deepEqual(czechCup?.providerIds, {
     sportmonks: null, sportsdb: null, bsd: null, oddsApi: null
   });
 });

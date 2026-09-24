@@ -57,7 +57,8 @@ router.get('/', async (req,res)=>{
   // Proven broad coverage baseline.
   for(const e of (legacy?.ok?(legacy.data?.events||[]):[])){
     const m=sportsDb.transformEvent(e);
-    if(sportsDb.isWhitelistedLeague(m.leagueId))put(m,'sportsdb');
+    if(sportsDb.isWhitelistedLeague(m.leagueId) &&
+       sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))put(m,'sportsdb');
   }
   const extra=Array.isArray(supplemental)?supplemental:(supplemental?.matches||[]);
   for(const m of extra)put(m);

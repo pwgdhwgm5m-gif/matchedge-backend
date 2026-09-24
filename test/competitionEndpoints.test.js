@@ -74,6 +74,58 @@ test('fixture endpoint deduplicates verified cross-provider cup rows', async () 
   }
 });
 
+test('fixture endpoint transforms a verified SportsDB event and rejects an ID/name mismatch', async () => {
+  const originalGetOrFetch = cache.getOrFetch;
+  const events = [
+    {
+      idEvent: 'tsdb-belgian-cup-1',
+      idLeague: '5831',
+      strLeague: 'Belgian Cup',
+      dateEvent: '2026-09-26',
+      strTime: '16:00:00',
+      strStatus: 'NS',
+      strHomeTeam: 'Berlare',
+      strAwayTeam: 'Latem',
+      intHomeScore: null,
+      intAwayScore: null
+    },
+    {
+      idEvent: 'wrong-league-id-1',
+      idLeague: '5831',
+      strLeague: 'English League One',
+      dateEvent: '2026-09-26',
+      strTime: '17:00:00',
+      strHomeTeam: 'Wrong Home',
+      strAwayTeam: 'Wrong Away'
+    }
+  ];
+
+  try {
+    cache.getOrFetch = async key => {
+      if (key.startsWith('fixtures:')) return { ok: true, data: { events } };
+      if (key === 'live:v2:all') return { ok: false };
+      if (key.startsWith('cup-fixtures:')) return { ok: true, matches: [] };
+      if (key.startsWith('odds-events:')) return { ok: false, matches: [] };
+      if (key.startsWith('sportmonks:tr:600:')) return { ok: false, fixtures: [] };
+      if (key.startsWith('sportmonks:date:')) return { ok: false, fixtures: [] };
+      if (key.startsWith('bsd:canonical-results:')) return { ok: false, matches: [] };
+      return { ok: false };
+    };
+
+    const response = responseCapture();
+    await routeHandler(matchesRouter)({ query: { date: '2026-09-26' } }, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.matches.length, 1);
+    assert.equal(response.body.matches[0].fixtureId, 'tsdb-belgian-cup-1');
+    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'belgium-cup');
+    assert.equal(response.body.matches[0].mappingStatus, 'verified');
+    assert.equal(response.body.matches[0].fixtureCoverage, 'fixture-producing');
+    assert.equal(response.body.matches[0].visibleInCompetitionFilter, true);
+  } finally {
+    cache.getOrFetch = originalGetOrFetch;
+  }
+});
+
 test('live endpoint keeps lower-priority competitions visible and merges provider aliases', async () => {
   const original = {
     getOrFetch: cache.getOrFetch,

@@ -75,6 +75,12 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4675', // Isvicre Super League
   '4629', // Hirvatistan HNL
   '4691', // Romanya Liga I
+  '4631', // Czech First League
+  '4671', // Serbian Super Liga
+  '4354', // Ukrainian Premier League
+  '4690', // Hungarian NB I
+  '4643', // League of Ireland Premier Division
+  '4359', // Chinese Super League
   // --- Amerika 1. Ligleri ---
   '4346', // ABD MLS
   '4350', // Meksika Liga MX
@@ -100,6 +106,20 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4902', // Hollanda KNVB Beker / Dutch KNVB Cup
   '4960', // Turkiye Kupasi (TheSportsDB current competition id)
   '4903', // Almanya Super Cup
+  '5831', // Belgian Cup
+  '5830', // Greek Football Cup
+  '4723', // Scottish FA Cup
+  '5489', // Swiss Cup
+  '5883', // Austrian Cup
+  '5634', // Norwegian Cupen
+  '4756', // Svenska Cupen
+  '5838', // Puchar Polski
+  '5193', // Russia Cup
+  '5199', // US Open Cup
+  '5637', // Japan Emperor's Cup
+  '5635', // Korea Cup
+  '5525', // China FA Cup
+  '5180', // Australia Cup
 ]);
 
 function isWhitelistedLeague(leagueId) {
@@ -115,7 +135,27 @@ const STRICT_LEAGUE_NAMES = {
   '4485': ['dfb-pokal','dfb pokal'],
   '4506': ['coppa italia'],
   '4510': ['taça de portugal','taca de portugal','portuguese cup'],
-  '4960': ['turkish cup','türkiye kupası','turkiye kupasi']
+  '4960': ['turkish cup','türkiye kupası','turkiye kupasi'],
+  '4631': ['czech first league'],
+  '4671': ['serbian super liga','serbian superliga','serbian super league'],
+  '4354': ['ukrainian premier league'],
+  '4690': ['hungarian nb i','nemzeti bajnokság i','nemzeti bajnoksag i'],
+  '4643': ['league of ireland premier division','irish premier division'],
+  '4359': ['chinese super league'],
+  '5831': ['belgian cup','croky cup'],
+  '5830': ['greek cup','greek football cup'],
+  '4723': ['scottish fa cup','scottish cup'],
+  '5489': ['swiss cup','schweizer cup'],
+  '5883': ['austrian cup','öfb cup','ofb cup'],
+  '5634': ['norwegian cup','norway cup','norwegian cupen'],
+  '4756': ['svenska cupen','swedish cup'],
+  '5838': ['puchar polski','polish cup'],
+  '5193': ['russian cup','russia cup','russian football cup'],
+  '5199': ['us open cup','u.s. open cup'],
+  '5637': ['emperor cup',"emperor's cup",'emperors cup',"japan emperor's cup",'japan emperors cup'],
+  '5635': ['korea cup','korean fa cup'],
+  '5525': ['china fa cup','chinese fa cup'],
+  '5180': ['australia cup','australia ffa cup','ffa cup']
 };
 function isLeagueIdentityConsistent(leagueId, leagueName) {
   const expected = STRICT_LEAGUE_NAMES[String(leagueId)];
