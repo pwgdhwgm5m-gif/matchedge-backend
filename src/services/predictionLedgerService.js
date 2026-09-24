@@ -442,4 +442,43 @@ async function reportCard(fixtureId){
  return {version:VERSION,edgeId:snapshot?String(snapshot._id):null,fixtureId:String(fixtureId),lockedAt:snapshot?.capturedAt||null,status:snapshot?.status||'not-captured',result:hit===null?(snapshot?.status==='settled'?'void':'pending'):(hit?'won':'lost'),strongestPick:pick,modelHistory:{market:metric,overall:all?{count:all.count,accuracy:all.accuracy,brier:all.brier,calibrationGapPercent:all.calibrationGapPercent}:null,league:league?{league:league.league,count:league.count,accuracy:league.accuracy,brier:league.brier,calibrationGapPercent:league.calibrationGapPercent}:null},readiness:all?(all.count<30?'collecting':all.count<100?'early-signal':'established'):'collecting'};
 }
 
+
+function normalizeClosingMarketRows(board){
+  const rows=[]; const books=Array.isArray(board?.bookmakers)?board.bookmakers.filter(b=>b.fresh===true):[];
+  const addThreeWay=(b)=>{
+    const h=b?.h2h;if(!h||![h.home,h.draw,h.away].every(x=>Number(x)>1))return;
+    const sum=1/Number(h.home)+1/Number(h.draw)+1/Number(h.away);
+    for(const [key,odds] of [['home',h.home],['draw',h.draw],['away',h.away]])rows.push({key,odds:Number(odds),bookmaker:b.bookmaker||null,deVigProbability:+(((1/Number(odds))/sum)*100).toFixed(2)});
+  };
+  const addPair=(b,yesKey,noKey,pair)=>{
+    const yes=Number(pair?.yes??pair?.over),no=Number(pair?.no??pair?.under);if(!(yes>1&&no>1))return;
+    const sum=1/yes+1/no;rows.push({key:yesKey,odds:yes,bookmaker:b.bookmaker||null,deVigProbability:+(((1/yes)/sum)*100).toFixed(2)});rows.push({key:noKey,odds:no,bookmaker:b.bookmaker||null,deVigProbability:+(((1/no)/sum)*100).toFixed(2)});
+  };
+  for(const b of books){addThreeWay(b);addPair(b,'over25','under25',b.totals?{over:b.totals.over25,under:b.totals.under25}:null);addPair(b,'bttsYes','bttsNo',b.btts);}
+  const best=new Map();for(const r of rows){const old=best.get(r.key);if(!old||r.odds>old.odds)best.set(r.key,r);}return [...best.values()];
+}
+async function captureClosingLines(){
+  const now=new Date(),horizon=new Date(Date.now()+75*60*1000);
+  const pending=await Prediction.find({status:'pending',kickoff:{$gt:now,$lte:horizon},closingLineCapturedAt:null}).limit(40);
+  let captured=0,skipped=0;
+  for(const p of pending){
+    try{
+      const policy=require('./sourcePolicyService').resolveSourcePolicy(p.league||'');
+      const sportKey=policy?.oddsKey||null;if(!sportKey){skipped++;continue;}
+      const odds=await require('./oddsApiService').getOddsForLeague(sportKey);
+      if(!odds.ok){skipped++;continue;}
+      const board=require('./oddsApiService').extractMatchMarketOdds(odds.data,p.homeTeam,p.awayTeam);
+      const rows=normalizeClosingMarketRows(board);
+      if(!rows.length){skipped++;continue;}
+      p.closingLineSnapshot=rows;p.closingLineCapturedAt=new Date();await p.save();captured++;
+    }catch(e){console.error('[closing-line]',p.fixtureId,e.message);skipped++;}
+  }
+  return {checked:pending.length,captured,skipped};
+}
+function clvForPick(pick,closingRows){
+  const close=(closingRows||[]).find(x=>x.key===pick.key);const open=Number(pick.odds),closing=Number(close?.odds);
+  if(!(pick.oddsFresh===true&&open>1&&closing>1))return null;
+  return {closingOdds:closing,clvPercent:+((open/closing-1)*100).toFixed(2),closingDeVigProbability:close.deVigProbability??null};
+}
+
 module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, calibrationHealth, selectionPerformance, outcomes, HALFTIME_GRACE_MS, VERSION, SELECTION_VERSION };
