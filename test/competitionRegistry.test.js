@@ -69,13 +69,13 @@ test('coverage metadata separates mapping, fixture, result, filter and home stat
   assert.equal(china.eligibleForHomePriority, true);
 
   const australia = registry.resolveCompetition({ provider: 'oddsApi', sportKey: 'soccer_australia_aleague' });
-  assert.equal(australia.mappingStatus, 'configured');
+  assert.equal(australia.mappingStatus, 'verified');
   assert.equal(australia.configured, true);
-  assert.equal(australia.fixtureCoverage, 'not-observed');
+  assert.equal(australia.fixtureCoverage, 'fixture-producing');
   assert.equal(australia.resultCoverage, 'not-observed');
-  assert.equal(australia.active, false);
-  assert.equal(australia.visibleInCompetitionFilter, false);
-  assert.equal(australia.eligibleForHomePriority, false);
+  assert.equal(australia.active, true);
+  assert.equal(australia.visibleInCompetitionFilter, true);
+  assert.equal(australia.eligibleForHomePriority, true);
 
   for (const key of ['uefa-nations-league', 'concacaf-nations-league', 'mexico-liga-mx']) {
     const legacy = registry.getCompetitionRegistry().find(item => item.canonicalCompetitionKey === key);
