@@ -31,6 +31,8 @@ const predictionSchema = new mongoose.Schema({
   strongestPick: { type: mongoose.Schema.Types.Mixed, default: null },
   topPicksSnapshot: { type: [mongoose.Schema.Types.Mixed], default: [] },
   v4Validation: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  closingLineSnapshot: { type: [mongoose.Schema.Types.Mixed], default: [] },
+  closingLineCapturedAt: { type: Date, default: null },
   status: { type: String, enum: ['pending','settled'], default: 'pending', index: true },
   actual: { type: mongoose.Schema.Types.Mixed, default: null },
   settledAt: Date,
