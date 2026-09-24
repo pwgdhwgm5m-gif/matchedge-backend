@@ -148,6 +148,7 @@ function startPrecomputeCron() {
 
   // Startup'ta 50 agir analiz calistirma: kullanici isteklerine oncelik ver. Ilk tur 06:00/13:00 cronunda.
   cron.schedule('15 */3 * * *', () => ledger.settlePending().catch(err => console.error('[prediction-ledger]', err)));
+  cron.schedule('*/15 * * * *', () => ledger.captureClosingLines().then(x=>{if(x.captured)console.log('[closing-line]',x)}).catch(err=>console.error('[closing-line]',err)));
   ledger.settlePending().then(() => modelCalibration.retrain()).catch(err => console.error('[prediction-ledger]', err));
   cron.schedule('45 3 * * *', () => modelCalibration.retrain().catch(err => console.error('[model-calibration]', err)));
   cron.schedule('0 4 * * *', () => require('../models/LoginEvent').deleteMany({loginAt:{$lt:new Date(Date.now()-90*86400000)}}).catch(err => console.error('[login-audit-retention]', err)));
