@@ -90,7 +90,23 @@ router.get('/', async (req, res) => {
     const at=new Date(a?.kickoff||a?.date||0).getTime(),bt=new Date(b?.kickoff||b?.date||0).getTime();
     return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=6*60*60*1000;
   };
-  const canonicalMatches=[...sportmonksMatches,...bsdMatches];
+  const canonicalMatches=[];
+  // Guard against the same real-world fixture arriving with different provider
+  // IDs or slightly different league labels. Provider ownership remains
+  // SportMonks for the six subscribed leagues; duplicates are merged only
+  // when normalized teams and kickoff are the same fixture.
+  for(const candidate of [...sportmonksMatches,...bsdMatches]){
+    const index=canonicalMatches.findIndex(m=>teamKey(m)===teamKey(candidate)&&isCloseKickoff(m,candidate));
+    if(index<0){canonicalMatches.push(candidate);continue;}
+    const old=canonicalMatches[index];
+    const preferCandidate=String(candidate.canonicalProvider)==='sportmonks'&&String(old.canonicalProvider)!=='sportmonks';
+    const primary=preferCandidate?candidate:old,secondary=preferCandidate?old:candidate;
+    canonicalMatches[index]={...secondary,...primary,
+      homeScore:primary.homeScore??secondary.homeScore,awayScore:primary.awayScore??secondary.awayScore,
+      halftimeHome:primary.halftimeHome??secondary.halftimeHome,halftimeAway:primary.halftimeAway??secondary.halftimeAway,
+      providerIds:{...(secondary.providerIds||{}),...(primary.providerIds||{})}
+    };
+  }
   const liveRows=(liveResult?.ok?(liveResult.data?.livescore||[]):[])
     .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
     .map(e=>sportsDb.transformLiveEvent(e))
