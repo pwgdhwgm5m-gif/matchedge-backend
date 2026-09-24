@@ -117,7 +117,7 @@ router.get('/commercial-model-audit', async (req,res)=>{
     ]);
     const all=(performance.rows||[]).filter(x=>x.league==='all');
     const byMarket=all.map(x=>({market:x.market,sample:x.count,brier:x.brier,logLoss:x.logLoss,ece:x.ece,predictedPercent:x.predictedPercent,actualPercent:x.actualPercent,calibrationGapPercent:+(Number(x.predictedPercent||0)-Number(x.actualPercent||0)).toFixed(1)}));
-    res.json({generatedAt:new Date().toISOString(),mode:'prospective-commercial-audit',modelVersion:performance.version,probabilityQuality:byMarket,topPicks:selections,walkForward,pairedModelComparison:paired,guardrails:{minimumEvidenceSample:8,marketPricing:'fresh executable bookmaker odds with de-vig where available',selectionPrinciple:'probability quality and betting value are measured separately',closingLineValue:{status:'not-yet-captured',reason:'No verified pre-kickoff closing-price snapshot is persisted yet; CLV must not be fabricated.'}}});
+    res.json({generatedAt:new Date().toISOString(),mode:'prospective-commercial-audit',modelVersion:performance.version,probabilityQuality:byMarket,topPicks:selections,walkForward,pairedModelComparison:paired,guardrails:{minimumEvidenceSample:8,marketPricing:'fresh executable bookmaker odds with de-vig where available',selectionPrinciple:'probability quality and betting value are measured separately',closingLineValue:{status:'collecting',reason:'Verified fresh bookmaker closing prices are captured prospectively within 75 minutes of kickoff; historical CLV is not backfilled.'}}});
   }catch(error){console.error('[commercial-model-audit]',error);res.status(500).json({error:'Commercial model audit unavailable.'});}
 });
 
