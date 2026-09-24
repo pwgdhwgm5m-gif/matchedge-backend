@@ -108,6 +108,22 @@ test('cross-provider duplicate aliases collapse while preserving source IDs', ()
 test('observed MLS, Taça, and Ireland naming aliases share stable identities', () => {
   assert.equal(registry.normalizeTeamIdentity('Republic of Ireland'), 'ireland');
   assert.equal(registry.normalizeTeamIdentity('N. Ireland'), 'northernireland');
+  for (const [providerName, bsdName] of [
+    ['Anaitasuna', 'CD Anaitasuna FT'],
+    ['Tedeón', 'CD Tedeon'],
+    ['Baztán', 'CD Baztan'],
+    ['Ribadesella', 'Ribadesella CF'],
+    ['Noja', 'Noja SD'],
+    ['Pinatar', 'UD Pinatar'],
+    ['Atlético Melilla', 'Atletico Melilla CF'],
+    ['Sant Rafel', 'CF Sant Rafel'],
+    ['Prat', 'AE Prat'],
+    ['Talayuela', 'CP Talayuela'],
+    ['Maracena', 'UD Maracena'],
+    ['Tavernes de la Valldigna', 'UE Tavernes']
+  ]) {
+    assert.equal(registry.normalizeTeamIdentity(providerName), registry.normalizeTeamIdentity(bsdName));
+  }
 
   const rows = [
     registry.decorateMatch({
@@ -122,6 +138,41 @@ test('observed MLS, Taça, and Ireland naming aliases share stable identities', 
     }, 'bsd')
   ];
   assert.equal(registry.dedupeCompetitionFixtures(rows).length, 1);
+});
+
+test('observed Copa del Rey provider aliases collapse without losing source IDs', () => {
+  const pairs = [
+    [['Anaitasuna', 'Tedeón'], ['CD Anaitasuna FT', 'CD Tedeon']],
+    [['Atlético Calatayud', 'Baztán'], ['Atlético Calatayud', 'CD Baztan']],
+    [['Ribadesella', 'Noja'], ['Ribadesella CF', 'Noja SD']],
+    [['Pinatar', 'Atlético Melilla'], ['UD Pinatar', 'Atletico Melilla CF']],
+    [['Sporting de Hortaleza', 'Atlético Unión Güímar'], ['Sporting Hortaleza', 'Atlético Unión Güímar']],
+    [['Sant Rafel', 'Prat'], ['CF Sant Rafel', 'AE Prat']],
+    [['Talayuela', 'Sporting de Alcázar'], ['CP Talayuela', 'Sporting de Alcazar CF']],
+    [['Maracena', 'Tavernes de la Valldigna'], ['UD Maracena', 'UE Tavernes']]
+  ];
+  const rows = pairs.flatMap(([providerTeams, bsdTeams], index) => [
+    registry.decorateMatch({
+      fixtureId: `tsdb-copa-${index}`, leagueId: '4483', league: 'Copa del Rey',
+      homeTeam: providerTeams[0], awayTeam: providerTeams[1],
+      kickoff: `2026-09-26T${String(14 + index).padStart(2, '0')}:00:00Z`,
+      providerIds: { sportsdb: `tsdb-copa-${index}` },
+      canonicalProvider: 'thesportsdb'
+    }, 'sportsdb'),
+    registry.decorateMatch({
+      fixtureId: `bsd-copa-${index}`, leagueId: '41', league: 'Copa del Rey',
+      homeTeam: bsdTeams[0], awayTeam: bsdTeams[1],
+      kickoff: `2026-09-26T${String(14 + index).padStart(2, '0')}:00:00Z`,
+      providerIds: { bsd: `bsd-copa-${index}` },
+      canonicalProvider: 'bsd'
+    }, 'bsd')
+  ]);
+  const deduped = registry.dedupeCompetitionFixtures(rows);
+  assert.equal(deduped.length, pairs.length);
+  for (const match of deduped) {
+    assert.ok(match.providerIds.sportsdb);
+    assert.ok(match.providerIds.bsd);
+  }
 });
 
 test('fixture identity keeps competition and kickoff in the dedupe check', () => {

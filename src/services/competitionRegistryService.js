@@ -377,14 +377,15 @@ function decorateMatch(match, provider) {
 function normalizeTeamIdentity(value) {
   let key = String(value || '').trim().toLowerCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g, ' ')
+    .replace(/\b(fc|cf|sc|afc|fk|sk|cd|ud|cp|ad|sd|ue|ae|ca|ft|calcio|football|club)\b/g, ' ')
     .replace(/[^a-z0-9]+/g, '');
   const aliases = {
     republicofireland: 'ireland',
     nireland: 'northernireland',
     ublebrijana: 'lebrijana',
-    cd6dejunio: 'ceuta6dejunio',
-    adcamacha: 'camacha'
+    '6dejunio': 'ceuta6dejunio',
+    sportinghortaleza: 'sportingdehortaleza',
+    tavernes: 'tavernesdelavalldigna'
   };
   return aliases[key] || key;
 }
