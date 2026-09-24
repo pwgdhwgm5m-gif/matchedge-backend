@@ -88,12 +88,11 @@ router.get('/', async (req,res)=>{
   matches=competitionRegistry.dedupeCompetitionFixtures(matches.map(m=>
     competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource)
   ));
-  // /api/matches is the shared fixture backbone used by Fixtures and Home.
-  // Enforce the central whitelist here, before Home can rank Featured/Strongest
-  // or merge Live rows. Unknown/unverified/excluded competitions never leave
-  // this endpoint.
-  matches=matches.filter(m=>m?.visibleInCompetitionFilter===true);
+  // Keep the complete fixture backbone here. Some provider rows do not carry
+  // enough league metadata to resolve a registry key at this stage; filtering
+  // them here can erase the whole day. Fixtures/Home apply the central registry
+  // visibility after canonical metadata is available.
   if(!matches.length&&!legacy?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
-  res.json({date,matches,coveragePolicy:'official-visible-competitions-only'});
+  res.json({date,matches,coveragePolicy:'broad-fallback-with-canonical-overlays'});
 });
 module.exports=router;
