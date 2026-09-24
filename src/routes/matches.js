@@ -8,27 +8,7 @@ const oddsApi = require('../services/oddsApiService');
 const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
 const sourcePolicy = require('../services/sourcePolicyService');
-
-
-function fixtureTeamNorm(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
-function fixtureDedupeKey(m){
-  const teams=[fixtureTeamNorm(m?.homeTeam),fixtureTeamNorm(m?.awayTeam)].filter(Boolean).sort();
-  const league=fixtureTeamNorm(m?.league||m?.leagueName||m?.leagueId);
-  const time=new Date(m?.kickoff||m?.date||0).getTime();
-  if(teams.length!==2||!league||!Number.isFinite(time))return null;
-  return league+'|'+teams.join('|')+'|'+Math.round(time/(10*60*1000));
-}
-function fixtureSourceRank(m){const p=String(m?.canonicalProvider||m?.source||'').toLowerCase();return p==='sportmonks'?3:p==='bsd'?2:p==='sportsdb'||p==='thesportsdb'?1:0}
-function dedupeFixtures(rows){
-  const unique=new Map(),unkeyed=[];
-  for(const m of rows){
-    const key=fixtureDedupeKey(m);
-    if(!key){unkeyed.push(m);continue}
-    const old=unique.get(key);
-    if(!old||fixtureSourceRank(m)>fixtureSourceRank(old))unique.set(key,m);
-  }
-  return [...unique.values(),...unkeyed];
-}
+const competitionRegistry = require('../services/competitionRegistryService');
 
 /** GET /api/matches?date=YYYY-MM-DD
  * Fixture coverage stays broad. Provider ownership is applied as an overlay,
@@ -47,25 +27,47 @@ router.get('/', async (req,res)=>{
     Promise.race([cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),new Promise(r=>setTimeout(()=>r({ok:false,error:'sportmonks_date_timeout'}),5000))]),
     cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date))
   ]);
-  const norm=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
-  const key=m=>norm(m.homeTeam)+'|'+norm(m.awayTeam);
-  const map=new Map();
-  const put=(m,replace=false)=>{if(!m?.homeTeam||!m?.awayTeam)return;const k=key(m);if(replace||!map.has(k))map.set(k,m);};
+  const candidates=[];
+  const put=(m,provider)=>{
+    if(!m?.homeTeam||!m?.awayTeam)return;
+    const kind=provider||m.canonicalProvider||m.source||m.dataSource;
+    let row=m;
+    if(kind==='sportsdb'){
+      row={
+        ...m,
+        canonicalProvider:m.canonicalProvider||'thesportsdb',
+        providerIds:{...(m.providerIds||{}),sportsdb:String(m.fixtureId||'')}
+      };
+    }else if(kind==='bsd'){
+      row={
+        ...m,
+        canonicalProvider:'bsd',
+        providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
+      };
+    }else if(kind==='sportmonks'){
+      row={
+        ...m,
+        canonicalProvider:'sportmonks',
+        providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}
+      };
+    }
+    candidates.push(competitionRegistry.decorateMatch(row,kind));
+  };
 
   // Proven broad coverage baseline.
   for(const e of (legacy?.ok?(legacy.data?.events||[]):[])){
     const m=sportsDb.transformEvent(e);
-    if(sportsDb.isWhitelistedLeague(m.leagueId))put(m);
+    if(sportsDb.isWhitelistedLeague(m.leagueId))put(m,'sportsdb');
   }
   const extra=Array.isArray(supplemental)?supplemental:(supplemental?.matches||[]);
   for(const m of extra)put(m);
-  for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m);
+  for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
 
   // BSD outside the subscribed six leagues: preferred identity/data, but it
   // augments rather than erases fixtures absent from BSD's day response.
   for(const m of (bsdDay?.ok?bsdDay.matches:[])){
     if(sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))continue;
-    put({...m,canonicalProvider:'bsd',providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}},true);
+    put({...m,canonicalProvider:'bsd',providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}},'bsd');
   }
 
   // SportMonks owns the six subscribed leagues and replaces matching fallback rows.
@@ -73,14 +75,18 @@ router.get('/', async (req,res)=>{
   const smUnique=new Map(smRaw.map(f=>[String(f.sportmonksId||f.fixtureId),f]));
   for(const m of sportmonks.toResultMatches([...smUnique.values()])){
     if(!sourcePolicy.resolve({leagueName:m.league||m.leagueName||''}))continue;
-    put({...m,canonicalProvider:'sportmonks',providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}},true);
+    put({...m,canonicalProvider:'sportmonks',providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}},'sportmonks');
   }
 
-  let matches=dedupeFixtures([...map.values()].sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0)));
+  let matches=competitionRegistry.dedupeCompetitionFixtures(candidates)
+    .sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   if(live?.ok){
     const raw=(live.data?.livescore||[]).filter(e=>String(e.strSport||'').toLowerCase()==='soccer');
     matches=sportsDb.applyLiveOverlay(matches,raw);
   }
+  matches=competitionRegistry.dedupeCompetitionFixtures(matches.map(m=>
+    competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource)
+  ));
   if(!matches.length&&!legacy?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
   res.json({date,matches,coveragePolicy:'broad-fallback-with-canonical-overlays'});
 });

@@ -7,6 +7,7 @@ const liveXg = require('../services/liveXgService');
 const bsdService = require('../services/bsdService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const sportmonks = require('../services/sportmonksService');
+const competitionRegistry = require('../services/competitionRegistryService');
 
 const quickBound = (promise, fallback, ms = 2500) => Promise.race([
   promise,
@@ -31,42 +32,13 @@ router.get('/', async (req, res) => {
     quickBound(cache.getOrFetch('sportmonks:inplay',30,()=>sportmonks.getInplay()),{ok:false,error:'sportmonks_timeout'}),
     quickBound(cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),{ok:false,error:'bsd_live_timeout'})
   ]);
-  const norm=s=>String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
-  const providerId=m=>{
-    if(m.canonicalProvider==='sportmonks') return m.providerIds?.sportmonks || m.sportmonksId || m.fixtureId;
-    if(m.canonicalProvider==='bsd') return m.providerIds?.bsd || m.bsdEventId || m.fixtureId;
-    return m.fixtureId;
-  };
-  const nameKey=m=>norm(m.homeTeam)+'|'+norm(m.awayTeam);
-  const sameProviderId=(a,b)=>a.canonicalProvider===b.canonicalProvider &&
-    providerId(a)!=null && providerId(b)!=null && String(providerId(a))===String(providerId(b));
-  const map=new Map();
-  const nameIndex=new Map();
-  const sourcePriority={sportmonks:3,bsd:2,thesportsdb:1};
-  const addMatch=m=>{
-    // Provider IDs are authoritative. Names are only an exact, normalized
-    // fallback for legacy rows that lack a canonical ID.
-    const id=providerId(m);
-    const idKey=id!=null ? `${m.canonicalProvider}:${id}` : null;
-    if(idKey && map.has(idKey)){ map.set(idKey,{...map.get(idKey),...m}); return; }
-    const nk=nameKey(m);
-    const existingKey=nameIndex.get(nk);
-    const existing=existingKey?map.get(existingKey):null;
-    const mt=new Date(m.kickoff||m.date||0).getTime(),et=new Date(existing?.kickoff||existing?.date||0).getTime();
-    const sameKickoff=existing&&(!Number.isFinite(mt)||!Number.isFinite(et)||Math.abs(mt-et)<=6*60*60*1000);
-    if(existing&&sameKickoff){
-      const preferNew=(sourcePriority[m.canonicalProvider]||0)>=(sourcePriority[existing.canonicalProvider]||0);
-      const merged=preferNew?{...existing,...m}:{...m,...existing};
-      const target=preferNew?(idKey||existingKey):existingKey;
-      if(target!==existingKey)map.delete(existingKey);
-      map.set(target,merged);nameIndex.set(nk,target);return;
-    }
-    if(!idKey){
-      if(map.has(nk)){ map.set(nk,{...map.get(nk),...m}); return; }
-      map.set(nk,m);nameIndex.set(nk,nk);
-      return;
-    }
-    map.set(idKey,m);nameIndex.set(nk,idKey);
+  const candidates=[];
+  const addMatch=rawMatch=>{
+    const match=competitionRegistry.decorateMatch(
+      rawMatch,
+      rawMatch?.canonicalProvider||rawMatch?.source||rawMatch?.dataSource
+    );
+    candidates.push(match);
   };
   if(tsdbLive.ok){
     for(const e of (tsdbLive.data?.livescore||[])){
@@ -88,7 +60,9 @@ router.get('/', async (req, res) => {
        addMatch(m);
     }
   }
-  const matches=[...map.values()];
+  const matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{
+    toleranceMs:6*60*60*1000
+  });
   return res.json({matches,source:'canonical-live-merged',counts:{thesportsdb:tsdbLive.ok?(tsdbLive.data?.livescore||[]).length:0,sportmonks:smLive.ok?(smLive.fixtures||[]).filter(x=>x.isLive).length:0,bsd:bsdLive.ok?bsdService.extractList(bsdLive.data).length:0}});
 });
 
@@ -183,6 +157,10 @@ router.get('/:fixtureId', async (req, res) => {
   if (!match) {
     return res.status(404).json({ error: 'Mac bulunamadi' });
   }
+  match=competitionRegistry.decorateMatch(
+    match,
+    match.canonicalProvider||match.source||match.dataSource
+  );
 
   // --- Pro/Premium V2 ek veriler: zaman cizelgesi, istatistik, kadro, TV, highlights ---
   // Bitmis maclarda bu veri degismeyecegi icin uzun (6 saat) cache'leniyor;
@@ -298,6 +276,12 @@ router.get('/:fixtureId', async (req, res) => {
 
   res.json({
     fixtureId,
+    canonicalCompetitionKey: match.canonicalCompetitionKey,
+    displayName: match.displayName,
+    competitionCountry: match.competitionCountry,
+    competitionType: match.competitionType,
+    competitionPriority: match.competitionPriority,
+    homePageRank: match.homePageRank,
     minute: match.minute,
     statusShort: match.statusShort,
     homeTeam: match.homeTeam,

@@ -9,6 +9,7 @@ const oddsApi = require('../services/oddsApiService');
 const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
 const sourcePolicy = require('../services/sourcePolicyService');
+const competitionRegistry = require('../services/competitionRegistryService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -64,23 +65,27 @@ router.get('/', async (req, res) => {
     if(!sourcePolicy.resolve({leagueName})) continue;
     smUnique.set(String(f.sportmonksId||f.fixtureId),f);
   }
-  const sportmonksMatches=sportmonks.toResultMatches([...smUnique.values()]).map(m=>({
-    ...m, canonicalProvider:'sportmonks',
-    providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}
-  }));
+  const sportmonksMatches=sportmonks.toResultMatches([...smUnique.values()]).map(m=>
+    competitionRegistry.decorateMatch({
+      ...m, canonicalProvider:'sportmonks',
+      providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}
+    },'sportmonks')
+  );
 
-  const bsdMatches=(bsdResult?.ok?bsdResult.matches:[]).filter(m=>!sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry})).map(m=>({
-    ...m, canonicalProvider:'bsd',
-    providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
-  }));
+  const bsdMatches=(bsdResult?.ok?bsdResult.matches:[])
+    .filter(m=>!sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))
+    .map(m=>competitionRegistry.decorateMatch({
+      ...m, canonicalProvider:'bsd',
+      providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
+    },'bsd'));
 
   // The canonical result feeds intentionally omit some competitions that are
   // present in the real-time TheSportsDB feed (notably women's cups). For
   // today's page, add only genuinely live rows that are missing from the
   // canonical list; existing rows keep their provider ownership and receive
   // the live score/clock overlay.
-  const normTeam=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
-  const teamKey=m=>normTeam(m.homeTeam)+'|'+normTeam(m.awayTeam);
+  const teamKey=m=>competitionRegistry.normalizeTeamIdentity(m.homeTeam)+'|'+
+    competitionRegistry.normalizeTeamIdentity(m.awayTeam);
   const isCloseKickoff=(a,b)=>{
     const at=new Date(a?.kickoff||a?.date||0).getTime(),bt=new Date(b?.kickoff||b?.date||0).getTime();
     return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=6*60*60*1000;
@@ -90,11 +95,15 @@ router.get('/', async (req, res) => {
     .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
     .map(e=>sportsDb.transformLiveEvent(e))
     .filter(m=>m?.isLive)
-    .map(m=>({...m,canonicalProvider:'thesportsdb',providerIds:{thesportsdb:String(m.fixtureId)},dataSource:'thesportsdb'}));
+    .map(m=>competitionRegistry.decorateMatch({
+      ...m,canonicalProvider:'thesportsdb',
+      providerIds:{thesportsdb:String(m.fixtureId)},dataSource:'thesportsdb'
+    },'sportsdb'));
   for(const live of liveRows){
     const index=canonicalMatches.findIndex(m=>
-      (String(m.canonicalProvider||'')==='thesportsdb' && String(m.fixtureId)===String(live.fixtureId)) ||
-      (teamKey(m)===teamKey(live) && isCloseKickoff(m,live))
+      m.canonicalCompetitionKey===live.canonicalCompetitionKey &&
+      teamKey(m)===teamKey(live) &&
+      isCloseKickoff(m,live)
     );
     if(index<0){canonicalMatches.push(live);continue;}
     const old=canonicalMatches[index];
@@ -106,7 +115,9 @@ router.get('/', async (req, res) => {
   }
   await sportsDb.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='thesportsdb'));
   await bsdService.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='bsd'));
-  const matches=canonicalMatches.sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
+  const matches=canonicalMatches
+    .map(m=>competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource))
+    .sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   res.json({
     date,matches,
     canonicalPolicy:'sportmonks-6-else-bsd-plus-today-live',
