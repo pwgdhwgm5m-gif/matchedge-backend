@@ -743,16 +743,16 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const smRawHomeAverages=sportmonksHistorical?.rawHome?.averages||{};
   const smRawAwayAverages=sportmonksHistorical?.rawAway?.averages||{};
   const smHalfUsed=Number(halfMarkets.evidence?.effectiveSample||0)>0;
-  const smChanceUsed=useSportmonksPrimary&&smOverallSample>=5&&Boolean(sportmonksMarketEvidence?.homeThreat||sportmonksMarketEvidence?.awayThreat);
+  const smChanceUsed=useSportmonksPrimary&&smOverallSample>=5&&Boolean(smMarketEvidence?.homeThreat||smMarketEvidence?.awayThreat);
   const hasSmMetric=(homeValue,awayValue)=>Number.isFinite(homeValue)||Number.isFinite(awayValue);
   const smShotsAvailable=hasSmMetric(smRawHomeAverages.shots,smRawAwayAverages.shots);
   const smInsideBoxAvailable=hasSmMetric(smRawHomeAverages.shotsInsideBox,smRawAwayAverages.shotsInsideBox);
   const smSotAvailable=hasSmMetric(smRawHomeAverages.shotsOnTarget,smRawAwayAverages.shotsOnTarget);
-  const smThreatRankingUsed=Boolean(sportmonksMarketEvidence&&[
-    sportmonksMarketEvidence.homeThreat,sportmonksMarketEvidence.awayThreat,
-    sportmonksMarketEvidence.goalQuality,sportmonksMarketEvidence.bttsQuality,
+  const smThreatRankingUsed=Boolean(smMarketEvidence&&[
+    smMarketEvidence.homeThreat,smMarketEvidence.awayThreat,
+    smMarketEvidence.goalQuality,smMarketEvidence.bttsQuality,
   ].some(Number.isFinite));
-  const smCornerRankingUsed=Number.isFinite(sportmonksMarketEvidence?.cornerQuality);
+  const smCornerRankingUsed=Number.isFinite(smMarketEvidence?.cornerQuality);
   const sportmonksConsumedInputs=useSportmonksPrimary?{
     form:{available:{home:Number(sportmonksHistorical?.rawHome?.sample||0)>0,away:Number(sportmonksHistorical?.rawAway?.sample||0)>0},consumedByExpectedGoals:smChanceUsed,source:'SportMonks completed team history'},
     shots:{available:{home:Number.isFinite(smRawHomeAverages.shots),away:Number.isFinite(smRawAwayAverages.shots)},consumedByExpectedGoals:smChanceUsed&&smShotsAvailable,consumedByMarketRanking:smThreatRankingUsed&&smShotsAvailable},
