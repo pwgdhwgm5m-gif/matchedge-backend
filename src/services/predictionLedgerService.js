@@ -307,16 +307,17 @@ function pickWon(key,a){
  return null;
 }
 async function selectionPerformance(){
- const rows=await Prediction.find({status:'settled',selectionVersion:SELECTION_VERSION,'topPicksSnapshot.0':{$exists:true}}).select('topPicksSnapshot actual selectionVersion kickoff').lean();
- let bets=0,wins=0,staked=0,returned=0,expected=0;
+ const rows=await Prediction.find({status:'settled',selectionVersion:SELECTION_VERSION,'topPicksSnapshot.0':{$exists:true}}).select('topPicksSnapshot closingLineSnapshot closingLineCapturedAt actual selectionVersion kickoff').lean();
+ let bets=0,wins=0,staked=0,returned=0,expected=0,clvCount=0,clvSum=0,positiveClv=0;
  const byMarket={};
  for(const r of rows)for(const p of r.topPicksSnapshot||[]){
   if(p.oddsFresh!==true||!(Number(p.odds)>1))continue;const won=pickWon(p.key,r.actual);if(won==null)continue;
   bets++;staked++;expected+=Number(p.expectedValuePercent||0)/100;if(won){wins++;returned+=Number(p.odds);}
+  const close=(r.closingLineSnapshot||[]).find(x=>x.key===p.key);if(Number(close?.odds)>1){const clv=Number(p.odds)/Number(close.odds)-1;clvCount++;clvSum+=clv;if(clv>0)positiveClv++;}
   const k=p.market||p.key,b=byMarket[k]||(byMarket[k]={bets:0,wins:0,staked:0,returned:0});b.bets++;b.staked++;if(won){b.wins++;b.returned+=Number(p.odds);}
  }
  const fmt=b=>({...b,hitRatePercent:b.bets?+(100*b.wins/b.bets).toFixed(1):null,roiPercent:b.staked?+(100*(b.returned-b.staked)/b.staked).toFixed(1):null});
- return {selectionVersion:SELECTION_VERSION,bets,wins,hitRatePercent:bets?+(100*wins/bets).toFixed(1):null,roiPercent:staked?+(100*(returned-staked)/staked).toFixed(1):null,meanExpectedValuePercent:bets?+(100*expected/bets).toFixed(1):null,byMarket:Object.fromEntries(Object.entries(byMarket).map(([k,v])=>[k,fmt(v)])),note:'Prospective settled picks with fresh captured bookmaker odds only.'};
+ return {selectionVersion:SELECTION_VERSION,bets,wins,hitRatePercent:bets?+(100*wins/bets).toFixed(1):null,roiPercent:staked?+(100*(returned-staked)/staked).toFixed(1):null,meanExpectedValuePercent:bets?+(100*expected/bets).toFixed(1):null,clvCount,averageClvPercent:clvCount?+(100*clvSum/clvCount).toFixed(2):null,positiveClvPercent:clvCount?+(100*positiveClv/clvCount).toFixed(1):null,byMarket:Object.fromEntries(Object.entries(byMarket).map(([k,v])=>[k,fmt(v)])),note:'Prospective settled picks with fresh captured bookmaker odds only.'};
 }
 async function calibrationHealth(options={}){
  if(options.cached&&healthCache.value&&Date.now()-healthCache.at<15*60*1000)return healthCache.value;
