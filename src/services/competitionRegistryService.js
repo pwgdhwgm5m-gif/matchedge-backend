@@ -328,7 +328,7 @@ const COMPETITIONS = Object.freeze([
   makeCompetition('uefa-nations-league', 'UEFA Nations League', 'Europe', 'continental', 2, 99,
     { sportsdb: '4490', bsd: '64', oddsApi: 'soccer_uefa_nations_league' },
     ['UEFA Nations League', 'Nations League', 'soccer_uefa_nations_league'],
-    'verified', { visibleInCompetitionFilter: false, eligibleForHomePriority: false }),
+    'verified', { fixtureCoverage: 'fixture-producing', visibleInCompetitionFilter: true, eligibleForHomePriority: true }),
   makeCompetition('concacaf-nations-league', 'CONCACAF Nations League', 'North America', 'continental', 2, 99,
     { bsd: '65' }, ['CONCACAF Nations League'],
     'verified', { visibleInCompetitionFilter: false, eligibleForHomePriority: false }),
