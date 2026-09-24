@@ -147,12 +147,14 @@ function calculateHalfMarkets(homeLambda, awayLambda, evidence = null) {
   };
   // 45/55 remains the conservative league prior. Verified half-specific
   // Sportmonks history may move each team's split, with sample shrinkage.
-  const hs=boundedShare(Number(evidence?.homeFirstRate),Number(evidence?.homeSecondRate),evidence?.homeSample);
-  const as=boundedShare(Number(evidence?.awayFirstRate),Number(evidence?.awaySecondRate),evidence?.awaySample);
+  const numericRate=value=>value===null||value===undefined||value===''?null:Number(value);
+  const hs=boundedShare(numericRate(evidence?.homeFirstRate),numericRate(evidence?.homeSecondRate),evidence?.homeSample);
+  const as=boundedShare(numericRate(evidence?.awayFirstRate),numericRate(evidence?.awaySecondRate),evidence?.awaySample);
   const homeFirstLambda=homeLambda*hs, awayFirstLambda=awayLambda*as;
   const homeSecondLambda=Math.max(0,homeLambda-homeFirstLambda), awaySecondLambda=Math.max(0,awayLambda-awayFirstLambda);
   const firstHalf = calculateMatchProbabilities(homeFirstLambda, awayFirstLambda, 5);
   const secondHalf = calculateMatchProbabilities(homeSecondLambda, awaySecondLambda, 5);
+  const firstHalfMarkets = calculateMarketProbabilities(homeFirstLambda, awayFirstLambda, 5);
   const firstTotal = homeFirstLambda + awayFirstLambda;
   const secondTotal = homeSecondLambda + awaySecondLambda;
   let firstMore = 0, secondMore = 0, equal = 0;
@@ -164,16 +166,22 @@ function calculateHalfMarkets(homeLambda, awayLambda, evidence = null) {
   }
   const total = firstMore + secondMore + equal || 1;
   const scoreAtLeastOnce = lambda => +(100 * (1 - Math.exp(-Math.max(0, lambda)))).toFixed(1);
+  const homeSample=Number(evidence?.homeHTSamples ?? evidence?.homeSample ?? 0);
+  const awaySample=Number(evidence?.awayHTSamples ?? evidence?.awaySample ?? 0);
+  const priorUsed=evidence?.priorUsed ?? (Math.min(homeSample,awaySample)<8);
   return {
     firstHalf: {
       home: firstHalf.homeWinProbability, draw: firstHalf.drawProbability, away: firstHalf.awayWinProbability,
       homeScores: scoreAtLeastOnce(homeFirstLambda), awayScores: scoreAtLeastOnce(awayFirstLambda),
       over05: scoreAtLeastOnce(firstTotal),
+      under05: +(100-scoreAtLeastOnce(firstTotal)).toFixed(1),
+      btts: firstHalfMarkets.bttsPercent,
     },
     secondHalf: {
       home: secondHalf.homeWinProbability, draw: secondHalf.drawProbability, away: secondHalf.awayWinProbability,
       homeScores: scoreAtLeastOnce(homeSecondLambda), awayScores: scoreAtLeastOnce(awaySecondLambda),
       over05: scoreAtLeastOnce(secondTotal),
+      under05: +(100-scoreAtLeastOnce(secondTotal)).toFixed(1),
     },
     mostGoalsHalf: {
       first: +((firstMore / total) * 100).toFixed(1),
@@ -183,7 +191,19 @@ function calculateHalfMarkets(homeLambda, awayLambda, evidence = null) {
     evidence: {
       source:evidence?.source || 'league-prior-45-55',
       homeFirstShare:+(hs*100).toFixed(1), awayFirstShare:+(as*100).toFixed(1),
-      homeSample:Number(evidence?.homeSample||0), awaySample:Number(evidence?.awaySample||0)
+      homeSample, awaySample,
+      homeHTSamples:Number(evidence?.homeHTSamples ?? evidence?.homeSample ?? 0),
+      awayHTSamples:Number(evidence?.awayHTSamples ?? evidence?.awaySample ?? 0),
+      homeFirstHalfScoringSamples:Number(evidence?.homeFirstHalfScoringSamples ?? evidence?.homeHTSamples ?? evidence?.homeSample ?? 0),
+      awayFirstHalfScoringSamples:Number(evidence?.awayFirstHalfScoringSamples ?? evidence?.awayHTSamples ?? evidence?.awaySample ?? 0),
+      homeFirstHalfConcedingSamples:Number(evidence?.homeFirstHalfConcedingSamples ?? evidence?.homeHTSamples ?? evidence?.homeSample ?? 0),
+      awayFirstHalfConcedingSamples:Number(evidence?.awayFirstHalfConcedingSamples ?? evidence?.awayHTSamples ?? evidence?.awaySample ?? 0),
+      homeSecondHalfSamples:Number(evidence?.homeSecondHalfSamples ?? 0),
+      awaySecondHalfSamples:Number(evidence?.awaySecondHalfSamples ?? 0),
+      priorUsed,
+      firstHalfPriorUsed:evidence?.firstHalfPriorUsed ?? (Math.min(homeSample,awaySample)<8),
+      secondHalfPriorUsed:evidence?.secondHalfPriorUsed ?? (Math.min(Number(evidence?.homeSecondHalfSamples||0),Number(evidence?.awaySecondHalfSamples||0))<8),
+      effectiveSample:Math.min(homeSample,awaySample)
     }
   };
 }

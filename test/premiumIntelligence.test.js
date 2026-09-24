@@ -3,12 +3,31 @@ const { buildPremiumIntelligence, buildMarketBoard } = require('../src/services/
 const { calculateHalfMarkets, calculateMarketProbabilities, estimateCornerMetrics } = require('../src/services/poissonService');
 const { calculateMatchDominance } = require('../src/services/liveXgService');
 
+const sufficientMarketEvidence = Object.fromEntries([
+  'home','draw','away','over25','under25','bttsYes','bttsNo','over15','over35','under35',
+  'homeScores','awayScores','homeOver15','homeOver25','homeOver35','awayOver15','awayOver25','awayOver35',
+  'cornersOver95','cornersUnder95','fhHome','fhDraw','fhAway','fhHomeScores','fhAwayScores','fhOver05',
+  'shHome','shDraw','shAway','shHomeScores','shAwayScores','shOver05','mostGoalsFirst','mostGoalsEqual','mostGoalsSecond',
+].map(key => [key, {
+  evidenceLevel:'SUFFICIENT',
+  effectiveSample:8,
+  evidenceSource:['test-history'],
+  priorUsed:false,
+  strongPickEligible:true,
+}]));
+const sufficientHomeEvidence = {
+  home:{evidenceLevel:'SUFFICIENT',effectiveSample:8,evidenceSource:['test-history'],priorUsed:false,strongPickEligible:true},
+  draw:{evidenceLevel:'SUFFICIENT',effectiveSample:8,evidenceSource:['test-history'],priorUsed:false,strongPickEligible:true},
+  away:{evidenceLevel:'SUFFICIENT',effectiveSample:8,evidenceSource:['test-history'],priorUsed:false,strongPickEligible:true},
+};
+
 const strong = buildPremiumIntelligence({
+  marketEvidence:sufficientHomeEvidence,
   modelProbabilities: { homeWinProbability: 60, drawProbability: 23, awayWinProbability: 17 },
   marketProbabilities: { home: 52, draw: 27, away: 21 },
   matchOdds: { home: 1.82, draw: 3.5, away: 4.2 },
-  homePlayed: 5,
-  awayPlayed: 5,
+  homePlayed: 8,
+  awayPlayed: 8,
   hasStandings: true,
   injuriesAvailable: true,
   h2hCount: 2,
@@ -39,9 +58,10 @@ assert.equal(earlySeason.selection, null);
 assert.ok(earlySeason.blockers.includes('SMALL_SAMPLE'));
 
 const noOdds = buildPremiumIntelligence({
+  marketEvidence:sufficientHomeEvidence,
   modelProbabilities: { homeWinProbability: 45, drawProbability: 30, awayWinProbability: 25 },
-  homePlayed: 5,
-  awayPlayed: 5,
+  homePlayed: 8,
+  awayPlayed: 8,
   hasStandings: true,
   injuriesAvailable: true,
   h2hCount: 1,
@@ -53,9 +73,19 @@ assert.equal(noOdds.bestEdge.modelProbability, 45);
 assert.equal(noOdds.bestEdge.edgePoints, null);
 assert.ok(noOdds.blockers.includes('NO_MARKET_ODDS'));
 
+const evidenceLimitedPick=buildPremiumIntelligence({
+  modelProbabilities:{homeWinProbability:80,drawProbability:12,awayWinProbability:8},
+  homePlayed:7,awayPlayed:7,hasStandings:true,
+  marketEvidence:{home:{evidenceLevel:'LIMITED',effectiveSample:7,strongPickEligible:false}},
+});
+assert.equal(evidenceLimitedPick.status,'UNAVAILABLE');
+assert.equal(evidenceLimitedPick.selection,null);
+assert.ok(evidenceLimitedPick.blockers.includes('INSUFFICIENT_MARKET_EVIDENCE'));
+
 console.log('premiumIntelligence tests passed');
 
 const board = buildMarketBoard({
+  marketEvidence:sufficientMarketEvidence,
   modelProbabilities: { homeWinProbability: 44, drawProbability: 28, awayWinProbability: 28 },
   goalMarkets: { over25GoalsPercent: 68, bttsPercent: 61, totalGoals:{'1.5':{over:82,under:18},'3.5':{over:44,under:56}}, teamGoals:{home:{'1.5':{over:67},'2.5':{over:42},'3.5':{over:22}},away:{'1.5':{over:31},'2.5':{over:12},'3.5':{over:4}}}, scoring:{home:84,away:55} },
   cornerMetrics: { over95Percent: 62, under95Percent:38 },
@@ -100,6 +130,7 @@ console.log('expanded market probability tests passed');
 // A 90% high-base-rate market without a verified price must never beat a
 // lower-probability positive-EV market into Top Picks.
 const valueBoard = buildMarketBoard({
+  marketEvidence:sufficientMarketEvidence,
   modelProbabilities:{homeWinProbability:62,drawProbability:23,awayWinProbability:15},
   goalMarkets:{over25GoalsPercent:64,bttsPercent:58,totalGoals:{'1.5':{over:80,under:20},'3.5':{over:40,under:60}},teamGoals:{home:{'1.5':{over:55},'2.5':{over:25},'3.5':{over:10}},away:{'1.5':{over:25},'2.5':{over:8},'3.5':{over:2}}},scoring:{home:82,away:52}},
   halfMarkets:{firstHalf:{home:40,draw:40,away:20,homeScores:55,awayScores:30,over05:70},secondHalf:{home:50,draw:30,away:20,homeScores:75,awayScores:45,over05:90},mostGoalsHalf:{first:28,equal:25,second:47}},
@@ -115,6 +146,7 @@ console.log('betting-value Top Picks tests passed');
 
 
 const noValueBoard = buildMarketBoard({
+  marketEvidence:sufficientMarketEvidence,
   modelProbabilities:{homeWinProbability:34,drawProbability:33,awayWinProbability:33},
   goalMarkets:{over25GoalsPercent:50,bttsPercent:50,totalGoals:{'1.5':{over:60,under:40},'3.5':{over:30,under:70}},teamGoals:{home:{'1.5':{over:30},'2.5':{over:10},'3.5':{over:3}},away:{'1.5':{over:30},'2.5':{over:10},'3.5':{over:3}}},scoring:{home:60,away:60}},
   halfMarkets:{firstHalf:{home:30,draw:45,away:25,homeScores:40,awayScores:40,over05:60},secondHalf:{home:35,draw:35,away:30,homeScores:55,awayScores:55,over05:91},mostGoalsHalf:{first:30,equal:25,second:45}},
@@ -162,6 +194,7 @@ assert.ok(sparseHalves.evidence.awayFirstShare>40);
 console.log('half-specific evidence tests passed');
 
 const unhealthyBoard=buildMarketBoard({
+ marketEvidence:sufficientMarketEvidence,
  modelProbabilities:{homeWinProbability:72,drawProbability:16,awayWinProbability:12},
  goalMarkets:{over25GoalsPercent:65,bttsPercent:55,totalGoals:{'1.5':{over:80},'3.5':{over:35,under:65}},scoring:{home:82,away:55},teamGoals:{home:{'1.5':{over:60},'2.5':{over:35},'3.5':{over:15}},away:{'1.5':{over:25},'2.5':{over:10},'3.5':{over:4}}}},
  cornerMetrics:{over95Percent:50,under95Percent:50},halfMarkets:halves,dataHealth:{score:85},premium:{},
@@ -176,6 +209,7 @@ assert.equal(unhealthyBoard.selectionPolicy.modelHealthGate,true);
 console.log('model health gate tests passed');
 
 const staleOddsBoard=buildMarketBoard({
+ marketEvidence:sufficientMarketEvidence,
  modelProbabilities:{homeWinProbability:75,drawProbability:15,awayWinProbability:10},
  goalMarkets:{over25GoalsPercent:70,bttsPercent:55,totalGoals:{'1.5':{over:85},'3.5':{over:40,under:60}},scoring:{home:85,away:50},teamGoals:{home:{'1.5':{over:65},'2.5':{over:40},'3.5':{over:20}},away:{'1.5':{over:20},'2.5':{over:8},'3.5':{over:3}}}},
  cornerMetrics:{over95Percent:50,under95Percent:50},halfMarkets:halves,dataHealth:{score:90},premium:{},evidenceStrength:.9,modelAgreementScore:90,
@@ -187,6 +221,7 @@ assert.equal(staleOddsBoard.selectionPolicy.valueRequiresFreshOdds,true);
 console.log('stale odds value gate tests passed');
 
 const extendedValueBoard=buildMarketBoard({
+ marketEvidence:sufficientMarketEvidence,
  modelProbabilities:{homeWinProbability:58,drawProbability:24,awayWinProbability:18},
  goalMarkets:{over25GoalsPercent:60,bttsPercent:72,totalGoals:{'1.5':{over:78},'3.5':{over:32,under:68}},scoring:{home:80,away:68},teamGoals:{home:{'1.5':{over:55},'2.5':{over:30},'3.5':{over:12}},away:{'1.5':{over:38},'2.5':{over:16},'3.5':{over:6}}}},
  cornerMetrics:{over95Percent:52,under95Percent:48},

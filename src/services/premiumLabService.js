@@ -1,5 +1,6 @@
 const Prediction=require('../models/PredictionSnapshot');
 const oddsApi=require('./oddsApiService');
+const marketEvidence=require('./marketEvidenceService');
 const patternCache=new Map(),oddsCache=new Map();
 const PATTERN_CACHE_MS=30*60*1000,ODDS_CACHE_MS=10*60*1000;
 function cacheGet(map,key,ttl){const x=map.get(key);if(!x||Date.now()-x.at>ttl){if(x)map.delete(key);return null}return x.value}
@@ -22,6 +23,7 @@ const PROFILE={
 function marketFamily(p){const s=String((p&&p.market)||'')+' '+String((p&&p.key)||'');if(/corner/i.test(s))return'corners';if(/btts|kg/i.test(s))return'btts';if(/over|under|goal|gol/i.test(s))return'goals';if(/half|iy|1h|2h/i.test(s))return'halves';if(/home|draw|away|1x2|winner|result/i.test(s))return'result';return String((p&&p.market)||(p&&p.key)||'unknown')}
 function candidateStrength(row,p,risk){
  const q=Number(row.dataQualityScore)||0,prob=Number(p.probability)||0,score=Number(p.score)||0,cfg=PROFILE[risk];
+  if(!marketEvidence.hasStrongEvidence(p))return null;
  if(prob<cfg.probability||q<cfg.quality||score<cfg.score)return null;
  const sim=(Number(row.homeLambda)>0&&Number(row.awayLambda)>0)?monteCarlo50k(row):null,simProb=sim?simProbabilityForPick(p,sim):null;
  const disagreement=simProb==null?0:Math.abs(prob-simProb),simPenalty=simProb==null?0:(disagreement>15?10:disagreement>10?6:disagreement>6?3:0),simBonus=simProb!=null&&disagreement<=4?2:0;
@@ -170,4 +172,4 @@ async function lockFixtureValidation(fixtureId){
 async function fixtureValidation(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId)}).lean();if(!row)return null;return (row.v4Validation||[]).find(v=>v&&v.kind==='fixture-cross-check')||null;}
 
 async function simulateFixture(fixtureId){const row=await Prediction.findOne({fixtureId:String(fixtureId),status:'pending'}).sort({capturedAt:-1}).lean();if(!row){const e=new Error('fixture_not_in_prospective_ledger');e.status=404;throw e}if(!(Number(row.homeLambda)>0)||!(Number(row.awayLambda)>0)){const e=new Error('expected_goals_unavailable');e.status=422;throw e}return{fixtureId:row.fixtureId,match:row.homeTeam+' - '+row.awayTeam,kickoff:row.kickoff,league:row.league,simulation:simulationFromLambdas(row.homeLambda,row.awayLambda),modelSnapshot:row.probabilities}}
-module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,similarMatches,patternFinder,valueFinder,validationSnapshot,validationReport,captureValidation,lockFixtureValidation,fixtureValidation};
+module.exports={available,buildCoupon,simulateFixture,simulationFromLambdas,monteCarlo50k,simProbabilityForPick,candidateStrength,similarMatches,patternFinder,valueFinder,validationSnapshot,validationReport,captureValidation,lockFixtureValidation,fixtureValidation};

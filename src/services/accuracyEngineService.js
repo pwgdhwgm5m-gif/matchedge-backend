@@ -2,6 +2,12 @@ const cache = require('../utils/cache');
 const sportsDb = require('./sportsDbService');
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+function normalizeProviderMetric(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 async function cachedEventStats(eventId) {
   if (!eventId) return null;
   return cache.getOrFetch('accuracy:eventstats:' + eventId, 6*60*60, async () => {
@@ -14,7 +20,7 @@ async function teamAdvancedForm(fixtures, teamId, limit=8) {
   const rows=await Promise.all(finished.map(async f=>{
     const s=await cachedEventStats(f.fixture.id); if(!s) return null;
     const isHome=String(f.teams?.home?.id)===String(teamId);
-    const pick=(obj,own)=>{ if(!obj)return null; const v=isHome?obj[own?'home':'away']:obj[own?'away':'home']; return Number.isFinite(Number(v))?Number(v):null; };
+    const pick=(obj,own)=>{ if(!obj)return null; const v=isHome?obj[own?'home':'away']:obj[own?'away':'home']; return normalizeProviderMetric(v); };
     return {xgFor:pick(s.xg,true),xgAgainst:pick(s.xg,false),cornersFor:pick(s.corners,true),cornersAgainst:pick(s.corners,false),shotsFor:pick(s.totalShots,true),sotFor:pick(s.shotsOnTarget,true)};
   }));
   const valid=rows.filter(Boolean);
@@ -44,4 +50,4 @@ function cornerProjection(home,away){
   if(![h,a].every(Number.isFinite))return null;
   return {homeExpected:+h.toFixed(2),awayExpected:+a.toFixed(2),totalExpected:+(h+a).toFixed(2),sample:Math.min(home.cornerSample,away.cornerSample)};
 }
-module.exports={teamAdvancedForm,leagueBaselines,blendLambda,cornerProjection};
+module.exports={teamAdvancedForm,leagueBaselines,blendLambda,cornerProjection,normalizeProviderMetric};

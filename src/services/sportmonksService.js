@@ -258,6 +258,11 @@ function aggregateTeamHistory(fixtures, teamId) {
   const rows = Array.isArray(fixtures) ? fixtures : [];
   const keys=['shotsOnTarget','shots','corners','cornersAgainst','shotsOnTargetAgainst','shotsAgainst','blockedShotsAgainst','shotsInsideBoxAgainst','bigChancesAgainst','dangerousAttacksAgainst','shotsOffTarget','attacks','dangerousAttacks','blockedShots','shotsInsideBox','bigChances','firstHalfScored','firstHalfConceded','secondHalfScored','secondHalfConceded'];
   const values = [];
+  const score = value => {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? number : null;
+  };
 
   for (const [index, f] of rows.slice(0,14).entries()) {
     const raw = f.raw || {};
@@ -268,6 +273,13 @@ function aggregateTeamHistory(fixtures, teamId) {
     const pick = key => f.stats?.[key + loc] ?? null;
     const oppLoc = loc === 'Home' ? 'Away' : 'Home';
     const pickOpp = key => f.stats?.[key + oppLoc] ?? null;
+    const htHome = score(f.halftimeHome);
+    const htAway = score(f.halftimeAway);
+    const ftHome = score(f.homeScore);
+    const ftAway = score(f.awayScore);
+    const hasHalftime = htHome !== null && htAway !== null;
+    const hasFullSplit = hasHalftime && ftHome !== null && ftAway !== null &&
+      ftHome >= htHome && ftAway >= htAway;
     // Recency decay: newest completed matches matter more, without discarding
     // the older sample that stabilises early-season analysis.
     const recencyWeight = Math.pow(0.90, index);
@@ -282,23 +294,35 @@ function aggregateTeamHistory(fixtures, teamId) {
       // Half-specific scoring is derived only when the provider supplied a
       // verified halftime score. Missing HT data stays null and cannot create
       // artificial first/second-half tendencies.
-      firstHalfScored: f.halftimeHome != null && f.halftimeAway != null ? (loc === 'Home' ? Number(f.halftimeHome) : Number(f.halftimeAway)) : null,
-      firstHalfConceded: f.halftimeHome != null && f.halftimeAway != null ? (loc === 'Home' ? Number(f.halftimeAway) : Number(f.halftimeHome)) : null,
-      secondHalfScored: f.halftimeHome != null && f.halftimeAway != null ? Math.max(0,(loc === 'Home' ? Number(f.homeScore) : Number(f.awayScore))-(loc === 'Home' ? Number(f.halftimeHome) : Number(f.halftimeAway))) : null,
-      secondHalfConceded: f.halftimeHome != null && f.halftimeAway != null ? Math.max(0,(loc === 'Home' ? Number(f.awayScore) : Number(f.homeScore))-(loc === 'Home' ? Number(f.halftimeAway) : Number(f.halftimeHome))) : null
+       firstHalfScored: hasHalftime ? (loc === 'Home' ? htHome : htAway) : null,
+       firstHalfConceded: hasHalftime ? (loc === 'Home' ? htAway : htHome) : null,
+       secondHalfScored: hasFullSplit ? (loc === 'Home' ? ftHome - htHome : ftAway - htAway) : null,
+       secondHalfConceded: hasFullSplit ? (loc === 'Home' ? ftAway - htAway : ftHome - htHome) : null
     });
   }
 
   const summarize = subset => {
     const averages={};
+    const metricSamples={};
     for (const k of keys) {
       const valid=subset.filter(v=>Number.isFinite(v[k]));
       const totalWeight=valid.reduce((s,v)=>s+v.recencyWeight,0);
+      metricSamples[k]=valid.length;
       averages[k]=totalWeight
         ? +(valid.reduce((s,v)=>s+v[k]*v.recencyWeight,0)/totalWeight).toFixed(2)
         : null;
     }
-    return { sample:subset.length, averages };
+    return {
+      sample:subset.length,
+      averages,
+      metricSamples,
+      halftimeSamples:metricSamples.firstHalfScored,
+      secondHalfSamples:metricSamples.secondHalfScored,
+      firstHalfScoringSamples:metricSamples.firstHalfScored,
+      firstHalfConcedingSamples:metricSamples.firstHalfConceded,
+      secondHalfScoringSamples:metricSamples.secondHalfScored,
+      secondHalfConcedingSamples:metricSamples.secondHalfConceded,
+    };
   };
 
   const overall=summarize(values);
