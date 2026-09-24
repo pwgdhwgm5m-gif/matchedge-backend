@@ -1,5 +1,16 @@
 const sourcePolicy = require('./sourcePolicyService');
 
+const OFFICIAL_VISIBLE_COMPETITION_KEYS = new Set([
+  'england-premier-league','spain-la-liga','italy-serie-a','germany-bundesliga','france-ligue-1','turkey-super-lig',
+  'portugal-primeira-liga','netherlands-eredivisie','belgium-pro-league','greece-super-league','scotland-premiership',
+  'czechia-first-league','poland-ekstraklasa','austria-bundesliga','switzerland-super-league','denmark-superliga',
+  'norway-eliteserien','sweden-allsvenskan','romania-superliga','croatia-hnl','serbia-superliga','ukraine-premier-league',
+  'russia-premier-league','hungary-nb-i','finland-veikkausliiga','ireland-premier-division',
+  'usa-mls','japan-j1-league','south-korea-k-league-1','china-super-league','australia-a-league-men',
+  'uefa-champions-league','uefa-europa-league','uefa-conference-league','uefa-super-cup','uefa-nations-league',
+  'england-fa-cup'
+]);
+
 function makeCompetition(
   canonicalCompetitionKey,
   displayName,
@@ -26,10 +37,10 @@ function makeCompetition(
     (mappingStatus === 'unverified' ? 'unverified' : 'not-observed');
   const resultCoverage = coverage.resultCoverage ||
     (mappingStatus === 'unverified' ? 'unverified' : 'not-observed');
-  const visibleInCompetitionFilter = coverage.visibleInCompetitionFilter ??
-    (mappingStatus === 'verified' && homePageRank < 99);
-  const eligibleForHomePriority = coverage.eligibleForHomePriority ??
-    (mappingStatus === 'verified' && homePageRank < 99);
+  const visibleInCompetitionFilter = OFFICIAL_VISIBLE_COMPETITION_KEYS.has(canonicalCompetitionKey) &&
+    (coverage.visibleInCompetitionFilter ?? (mappingStatus === 'verified'));
+  const eligibleForHomePriority = OFFICIAL_VISIBLE_COMPETITION_KEYS.has(canonicalCompetitionKey) &&
+    (coverage.eligibleForHomePriority ?? (mappingStatus === 'verified'));
   return Object.freeze({
     canonicalCompetitionKey,
     displayName,
