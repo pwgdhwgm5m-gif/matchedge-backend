@@ -164,7 +164,12 @@ const COMPETITIONS = Object.freeze([
   makeCompetition('australia-a-league-men', 'Australia A-League Men', 'Australia', 'league', 2, 4,
     { oddsApi: 'soccer_australia_aleague' },
     ['A-League Men', 'A-League', 'Australian A-League'], 'verified',
-    { fixtureCoverage: 'fixture-producing', resultCoverage: 'not-observed' }),
+    {
+      fixtureCoverage: 'observed-intermittently',
+      resultCoverage: 'not-observed',
+      visibleInCompetitionFilter: true,
+      eligibleForHomePriority: false
+    }),
 
   // UEFA stages resolve to their parent competition, never to a fake league.
   makeCompetition('uefa-champions-league', 'UEFA Champions League', 'Europe', 'continental', 1, 2,
