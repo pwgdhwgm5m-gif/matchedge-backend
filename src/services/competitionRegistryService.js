@@ -103,7 +103,8 @@ const COMPETITIONS = Object.freeze([
     ['Scottish Premiership', 'Scottish Premier League', 'Scotland Premiership']),
   makeCompetition('czechia-first-league', 'Czechia First League', 'Czechia', 'league', 2, 3,
     { sportsdb: '4631' },
-    ['Czech Republic First League', 'Czech First League']),
+    ['Czech Republic First League', 'Czech First League'],
+    'verified', { fixtureCoverage: 'fixture-producing' }),
   makeCompetition('poland-ekstraklasa', 'Poland Ekstraklasa', 'Poland', 'league', 2, 3,
     { sportsdb: '4422', oddsApi: 'soccer_poland_ekstraklasa' },
     ['Ekstraklasa', 'Polish Ekstraklasa']),
@@ -276,7 +277,7 @@ const COMPETITIONS = Object.freeze([
     ['Ukrainian Cup', 'Ukraine Cup']),
   makeCompetition('russia-cup', 'Russian Cup', 'Russia', 'domestic-cup', 2, 5,
     { sportsdb: '5193' }, ['Russian Football Cup'],
-    'verified', { fixtureCoverage: 'not-observed' }),
+    'verified', { fixtureCoverage: 'fixture-producing' }),
 
   // America / Asia / Oceania cups and continental competitions.
   makeCompetition('usa-us-open-cup', 'US Open Cup', 'United States', 'domestic-cup', 2, 5,
@@ -294,7 +295,7 @@ const COMPETITIONS = Object.freeze([
     ['J.League Cup', 'J League Cup', 'YBC Levain Cup']),
   makeCompetition('south-korea-korea-cup', 'South Korea Korea Cup', 'South Korea', 'domestic-cup', 2, 5,
     { sportsdb: '5635' }, ['Korea Cup', 'Korean FA Cup'],
-    'verified', { fixtureCoverage: 'not-observed' }),
+    'verified', { fixtureCoverage: 'fixture-producing' }),
   makeCompetition('china-fa-cup', 'China Chinese FA Cup', 'China', 'domestic-cup', 2, 5,
     { sportsdb: '5525' }, ['Chinese FA Cup', 'China FA Cup'],
     'verified', { fixtureCoverage: 'fixture-producing' }),
