@@ -101,9 +101,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         : cache.getOrFetch(`h2h:${fixtureId}`, config.cache.ttlStatic, () =>
             footballApi.getH2H(home, away)
           ),
-      config.oddsApi.key
-        ? cache.getOrFetch(`odds:${sportKey || 'soccer_epl'}`, config.cache.ttlStatic, () => oddsApi.getOddsForLeague(sportKey || 'soccer_epl'))
-        : Promise.resolve({ok:false,error:'odds_disabled'}),
+      // BSD is the default market source. Do not spend The Odds API credits
+      // during normal analysis; the free 500-credit plan is reserved for a
+      // future explicit/on-demand fallback path.
+      Promise.resolve({ok:false,error:'the_odds_api_reserved'}),
       config.apiFootball.sources.length && !useOwnSource
         ? cache.getOrFetch(`injuries:${fixtureId}`, config.cache.ttlStatic, () => footballApi.getInjuries(fixtureId))
         : Promise.resolve({ok:false,error:'injuries_unavailable'}),
@@ -612,8 +613,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
     : null;
-  // Bookmaker pricing is independent from the SportMonks league-data subscription.
-  // The Odds API is the primary verified price source for every league it covers.
+  // The Odds API is intentionally not queried by normal analysis. BSD consensus
+  // is the market anchor across competitions; missing BSD odds stay missing rather
+  // than silently consuming a scarce external credit or fabricating a price.
   const primaryMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
