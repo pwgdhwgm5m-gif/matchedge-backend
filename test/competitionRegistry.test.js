@@ -67,6 +67,28 @@ test('the exact Trendyol Süper Lig provider label resolves to Turkey Super Lig'
   }
 });
 
+test('BSD names resolve across the visible league registry before fixture filtering', () => {
+  const visible = registry.getCompetitionRegistry().filter(item => item.visibleInCompetitionFilter);
+  for (const competition of visible) {
+    if (competition.providerIds.sportmonks) continue;
+    const match = registry.decorateMatch({
+      fixtureId: 'bsd-fixture', leagueId: 'unmapped-bsd-id',
+      league: competition.aliases[0], leagueCountry: competition.country,
+      homeTeam: 'Home', awayTeam: 'Away'
+    }, 'bsd');
+    assert.equal(match.canonicalCompetitionKey, competition.canonicalCompetitionKey, competition.displayName);
+    assert.equal(match.visibleInCompetitionFilter, true, competition.displayName);
+  }
+  const eerste = registry.decorateMatch({
+    fixtureId: 'bsd-dordrecht-almere', leagueId: 'unmapped-bsd-id',
+    league: 'Eerste Divisie', leagueCountry: 'Netherlands',
+    homeTeam: 'FC Dordrecht', awayTeam: 'Almere City'
+  }, 'bsd');
+  assert.equal(eerste.canonicalCompetitionKey, 'netherlands-eerste-divisie');
+  assert.equal(eerste.visibleInCompetitionFilter, true);
+  assert.equal(registry.resolveCompetition({provider:'bsd', leagueId:'unknown', leagueName:'Eerste Divisie', leagueCountry:'Belgium'}), null);
+});
+
 test('coverage metadata separates mapping, fixture, result, filter and home states', () => {
   const china = registry.resolveCompetition({ provider: 'bsd', leagueId: '52' });
   assert.equal(china.mappingStatus, 'verified');

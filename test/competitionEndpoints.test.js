@@ -74,6 +74,28 @@ test('fixture endpoint deduplicates verified cross-provider cup rows', async () 
   }
 });
 
+test('fixture endpoint includes a BSD Eerste Divisie match with an unmapped numeric league ID', async () => {
+  const originalGetOrFetch = cache.getOrFetch;
+  try {
+    cache.getOrFetch = async key => key.startsWith('bsd:canonical-results:')
+      ? {ok: true, matches: [{
+          fixtureId: 'bsd-dordrecht-almere', bsdEventId: 'bsd-dordrecht-almere',
+          leagueId: 'provider-league-id', league: 'Eerste Divisie', leagueCountry: 'Netherlands',
+          homeTeam: 'FC Dordrecht', awayTeam: 'Almere City', date: '2026-09-25T19:00:00Z'
+        }]}
+      : {ok: false, fixtures: [], matches: []};
+    const response = responseCapture();
+    await routeHandler(matchesRouter)({query: {date: '2026-09-25'}}, response);
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.body.matches.length, 1);
+    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'netherlands-eerste-divisie');
+    assert.equal(response.body.matches[0].visibleInCompetitionFilter, true);
+    assert.equal(response.body.matches[0].canonicalProvider, 'bsd');
+  } finally {
+    cache.getOrFetch = originalGetOrFetch;
+  }
+});
+
 test('fixture endpoint transforms a verified SportsDB event and rejects an ID/name mismatch', async () => {
   const originalGetOrFetch = cache.getOrFetch;
   const events = [

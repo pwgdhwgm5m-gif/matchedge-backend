@@ -97,7 +97,9 @@ async function getLeagueRegistry(){
   for(const l of extractList(r.data)){
     const id=String(pickField(l,['id','league_id'])||'');
     const name=String(pickField(l,['name','league_name','title'])||'').trim();
-    if(id&&name)map[id]={id,name,country:pickField(l,['country.name','country_name','country'])||'',raw:l};
+    const rawCountry=pickField(l,['country.name','country_name','country']);
+    const country=typeof rawCountry==='object' ? teamValue(rawCountry) : rawCountry;
+    if(id&&name)map[id]={id,name,country:country||'',raw:l};
   }
   return {ok:true,map};
 }

@@ -2,7 +2,7 @@ const sourcePolicy = require('./sourcePolicyService');
 
 const OFFICIAL_VISIBLE_COMPETITION_KEYS = new Set([
   'england-premier-league','spain-la-liga','italy-serie-a','germany-bundesliga','france-ligue-1','turkey-super-lig',
-  'portugal-primeira-liga','netherlands-eredivisie','belgium-pro-league','greece-super-league','scotland-premiership',
+  'portugal-primeira-liga','netherlands-eredivisie','netherlands-eerste-divisie','belgium-pro-league','greece-super-league','scotland-premiership',
   'czechia-first-league','poland-ekstraklasa','austria-bundesliga','switzerland-super-league','denmark-superliga',
   'norway-eliteserien','sweden-allsvenskan','romania-superliga','croatia-hnl','serbia-superliga','ukraine-premier-league',
   'russia-premier-league','hungary-nb-i','finland-veikkausliiga','ireland-premier-division',
@@ -105,6 +105,9 @@ const COMPETITIONS = Object.freeze([
     { sportsdb: '4337', oddsApi: 'soccer_netherlands_eredivisie' },
     ['Eredivisie', 'Dutch Eredivisie', 'Netherlands Eredivisie'],
     'verified', { fixtureCoverage: 'fixture-producing' }),
+  makeCompetition('netherlands-eerste-divisie', 'Netherlands Eerste Divisie', 'Netherlands', 'league', 2, 3,
+    {}, ['Eerste Divisie', 'Dutch Eerste Divisie', 'Keuken Kampioen Divisie', 'Netherlands Eerste Divisie'],
+    'unverified', { visibleInCompetitionFilter: true, eligibleForHomePriority: false }),
   makeCompetition('belgium-pro-league', 'Belgium Pro League', 'Belgium', 'league', 2, 3,
     { sportsdb: '4338', oddsApi: 'soccer_belgium_first_div' },
     ['Pro League', 'Belgian Pro League', 'Belgian First Division A'],
@@ -352,6 +355,7 @@ const COMPETITIONS = Object.freeze([
 const BY_KEY = new Map(COMPETITIONS.map(item => [item.canonicalCompetitionKey, item]));
 const BY_ALIAS = new Map();
 const BY_PROVIDER_ID = new Map();
+const AMBIGUOUS_ALIAS = Symbol('ambiguous competition alias');
 
 function normalizeCompetitionName(value) {
   let key = String(value || '').trim().toLowerCase()
@@ -364,6 +368,14 @@ function normalizeCompetitionName(value) {
     }
   }
   return key;
+}
+
+function normalizeCountry(value) {
+  const name = normalizeCompetitionName(value);
+  return ({thenetherlands:'netherlands', holland:'netherlands', usa:'unitedstates',
+    unitedstatesofamerica:'unitedstates', turkiye:'turkey', czechrepublic:'czechia',
+    republicofkorea:'southkorea', korea:'southkorea', uk:'england',
+    unitedkingdom:'england'})[name] || name;
 }
 
 function providerKind(value) {
@@ -385,7 +397,8 @@ function idValues(value) {
 for (const competition of COMPETITIONS) {
   for (const alias of competition.aliases) {
     const key = normalizeCompetitionName(alias);
-    if (key && !BY_ALIAS.has(key)) BY_ALIAS.set(key, competition);
+    if (key && BY_ALIAS.has(key) && BY_ALIAS.get(key) !== competition) BY_ALIAS.set(key, AMBIGUOUS_ALIAS);
+    else if (key && !BY_ALIAS.has(key)) BY_ALIAS.set(key, competition);
   }
   for (const [provider, value] of Object.entries(competition.providerIds)) {
     for (const id of idValues(value)) {
@@ -407,6 +420,9 @@ function resolveCompetition({
   leagueName,
   league,
   displayName,
+  leagueCountry,
+  competitionCountry,
+  country,
   providerIds
 } = {}) {
   if (canonicalCompetitionKey && BY_KEY.has(String(canonicalCompetitionKey))) {
@@ -424,7 +440,14 @@ function resolveCompetition({
   }
 
   const name = leagueName || league || displayName;
-  return BY_ALIAS.get(normalizeCompetitionName(name)) || null;
+  const hit = BY_ALIAS.get(normalizeCompetitionName(name));
+  if (!hit || hit === AMBIGUOUS_ALIAS) return null;
+  const suppliedCountry = normalizeCountry(leagueCountry || competitionCountry || country);
+  const mappedCountry = normalizeCountry(hit.country);
+  // BSD league IDs are not registered for every competition. The league
+  // registry name is a valid fallback only when its country also agrees.
+  if (suppliedCountry && suppliedCountry !== mappedCountry) return null;
+  return hit;
 }
 
 function decorateMatch(match, provider) {
@@ -439,6 +462,8 @@ function decorateMatch(match, provider) {
     sportKey: match.sportKey,
     leagueName: match.leagueName || match.league,
     displayName: match.displayName,
+    leagueCountry: match.leagueCountry,
+    competitionCountry: match.competitionCountry,
     providerIds: match.providerIds
   });
   const rawName = String(match.displayName || match.leagueName || match.league || '').trim();
