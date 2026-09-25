@@ -155,6 +155,7 @@ function startPrecomputeCron() {
 }
 
 function startOddsSnapshotCron() {
+  if (!config.oddsSnapshotEnabled) { console.log('[odds-snapshot] DEVRE DISI: otomatik The Odds API harcamasi kapali.'); return; }
   if (!config.oddsApi.key) { console.log('[odds-snapshot] DEVRE DISI: ODDS_API_KEY yok.'); return; }
   cron.schedule(config.oddsSnapshotCron, async () => {
     for (const sportKey of config.trackedLeagues) {
