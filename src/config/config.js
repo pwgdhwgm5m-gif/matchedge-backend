@@ -65,6 +65,11 @@ module.exports = {
     baseUrl: 'https://api.the-odds-api.com/v4',
   },
 
+  fiveDollarFootball: {
+    key: process.env.FIVE_DOLLAR_FOOTBALL_API_KEY || '',
+    baseUrl: 'https://api.5dollarfootballapi.com/v1',
+  },
+
   sportsDb: {
     key: process.env.THESPORTSDB_KEY || '3',
     baseUrl: 'https://www.thesportsdb.com/api/v1/json',
@@ -137,6 +142,7 @@ module.exports = {
   // Oran snapshot cron ifadesi. Kota tuketimini kontrol altinda tutmak icin
   // varsayilan 3 saatte bir (gunde 8 kez x lig sayisi kadar istek).
   oddsSnapshotCron: process.env.ODDS_SNAPSHOT_CRON || '0 */3 * * *',
+  oddsSnapshotEnabled: String(process.env.ODDS_SNAPSHOT_ENABLED || 'false').toLowerCase() === 'true',
 
   // Onden hesaplama (precompute) turu basina islenecek maksimum mac sayisi.
   // computeFullAnalysis mac basina 4-5 API-Football istegi yapiyor, bu yuzden
