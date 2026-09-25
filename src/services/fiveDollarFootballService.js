@@ -39,7 +39,7 @@ async function getMatchOdds(homeName, awayName, kickoff) {
     try {
       const response = await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`, {
         headers: headers(),
-        params: { start_time:start, end_time:start+86400, include:'odds' },
+        params: { start_time:start, end_time:start+86400 },
         timeout: 3500,
       });
       rows = { data:Array.isArray(response.data?.data)?response.data.data:[], expires:Date.now()+TTL_MS };
@@ -53,7 +53,26 @@ async function getMatchOdds(homeName, awayName, kickoff) {
     }
   }
   const fixture = rows.data.find(f => teamNamesMatch(f.teams?.home?.name,homeName) && teamNamesMatch(f.teams?.away?.name,awayName));
-  return normalizeFixture(fixture,homeName,awayName);
+  if (!fixture?.id) return null;
+  const oddsKey = `five-dollar-odds:${fixture.id}`;
+  let oddsRow = memory.get(oddsKey);
+  if (!oddsRow || oddsRow.expires < Date.now()) {
+    try {
+      const response = await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixture.id}/odds`, {
+        headers: headers(), params: { bookmakers:'bet365' }, timeout: 3500,
+      });
+      oddsRow = { data:response.data?.data || null, expires:Date.now()+TTL_MS };
+      memory.set(oddsKey, oddsRow);
+    } catch (e) {
+      const status=e.response?.status;
+      if (status===429) console.warn('[5dollar] rate limit reached; odds fallback skipped');
+      else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; odds fallback skipped');
+      else console.warn('[5dollar] odds request failed; fallback skipped');
+      return null;
+    }
+  }
+  const bet365 = oddsRow.data?.bookmakers?.find(b => String(b.slug||'').toLowerCase()==='bet365') || oddsRow.data?.bookmakers?.[0];
+  return normalizeFixture({...fixture, odds:bet365?.odds || {}},homeName,awayName);
 }
 
 module.exports = { enabled, getMatchOdds };
