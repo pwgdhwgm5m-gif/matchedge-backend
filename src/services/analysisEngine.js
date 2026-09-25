@@ -14,6 +14,7 @@ const footballDataOdds = require('./footballDataUpcomingOddsService');
 const sportmonks = require('./sportmonksService');
 const sourcePolicy = require('./sourcePolicyService');
 const bsd = require('./bsdService');
+const fiveDollarFootball = require('./fiveDollarFootballService');
 const powerRating = require('./powerRatingService');
 const predictionLedger = require('./predictionLedgerService');
 const marketEvidenceService = require('./marketEvidenceService');
@@ -659,18 +660,22 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ]);
     if (extended?.ok) extendedOddsBoard=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
   }
-  // Football-Data is an additive, fail-open fallback. It is used only when
-  // the existing odds provider has no match and both team names match exactly
-  // after normalization. Any fetch/rate-limit/parse failure returns null.
-  const footballDataMatchOdds = (!primaryMatchOdds && homeTeamName && awayTeamName)
-    ? await footballDataOdds.getMatchOdds(homeTeamName, awayTeamName)
-    : null;
-  const matchOdds = primaryMatchOdds || footballDataMatchOdds;
-  // BSD free odds are a multi-bookmaker consensus, not an executable quote.
-  // Prefer a fresh complete consensus as the broad 1X2 market anchor, while
-  // retaining The Odds API bookmaker rows for Value/EV and displayed prices.
+  // BSD remains the first market source. Only when BSD has no fresh complete
+  // 1X2 consensus do we spend one cached 5DollarFootball day-window request.
+  // The response supplies an executable Bet365 quote; failures and plan gaps
+  // are fail-open and remain null (never fabricated).
   const bsdAnchorOdds = bsdConsensus?.fresh && bsdConsensus?.h2h?.home && bsdConsensus?.h2h?.draw && bsdConsensus?.h2h?.away
     ? bsdConsensus.h2h : null;
+  const fiveDollarOdds = (!bsdAnchorOdds && homeTeamName && awayTeamName)
+    ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
+    : null;
+  if (!marketOddsBoard && fiveDollarOdds?.marketBoard) marketOddsBoard = fiveDollarOdds.marketBoard;
+
+  // Football-Data remains the final additive odds fallback.
+  const footballDataMatchOdds = (!primaryMatchOdds && !fiveDollarOdds?.matchOdds && homeTeamName && awayTeamName)
+    ? await footballDataOdds.getMatchOdds(homeTeamName, awayTeamName)
+    : null;
+  const matchOdds = primaryMatchOdds || fiveDollarOdds?.matchOdds || footballDataMatchOdds;
   const marketAnchorOdds = bsdAnchorOdds || matchOdds;
   const proportionalMarket = oddsApi.normalizeImpliedProbabilities(marketAnchorOdds);
   const shinMarket = oddsApi.shinImpliedProbabilities(marketAnchorOdds);
@@ -888,8 +893,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     odds: oddsResult.status === 'fulfilled' ? oddsResult.value : null,
     marketOdds: matchOdds,
     marketOddsBoard,
-    marketOddsSource: primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null),
-    marketAnchorSource: bsdAnchorOdds ? 'bsd-consensus' : (primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null)),
+    marketOddsSource: primaryMatchOdds ? 'the-odds-api' : (fiveDollarOdds?.matchOdds ? '5dollarfootball-bet365' : (footballDataMatchOdds ? 'football-data.co.uk' : null)),
+    marketAnchorSource: bsdAnchorOdds ? 'bsd-consensus' : (primaryMatchOdds ? 'the-odds-api' : (fiveDollarOdds?.matchOdds ? '5dollarfootball-bet365' : (footballDataMatchOdds ? 'football-data.co.uk' : null))),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
     bsdEvidence: {
