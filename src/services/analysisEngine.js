@@ -99,16 +99,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     await Promise.allSettled([
       useDerivedH2H
         ? Promise.resolve({ ok: true, skipped: true })
-        : cache.getOrFetch(`h2h:${fixtureId}`, config.cache.ttlStatic, () =>
-            footballApi.getH2H(home, away)
-          ),
+        : Promise.resolve({ok:false,error:'api_football_disabled'}),
       // BSD is the default market source. Do not spend The Odds API credits
       // during normal analysis; the free 500-credit plan is reserved for a
       // future explicit/on-demand fallback path.
       Promise.resolve({ok:false,error:'the_odds_api_reserved'}),
-      config.apiFootball.sources.length && !useOwnSource
-        ? cache.getOrFetch(`injuries:${fixtureId}`, config.cache.ttlStatic, () => footballApi.getInjuries(fixtureId))
-        : Promise.resolve({ok:false,error:'injuries_unavailable'}),
+      // API-Football is intentionally disabled: account/provider is blocked.
+      // Missing injury data stays unavailable rather than spending calls or inventing values.
+      Promise.resolve({ok:false,error:'api_football_disabled'}),
       cache.getOrFetch(homeFormCacheKey, config.cache.ttlStatic, homeFormFetcher),
       cache.getOrFetch(awayFormCacheKey, config.cache.ttlStatic, awayFormFetcher),
       cache.getOrFetch(standingsCacheKey, config.cache.ttlStatic, standingsFetcher),
