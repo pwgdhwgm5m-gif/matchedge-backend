@@ -4,6 +4,15 @@ const { teamNamesMatch } = require('../utils/textNormalize');
 
 const memory = new Map();
 const TTL_MS = 10 * 60 * 1000;
+const MISS_TTL_MS = 30 * 60 * 1000;
+const RATE_LIMIT_BACKOFF_MS = 60 * 60 * 1000;
+let blockedUntil = 0;
+
+function available() { return enabled() && Date.now() >= blockedUntil; }
+function rememberMiss(key) { memory.set(key, { data:null, miss:true, expires:Date.now()+MISS_TTL_MS }); }
+function backoff(status) {
+  if (status === 429) blockedUntil = Math.max(blockedUntil, Date.now()+RATE_LIMIT_BACKOFF_MS);
+}
 
 function enabled() { return Boolean(config.fiveDollarFootball?.key); }
 function headers() { return { Authorization: `Bearer ${config.fiveDollarFootball.key}` }; }
@@ -29,7 +38,7 @@ function normalizeFixture(f, homeName, awayName) {
 }
 
 async function getMatchOdds(homeName, awayName, kickoff) {
-  if (!enabled() || !homeName || !awayName || !kickoff) return null;
+  if (!available() || !homeName || !awayName || !kickoff) return null;
   const d = new Date(kickoff);
   if (Number.isNaN(d.getTime())) return null;
   const start = Math.floor(new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())).getTime()/1000);
@@ -46,14 +55,18 @@ async function getMatchOdds(homeName, awayName, kickoff) {
       memory.set(key, rows);
     } catch (e) {
       const status=e.response?.status;
+      backoff(status);
       if (status===429) console.warn('[5dollar] rate limit reached; fallback skipped');
       else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; fallback skipped');
       else console.warn('[5dollar] request failed; fallback skipped');
       return null;
     }
   }
+  const missKey = `five-dollar-miss:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`;
+  const knownMiss = memory.get(missKey);
+  if (knownMiss?.expires > Date.now()) return null;
   const fixture = rows.data.find(f => teamNamesMatch(f.teams?.home?.name,homeName) && teamNamesMatch(f.teams?.away?.name,awayName));
-  if (!fixture?.id) return null;
+  if (!fixture?.id) { rememberMiss(missKey); return null; }
   const oddsKey = `five-dollar-odds:${fixture.id}`;
   let oddsRow = memory.get(oddsKey);
   if (!oddsRow || oddsRow.expires < Date.now()) {
@@ -65,6 +78,7 @@ async function getMatchOdds(homeName, awayName, kickoff) {
       memory.set(oddsKey, oddsRow);
     } catch (e) {
       const status=e.response?.status;
+      backoff(status);
       if (status===429) console.warn('[5dollar] rate limit reached; odds fallback skipped');
       else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; odds fallback skipped');
       else console.warn('[5dollar] odds request failed; fallback skipped');
