@@ -158,7 +158,13 @@ router.get('/:fixtureId', async (req, res) => {
     league = sportsDb.getFotmobIdForTsdbLeague(tsdbLeagueId) || undefined;
   }
 
-  const precomputed = cache.get(`precomputed:${fixtureId}`);
+  // Internal diagnostics can explicitly bypass the precomputed response without
+  // changing normal user caching. This is intentionally environment-secret
+  // protected so public clients cannot force provider/API work.
+  const diagnosticFreshRequested = String(req.query.fresh || '').toLowerCase() === 'true';
+  const diagnosticToken = req.get('x-socceredge-diagnostic-token');
+  const diagnosticFreshAllowed = diagnosticFreshRequested && Boolean(process.env.DIAGNOSTIC_TOKEN) && diagnosticToken === process.env.DIAGNOSTIC_TOKEN;
+  const precomputed = diagnosticFreshAllowed ? null : cache.get(`precomputed:${fixtureId}`);
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
       try {
