@@ -224,8 +224,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
 
   const homeAdvantageMultiplier = stats.calculateTeamHomeAdvantageMultiplier(homeTeamFullSplit, LEAGUE_ADVANTAGE_RATIO);
 
-  const homeForm = homeAwaySplit.home;
-  const awayForm = homeAwaySplit.away;
+  // National-team schedules are sparse and venue splits can easily contain zero
+  // matches even when we have valid recent team history. Club leagues keep the
+  // venue-specific model; international competitions use overall recent form so
+  // missing away/home samples cannot masquerade as a 0.00 scoring rate.
+  const homeForm = isInternationalCompetition ? homeOverallHistory : homeAwaySplit.home;
+  const awayForm = isInternationalCompetition ? awayOverallHistory : homeAwaySplit.away;
 
   const homeAttackBase = homeForm.played > 0 ? homeForm.avgGoalsFor / LEAGUE_AVG_HOME_GOALS : 1.0;
   const homeDefenseWeakBase = homeForm.played > 0 ? homeForm.avgGoalsAgainst / LEAGUE_AVG_AWAY_GOALS : 1.0;
