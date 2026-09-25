@@ -46,26 +46,26 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const homeFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
     : useBsdPrimary
-      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(homeTeamName,15); return br.ok&&br.data?.response?.length ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff}) : br); }
+      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(homeTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,home)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff}) : br); }
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff})
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const awayFormFetcher = isSuperLig
     ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
     : useBsdPrimary
-      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(awayTeamName,15); return br.ok&&br.data?.response?.length ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff}) : br); }
+      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(awayTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,away)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff}) : br); }
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff})
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const homeFormCacheKey = isSuperLig
     ? `tff-form:${homeTeamName}`
-    : useBsdPrimary ? `bsd-form:v3:${homeTeamName}`
+    : useBsdPrimary ? `bsd-form:v4:${homeTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${homeTeamName}`
       : `form:${home}`;
   const awayFormCacheKey = isSuperLig
     ? `tff-form:${awayTeamName}`
-    : useBsdPrimary ? `bsd-form:v3:${awayTeamName}`
+    : useBsdPrimary ? `bsd-form:v4:${awayTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${awayTeamName}`
       : `form:${away}`;
