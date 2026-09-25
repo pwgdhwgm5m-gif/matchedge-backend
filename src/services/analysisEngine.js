@@ -35,6 +35,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const effectiveTsdbLeagueId = directTsdbLeagueId || (mappedTsdbLeagueId ? String(mappedTsdbLeagueId) : null);
   const isMappedLeague = Boolean(effectiveTsdbLeagueId && sportsDb.isWhitelistedLeague(effectiveTsdbLeagueId));
   const useOwnSource = isSuperLig || isMappedLeague;
+  const isInternationalCompetition = /nations league|world cup|euro|international/i.test(String(leagueName || ''));
 
   // API-Football (footballApiService) askida oldugu icin form verisi:
   // - Süper Lig -> TFF.org scraper
@@ -125,12 +126,26 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     away: allInjuries.filter(p => String(p.teamId) === String(away)),
   };
 
-  const homeFixtures = homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.ok
+  let homeFixtures = homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.ok
     ? homeFixturesResult.value.data?.response || []
     : [];
-  const awayFixtures = awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.ok
+  let awayFixtures = awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.ok
     ? awayFixturesResult.value.data?.response || []
     : [];
+
+  // National teams often have sparse competition-specific history. Never let
+  // an empty BSD/league window become a synthetic 0.00 rate. For international
+  // competitions, recover recent TEAM history from TheSportsDB's team endpoint
+  // (cross-competition by design: Nations League/qualifiers/friendlies), which
+  // is the appropriate recent-form evidence for a national side.
+  if (isInternationalCompetition && (!homeFixtures.length || !awayFixtures.length)) {
+    const [th, ta] = await Promise.all([
+      !homeFixtures.length ? sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null) : Promise.resolve(null),
+      !awayFixtures.length ? sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null) : Promise.resolve(null),
+    ]);
+    if (!homeFixtures.length && th?.ok && th.data?.response?.length) homeFixtures = th.data.response;
+    if (!awayFixtures.length && ta?.ok && ta.data?.response?.length) awayFixtures = ta.data.response;
+  }
 
   const homeTeamIdForStats = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
     ? homeFixturesResult.value.teamId
