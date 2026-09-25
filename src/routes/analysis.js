@@ -6,6 +6,7 @@ const sportsDb = require('../services/sportsDbService');
 const ledger = require('../services/predictionLedgerService');
 const sportmonks = require('../services/sportmonksService');
 const sourcePolicy = require('../services/sourcePolicyService');
+const competitionRegistry = require('../services/competitionRegistryService');
 const premiumLab = require('../services/premiumLabService');
 const { hasStrongEvidence } = require('../services/marketEvidenceService');
 const { requireAuth } = require('../middleware/authMiddleware');
@@ -137,9 +138,20 @@ router.get('/:fixtureId', async (req, res) => {
   res.removeHeader('ETag');
   const { fixtureId } = req.params;
   const {
-    home, away, season, sportKey,
+    home, away, season,
     homeTeamName, awayTeamName, leagueName, kickoff, tsdbLeagueId,
   } = req.query;
+  let { sportKey } = req.query;
+
+  // Never rely on every frontend surface to supply bookmaker routing.
+  // Resolve the canonical competition server-side and derive the verified
+  // odds key centrally. This fixes analysis-detail/deep-link requests too.
+  if (!sportKey) {
+    const competition = competitionRegistry.resolveCompetition({
+      leagueName, league: leagueName, leagueId: tsdbLeagueId
+    });
+    sportKey = sourcePolicy.oddsSportKeyForCompetition(competition?.canonicalCompetitionKey) || undefined;
+  }
 
   let { league } = req.query;
   if (!league && tsdbLeagueId) {
