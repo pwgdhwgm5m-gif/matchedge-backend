@@ -424,11 +424,17 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       Number.isFinite(ownAdvanced?.avgXgFor)&&Number.isFinite(oppAdvanced?.avgXgAgainst);
     const xgModel=xgReady?Math.max(.15,Math.min(4.8,(Number(ownAdvanced.avgXgFor)+Number(oppAdvanced.avgXgAgainst))/2)):null;
     const sample=Math.min(ownSample,oppSample),sampleStrength=Math.min(1,sample/8);
+    // Recent raw goals describe form; they are not the team's underlying strength.
+    // Structural power (Elo/persistent attack-defence/opponent context) is the
+    // backbone. Recent form is a bounded adjustment, with xG/chance quality as
+    // an independent evidence family when the provider sample is usable.
+    const recentFormWeight = .18 + .10 * sampleStrength;
+    const structuralWeight = .58 + .12 * (1 - sampleStrength);
     const components=[
-      {name:'venue-recent-form',value:matchupModel,weight:.45},
-      {name:'structural-power-context',value:structuralLambda,weight:.35+.10*sampleStrength},
+      {name:'structural-power-context',value:structuralLambda,weight:structuralWeight},
+      {name:'opponent-adjusted-recent-form',value:matchupModel,weight:recentFormWeight},
     ];
-    if(xgModel!=null) components.push({name:'chance-quality-xg',value:xgModel,weight:.20+.10*Math.min(1,Math.min(ownAdvanced.xgSample,oppAdvanced.xgSample)/7)});
+    if(xgModel!=null) components.push({name:'chance-quality-xg',value:xgModel,weight:.24+.08*Math.min(1,Math.min(ownAdvanced.xgSample,oppAdvanced.xgSample)/7)});
     const totalWeight=components.reduce((s,c)=>s+c.weight,0);
     let blended=components.reduce((s,c)=>s+c.value*c.weight,0)/totalWeight;
     // Genuine elite-v-weak mismatches keep a thicker scoring expectation instead
@@ -438,8 +444,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     if(mismatch>.55 && ownRate>leagueGoalBase*1.35 && oppConcede>leagueGoalBase*1.35) {
       blended += leagueGoalBase * .22 * ((mismatch-.55)/.45);
     }
-    const prior=matchupModel,evidence=Math.min(1,sample/8);
-    const lower=prior*(.72-.07*evidence), upper=prior*(1.48+.22*mismatch);
+    // Bounds are centered on structural power, not raw last-N goals. This stops
+    // a five-match scoring/conceding spike from defining the prediction while
+    // still allowing genuine strength mismatches to widen the ceiling.
+    const prior=structuralLambda,evidence=Math.min(1,sample/8);
+    const recentRatio=Math.max(.72,Math.min(1.28,matchupModel/Math.max(.35,structuralLambda)));
+    blended *= 1 + (recentRatio - 1) * (.22 + .13 * evidence);
+    const lower=prior*(.70-.05*evidence), upper=prior*(1.38+.22*mismatch);
     return +Math.max(lower,Math.min(upper,blended)).toFixed(2);
   };
   homeLambda=ensembleLambda(homeLambda,homeForm,awayForm,homeAdvanced,awayAdvanced,leagueHomeGoals,Math.max(0,strengthGap));
