@@ -4,6 +4,14 @@ const { teamNamesMatch } = require('../utils/textNormalize');
 
 const memory = new Map();
 const TTL_MS = 10 * 60 * 1000;
+const FAILURE_TTL_MS = 15 * 60 * 1000;
+let unavailableUntil = 0;
+
+function providerAvailable() { return Date.now() >= unavailableUntil; }
+function markUnavailable(status) {
+  if (status === 429) unavailableUntil = Date.now() + 60 * 60 * 1000;
+  else if (status === 401 || status === 403) unavailableUntil = Date.now() + FAILURE_TTL_MS;
+}
 
 function enabled() { return Boolean(config.fiveDollarFootball?.key); }
 function headers() { return { Authorization: `Bearer ${config.fiveDollarFootball.key}` }; }
@@ -29,7 +37,7 @@ function normalizeFixture(f, homeName, awayName) {
 }
 
 async function getMatchOdds(homeName, awayName, kickoff) {
-  if (!enabled() || !homeName || !awayName || !kickoff) return null;
+  if (!enabled() || !providerAvailable() || !homeName || !awayName || !kickoff) return null;
   const d = new Date(kickoff);
   if (Number.isNaN(d.getTime())) return null;
   const start = Math.floor(new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())).getTime()/1000);
@@ -46,6 +54,7 @@ async function getMatchOdds(homeName, awayName, kickoff) {
       memory.set(key, rows);
     } catch (e) {
       const status=e.response?.status;
+      markUnavailable(status);
       if (status===429) console.warn('[5dollar] rate limit reached; fallback skipped');
       else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; fallback skipped');
       else console.warn('[5dollar] request failed; fallback skipped');
@@ -65,6 +74,7 @@ async function getMatchOdds(homeName, awayName, kickoff) {
       memory.set(oddsKey, oddsRow);
     } catch (e) {
       const status=e.response?.status;
+      markUnavailable(status);
       if (status===429) console.warn('[5dollar] rate limit reached; odds fallback skipped');
       else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; odds fallback skipped');
       else console.warn('[5dollar] odds request failed; fallback skipped');
