@@ -134,19 +134,44 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? awayFixturesResult.value.data?.response || []
     : [];
 
-  // National teams often have sparse competition-specific history. Never let
-  // an empty BSD/league window become a synthetic 0.00 rate. For international
-  // competitions, recover recent TEAM history from TheSportsDB's team endpoint
-  // (cross-competition by design: Nations League/qualifiers/friendlies), which
-  // is the appropriate recent-form evidence for a national side.
+  // National-team schedules are cross-competition. BSD can return a non-empty
+  // raw list that still has zero usable matches for the requested team identity,
+  // so raw array length is not a sufficient fallback criterion. For international
+  // matches, always resolve TheSportsDB team history and prefer whichever verified
+  // source yields the larger usable completed-match sample.
   let internationalHomeTeamId = null, internationalAwayTeamId = null;
-  if (isInternationalCompetition && (!homeFixtures.length || !awayFixtures.length)) {
+  let homeHistorySource = homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value?.source || null;
+  let awayHistorySource = awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value?.source || null;
+
+  if (isInternationalCompetition) {
     const [th, ta] = await Promise.all([
-      !homeFixtures.length ? sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null) : Promise.resolve(null),
-      !awayFixtures.length ? sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null) : Promise.resolve(null),
+      sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null).catch(() => null),
+      sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null).catch(() => null),
     ]);
-    if (!homeFixtures.length && th?.ok && th.data?.response?.length) { homeFixtures = th.data.response; internationalHomeTeamId = th.teamId || null; }
-    if (!awayFixtures.length && ta?.ok && ta.data?.response?.length) { awayFixtures = ta.data.response; internationalAwayTeamId = ta.teamId || null; }
+
+    const currentHomeId = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
+      ? homeFixturesResult.value.teamId : home;
+    const currentAwayId = useOwnSource && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
+      ? awayFixturesResult.value.teamId : away;
+    const currentHomeUsable = stats.summarizeMatches(homeFixtures, currentHomeId)?.played || 0;
+    const currentAwayUsable = stats.summarizeMatches(awayFixtures, currentAwayId)?.played || 0;
+
+    if (th?.ok && th.data?.response?.length && th.teamId) {
+      const tsdbHomeUsable = stats.summarizeMatches(th.data.response, th.teamId)?.played || 0;
+      if (tsdbHomeUsable > currentHomeUsable) {
+        homeFixtures = th.data.response;
+        internationalHomeTeamId = th.teamId;
+        homeHistorySource = 'sportsdb-team-history';
+      }
+    }
+    if (ta?.ok && ta.data?.response?.length && ta.teamId) {
+      const tsdbAwayUsable = stats.summarizeMatches(ta.data.response, ta.teamId)?.played || 0;
+      if (tsdbAwayUsable > currentAwayUsable) {
+        awayFixtures = ta.data.response;
+        internationalAwayTeamId = ta.teamId;
+        awayHistorySource = 'sportsdb-team-history';
+      }
+    }
   }
 
   const homeTeamIdForStats = internationalHomeTeamId || (useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
@@ -895,6 +920,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         history: {
           home: homeOverallHistory.played,
           away: awayOverallHistory.played,
+          homeSource: homeHistorySource,
+          awaySource: awayHistorySource,
+          homeTeamId: homeTeamIdForStats || null,
+          awayTeamId: awayTeamIdForStats || null,
           halftimeHome: halfMarkets.evidence?.homeHTSamples || 0,
           halftimeAway: halfMarkets.evidence?.awayHTSamples || 0,
         },
