@@ -139,6 +139,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // matches, always resolve TheSportsDB team history and prefer whichever verified
   // source yields the larger usable completed-match sample.
   let internationalHomeTeamId = null, internationalAwayTeamId = null;
+  let internationalHomeHistoryAudit = null, internationalAwayHistoryAudit = null;
   let homeHistorySource = homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value?.source || null;
   let awayHistorySource = awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value?.source || null;
 
@@ -161,6 +162,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         homeFixtures = th.data.response;
         internationalHomeTeamId = th.teamId;
         homeHistorySource = 'sportsdb-team-history';
+        internationalHomeHistoryAudit = th.historyAudit || null;
       }
     }
     if (ta?.ok && ta.data?.response?.length && ta.teamId) {
@@ -169,6 +171,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         awayFixtures = ta.data.response;
         internationalAwayTeamId = ta.teamId;
         awayHistorySource = 'sportsdb-team-history';
+        internationalAwayHistoryAudit = ta.historyAudit || null;
       }
     }
   }
@@ -929,6 +932,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
           awayTeamId: awayTeamIdForStats || null,
           halftimeHome: halfMarkets.evidence?.homeHTSamples || 0,
           halftimeAway: halfMarkets.evidence?.awayHTSamples || 0,
+          selectedHistoryAudit: { home: internationalHomeHistoryAudit, away: internationalAwayHistoryAudit },
         },
       },
       bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
