@@ -131,6 +131,30 @@ router.post('/v4-decisions',requireAuth,async(req,res)=>{
 });
 router.get('/model/v4-performance',async(req,res)=>{try{res.json({activation:await ledger.v4ActivationStatus(),rows:await ledger.v4CrossCheckPerformance()})}catch(e){res.status(500).json({error:'v4_performance_unavailable'})}});
 router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.reportCard(req.params.fixtureId))}catch(e){res.status(500).json({error:'report_card_unavailable'})}});
+router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
+  const Prediction=require('../models/PredictionSnapshot');
+  const fixtureId=String(req.params.fixtureId);
+  const row=await Prediction.findOne({fixtureId,kickoff:{$lte:new Date()}}).sort({capturedAt:-1}).lean();
+  if(!row)return res.status(404).json({available:false,error:'prematch_snapshot_not_found'});
+  const p=row.probabilities||{}, raw=row.rawProbabilities||{}, board=row.marketBoardSnapshot||{};
+  const first=(...v)=>v.find(x=>x!==undefined&&x!==null);
+  const matchProbabilities={
+    homeWinProbability:first(p.homeWinProbability,p.home,p.homeWin,raw.homeWinProbability,raw.home),
+    drawProbability:first(p.drawProbability,p.draw,raw.drawProbability,raw.draw),
+    awayWinProbability:first(p.awayWinProbability,p.away,p.awayWin,raw.awayWinProbability,raw.away)
+  };
+  const all=Array.isArray(board.allMarkets)?board.allMarkets:[];
+  const market=(keys)=>{const x=all.find(m=>keys.includes(m.key)||keys.includes(m.market));return x?.probability};
+  const marketProbabilities={
+    over25GoalsPercent:first(p.over25GoalsPercent,p.over25,p.over2_5,market(['over25','over_2_5'])),
+    bttsPercent:first(p.bttsPercent,p.bttsYes,p.btts_yes,market(['bttsYes','btts_yes']))
+  };
+  res.json({available:true,fixtureId,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,
+    capturedAt:row.capturedAt,kickoff:row.kickoff,matchProbabilities,marketProbabilities,
+    bttsDirection:row.bttsDirection||null,dataQualityScore:row.dataQualityScore,
+    modelDiagnostics:{lambdas:{finalHome:row.homeLambda,finalAway:row.awayLambda}}});
+}catch(e){res.status(500).json({available:false,error:'prematch_snapshot_unavailable'})}});
+
 router.get('/:fixtureId', async (req, res) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
   res.set('Pragma', 'no-cache');
