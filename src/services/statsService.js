@@ -25,14 +25,13 @@ function summarizeMatches(matches, teamId) {
     else losses++;
   });
 
-  const denominator = played || 1;
   return {
     played,
     wins,
     draws,
     losses,
-    avgGoalsFor: +(goalsFor / denominator).toFixed(2),
-    avgGoalsAgainst: +(goalsAgainst / denominator).toFixed(2),
+    avgGoalsFor: played ? +(goalsFor / played).toFixed(2) : null,
+    avgGoalsAgainst: played ? +(goalsAgainst / played).toFixed(2) : null,
   };
 }
 

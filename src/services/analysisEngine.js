@@ -138,21 +138,22 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // competitions, recover recent TEAM history from TheSportsDB's team endpoint
   // (cross-competition by design: Nations League/qualifiers/friendlies), which
   // is the appropriate recent-form evidence for a national side.
+  let internationalHomeTeamId = null, internationalAwayTeamId = null;
   if (isInternationalCompetition && (!homeFixtures.length || !awayFixtures.length)) {
     const [th, ta] = await Promise.all([
       !homeFixtures.length ? sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null) : Promise.resolve(null),
       !awayFixtures.length ? sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null) : Promise.resolve(null),
     ]);
-    if (!homeFixtures.length && th?.ok && th.data?.response?.length) homeFixtures = th.data.response;
-    if (!awayFixtures.length && ta?.ok && ta.data?.response?.length) awayFixtures = ta.data.response;
+    if (!homeFixtures.length && th?.ok && th.data?.response?.length) { homeFixtures = th.data.response; internationalHomeTeamId = th.teamId || null; }
+    if (!awayFixtures.length && ta?.ok && ta.data?.response?.length) { awayFixtures = ta.data.response; internationalAwayTeamId = ta.teamId || null; }
   }
 
-  const homeTeamIdForStats = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
+  const homeTeamIdForStats = internationalHomeTeamId || (useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
     ? homeFixturesResult.value.teamId
-    : home;
-  const awayTeamIdForStats = useOwnSource && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
+    : home);
+  const awayTeamIdForStats = internationalAwayTeamId || (useOwnSource && awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
     ? awayFixturesResult.value.teamId
-    : away;
+    : away);
   const homeOverallHistory = stats.summarizeMatches(homeFixtures, homeTeamIdForStats);
   const awayOverallHistory = stats.summarizeMatches(awayFixtures, awayTeamIdForStats);
   const homeFixtureHalfHistory = stats.calculateHalfHistory(homeFixtures, homeTeamIdForStats);
