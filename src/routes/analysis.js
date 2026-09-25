@@ -8,6 +8,7 @@ const sportmonks = require('../services/sportmonksService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
 const premiumLab = require('../services/premiumLabService');
+const prematchArchive = require('../services/prematchArchiveService');
 const { hasStrongEvidence } = require('../services/marketEvidenceService');
 const { requireAuth } = require('../middleware/authMiddleware');
 
@@ -134,11 +135,21 @@ router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.
 router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
   const Prediction=require('../models/PredictionSnapshot');
   const fixtureId=String(req.params.fixtureId);
-  const cached=cache.get(`precomputed:${fixtureId}`);
-  if(cached)return res.json({...cached,available:true,prematchSource:'precomputed-cache'});
   const homeTeam=String(req.query.homeTeamName||'').trim();
   const awayTeam=String(req.query.awayTeamName||'').trim();
-  const kickoffQuery=req.query.kickoff?new Date(req.query.kickoff):null;
+  const kickoff=req.query.kickoff||'';
+  // Read the exact response captured before kick-off. A provider may assign
+  // another event ID to the same match, so the archive also checks team pair
+  // and kickoff. Live values are never used to recreate this analysis.
+  try {
+    const archived=await prematchArchive.find({fixtureId,homeTeam,awayTeam,kickoff});
+    if(archived)return res.json({...archived.analysis,homeTeam:archived.homeTeam,awayTeam:archived.awayTeam,
+      league:archived.league,kickoff:archived.kickoff,capturedAt:archived.capturedAt,
+      available:true,prematchSource:archived.source});
+  }catch(e){console.warn('[prematch-archive/read]',e.message)}
+  const cached=cache.get(`precomputed:${fixtureId}`);
+  if(cached)return res.json({...cached,available:true,prematchSource:'precomputed-cache'});
+  const kickoffQuery=kickoff?new Date(kickoff):null;
   const validKickoff=kickoffQuery&&!Number.isNaN(kickoffQuery.getTime())?kickoffQuery:null;
   let row=await Prediction.findOne({fixtureId}).sort({capturedAt:-1}).lean();
   if(row&&row.kickoff&&row.capturedAt&&new Date(row.capturedAt)>new Date(row.kickoff))row=null;
@@ -152,12 +163,14 @@ router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
   if(row.prematchAnalysisArchive)return res.json({...row.prematchAnalysisArchive,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,kickoff:row.kickoff,capturedAt:row.capturedAt,available:true,prematchSource:'durable-prematch-archive'});
   const p=row.probabilities||{},raw=row.rawProbabilities||{},board=row.marketBoardSnapshot||{};
   const first=(...v)=>v.find(x=>x!==undefined&&x!==null);
-  const all=Array.isArray(board.allMarkets)?board.allMarkets:[];
+  const all=Array.isArray(board)?board:(Array.isArray(board.allMarkets)?board.allMarkets:[]);
   const market=keys=>{const x=all.find(m=>keys.includes(m.key)||keys.includes(m.market));return x&&x.probability};
   res.json({available:true,fixtureId,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,capturedAt:row.capturedAt,kickoff:row.kickoff,prematchSource:'prediction-snapshot',
     matchProbabilities:{homeWinProbability:first(p.homeWinProbability,p.home,p.homeWin,raw.homeWinProbability,raw.home),drawProbability:first(p.drawProbability,p.draw,raw.drawProbability,raw.draw),awayWinProbability:first(p.awayWinProbability,p.away,p.awayWin,raw.awayWinProbability,raw.away)},
     marketProbabilities:{over25GoalsPercent:first(p.over25GoalsPercent,p.over25,p.over2_5,market(['over25','over_2_5'])),bttsPercent:first(p.bttsPercent,p.bttsYes,p.btts_yes,market(['bttsYes','btts_yes']))},
-    bttsDirection:row.bttsDirection||null,dataQualityScore:row.dataQualityScore,modelDiagnostics:{lambdas:{finalHome:row.homeLambda,finalAway:row.awayLambda}}});
+    bttsDirection:row.bttsDirection||null,dataQualityScore:row.dataQualityScore,
+    marketBoard:{allMarkets:all},strongestSignal:row.strongestPick||null,
+    modelDiagnostics:{lambdas:{finalHome:row.homeLambda,finalAway:row.awayLambda}}});
 }catch(e){res.status(500).json({available:false,error:'prematch_snapshot_unavailable'})}});
 
 router.get('/:fixtureId', async (req, res) => {
@@ -196,6 +209,11 @@ router.get('/:fixtureId', async (req, res) => {
   const precomputed = diagnosticFreshAllowed ? null : cache.get(`precomputed:${fixtureId}`);
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
+      try {
+        await prematchArchive.capture(precomputed,{fixtureId,kickoff,league:leagueName,
+          homeTeam:homeTeamName,awayTeam:awayTeamName,
+          canonicalProvider:sourcePolicy.policy({leagueName,sportKey}).primary});
+      } catch(e) { console.warn('[prematch-archive/capture]',e.message); }
       try {
         const precomputedPolicy=sourcePolicy.policy({leagueName,sportKey});
         const canonicalProvider=precomputedPolicy.primary==='sportmonks'?'sportmonks':precomputedPolicy.primary==='bsd'?'bsd':'sportsdb';
@@ -346,6 +364,11 @@ router.get('/:fixtureId', async (req, res) => {
       }));
     }
     if (kickoff && homeTeamName && awayTeamName) {
+      try {
+        await prematchArchive.capture(result,{fixtureId,kickoff,league:leagueName,
+          homeTeam:homeTeamName,awayTeam:awayTeamName,
+          canonicalProvider:sm?.sportmonksId?'sportmonks':providerPolicy.primary});
+      } catch(e) { console.warn('[prematch-archive/capture]',e.message); }
       try {
         const canonicalProvider=sm?.sportmonksId?'sportmonks':providerPolicy.primary==='bsd'?'bsd':'sportsdb';
         const canonicalId=sm?.sportmonksId||fixtureId;

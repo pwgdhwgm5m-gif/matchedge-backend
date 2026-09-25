@@ -331,6 +331,8 @@ router.get('/:fixtureId', async (req, res) => {
 
   res.json({
     fixtureId,
+    kickoff: match.kickoff || match.date || null,
+    league: match.league || match.leagueName || null,
     canonicalCompetitionKey: match.canonicalCompetitionKey,
     displayName: match.displayName,
     competitionCountry: match.competitionCountry,
