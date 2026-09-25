@@ -645,8 +645,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const marketImpliedProbabilities = shinMarket || proportionalMarket;
   const divergence = oddsApi.marketDivergence(matchProbabilities,marketImpliedProbabilities);
   // Large unexplained disagreement lowers model weight rather than being advertised as automatic value.
-  const divergencePenalty = divergence?.material ? Math.min(.12,Math.abs(divergence.largestGap)/100*.35) : 0;
-  const v2ModelWeight = marketImpliedProbabilities ? Math.max(.43,Math.min(.78,.38 + .40*evidenceStrength-divergencePenalty)) : 1;
+  const divergencePenalty = divergence?.material ? Math.min(.18,Math.abs(divergence.largestGap)/100*.45) : 0;
+  const lowEvidenceMarketBlend = dataHealthScore < 50 || playedSample < 5;
+  const earnedModelWeight = lowEvidenceMarketBlend ? (.18 + .22 * evidenceStrength) : (.34 + .36 * evidenceStrength);
+  const v2ModelWeight = marketImpliedProbabilities ? Math.max(lowEvidenceMarketBlend ? .18 : .32, Math.min(lowEvidenceMarketBlend ? .42 : .72, earnedModelWeight - divergencePenalty)) : 1;
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
 
   const homeFirstHalf = isSuperLig
