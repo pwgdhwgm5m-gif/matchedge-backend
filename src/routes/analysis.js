@@ -134,36 +134,29 @@ router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.
 router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
   const Prediction=require('../models/PredictionSnapshot');
   const fixtureId=String(req.params.fixtureId);
-  // Fast path: this is the exact pre-kickoff object shown by the normal analysis page.
-  // Keep it available to the live page while the 6h precomputed cache is alive.
   const cached=cache.get(`precomputed:${fixtureId}`);
   if(cached)return res.json({...cached,available:true,prematchSource:'precomputed-cache'});
-  const homeTeam=String(req.query.homeTeamName||'').trim(), awayTeam=String(req.query.awayTeamName||'').trim();
+  const homeTeam=String(req.query.homeTeamName||'').trim();
+  const awayTeam=String(req.query.awayTeamName||'').trim();
   const kickoffQuery=req.query.kickoff?new Date(req.query.kickoff):null;
-  const validKickoff=kickoffQuery && !Number.isNaN(kickoffQuery.getTime()) ? kickoffQuery : null;
-  const esc=s=>s.replace(/[.*+?^$()|[\\]\\\\]/g,'\\\\  const fixtureId=String(req.params.fixtureId);
-  const row=await Prediction.findOne({fixtureId,kickoff:{$lte:new Date()}}).sort({capturedAt:-1}).lean();
-  if(!row)return res.status(404).json({available:false,error:'prematch_snapshot_not_found'});');
-  let row=await Prediction.findOne({fixtureId,$expr:{$lte:['$capturedAt','$kickoff']}}).sort({capturedAt:-1}).lean();
-  if(!row && homeTeam && awayTeam){
-    const q={homeTeam:new RegExp('^'+esc(homeTeam)+'
-  const p=row.probabilities||{}, raw=row.rawProbabilities||{}, board=row.marketBoardSnapshot||{};
+  const validKickoff=kickoffQuery&&!Number.isNaN(kickoffQuery.getTime())?kickoffQuery:null;
+  let row=await Prediction.findOne({fixtureId}).sort({capturedAt:-1}).lean();
+  if(row&&row.kickoff&&row.capturedAt&&new Date(row.capturedAt)>new Date(row.kickoff))row=null;
+  if(!row&&homeTeam&&awayTeam){
+    const q={homeTeam,awayTeam};
+    if(validKickoff)q.kickoff={$gte:new Date(validKickoff.getTime()-21600000),$lte:new Date(validKickoff.getTime()+21600000)};
+    const rows=await Prediction.find(q).sort({capturedAt:-1}).limit(10).lean();
+    row=rows.find(x=>!x.kickoff||!x.capturedAt||new Date(x.capturedAt)<=new Date(x.kickoff))||null;
+  }
+  if(!row)return res.status(404).json({available:false,error:'prematch_snapshot_not_found'});
+  const p=row.probabilities||{},raw=row.rawProbabilities||{},board=row.marketBoardSnapshot||{};
   const first=(...v)=>v.find(x=>x!==undefined&&x!==null);
-  const matchProbabilities={
-    homeWinProbability:first(p.homeWinProbability,p.home,p.homeWin,raw.homeWinProbability,raw.home),
-    drawProbability:first(p.drawProbability,p.draw,raw.drawProbability,raw.draw),
-    awayWinProbability:first(p.awayWinProbability,p.away,p.awayWin,raw.awayWinProbability,raw.away)
-  };
   const all=Array.isArray(board.allMarkets)?board.allMarkets:[];
-  const market=(keys)=>{const x=all.find(m=>keys.includes(m.key)||keys.includes(m.market));return x?.probability};
-  const marketProbabilities={
-    over25GoalsPercent:first(p.over25GoalsPercent,p.over25,p.over2_5,market(['over25','over_2_5'])),
-    bttsPercent:first(p.bttsPercent,p.bttsYes,p.btts_yes,market(['bttsYes','btts_yes']))
-  };
-  res.json({available:true,fixtureId,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,
-    capturedAt:row.capturedAt,kickoff:row.kickoff,matchProbabilities,marketProbabilities,
-    bttsDirection:row.bttsDirection||null,dataQualityScore:row.dataQualityScore,
-    modelDiagnostics:{lambdas:{finalHome:row.homeLambda,finalAway:row.awayLambda}}});
+  const market=keys=>{const x=all.find(m=>keys.includes(m.key)||keys.includes(m.market));return x&&x.probability};
+  res.json({available:true,fixtureId,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,capturedAt:row.capturedAt,kickoff:row.kickoff,prematchSource:'prediction-snapshot',
+    matchProbabilities:{homeWinProbability:first(p.homeWinProbability,p.home,p.homeWin,raw.homeWinProbability,raw.home),drawProbability:first(p.drawProbability,p.draw,raw.drawProbability,raw.draw),awayWinProbability:first(p.awayWinProbability,p.away,p.awayWin,raw.awayWinProbability,raw.away)},
+    marketProbabilities:{over25GoalsPercent:first(p.over25GoalsPercent,p.over25,p.over2_5,market(['over25','over_2_5'])),bttsPercent:first(p.bttsPercent,p.bttsYes,p.btts_yes,market(['bttsYes','btts_yes']))},
+    bttsDirection:row.bttsDirection||null,dataQualityScore:row.dataQualityScore,modelDiagnostics:{lambdas:{finalHome:row.homeLambda,finalAway:row.awayLambda}}});
 }catch(e){res.status(500).json({available:false,error:'prematch_snapshot_unavailable'})}});
 
 router.get('/:fixtureId', async (req, res) => {
