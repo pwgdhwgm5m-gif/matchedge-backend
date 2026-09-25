@@ -142,6 +142,7 @@ module.exports = {
   // Oran snapshot cron ifadesi. Kota tuketimini kontrol altinda tutmak icin
   // varsayilan 3 saatte bir (gunde 8 kez x lig sayisi kadar istek).
   oddsSnapshotCron: process.env.ODDS_SNAPSHOT_CRON || '0 */3 * * *',
+  oddsSnapshotEnabled: String(process.env.ODDS_SNAPSHOT_ENABLED || 'false').toLowerCase() === 'true',
 
   // Onden hesaplama (precompute) turu basina islenecek maksimum mac sayisi.
   // computeFullAnalysis mac basina 4-5 API-Football istegi yapiyor, bu yuzden
