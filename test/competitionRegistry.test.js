@@ -119,7 +119,11 @@ test('coverage metadata separates mapping, fixture, result, filter and home stat
     assert.equal(mapped.resultCoverage, 'not-observed');
   }
 
-  for (const key of ['uefa-nations-league', 'concacaf-nations-league', 'mexico-liga-mx']) {
+  const uefaNations = registry.getCompetitionRegistry().find(item => item.canonicalCompetitionKey === 'uefa-nations-league');
+  assert.equal(uefaNations.visibleInCompetitionFilter, true);
+  assert.equal(uefaNations.eligibleForHomePriority, true);
+
+  for (const key of ['concacaf-nations-league', 'mexico-liga-mx']) {
     const legacy = registry.getCompetitionRegistry().find(item => item.canonicalCompetitionKey === key);
     assert.ok(legacy);
     assert.equal(legacy.visibleInCompetitionFilter, false);
