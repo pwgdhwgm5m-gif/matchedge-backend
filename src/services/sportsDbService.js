@@ -496,7 +496,7 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
         return e.strStatus === 'FT' || e.intHomeScore !== null && e.intHomeScore !== undefined;
       });
       if (finishedEvents.length > 0) {
-        const lastEvents = finishedEvents.slice(-n);
+        const lastEvents = finishedEvents.slice(0, n);
         return {
           ok: true,
           data: { response: lastEvents.map(toAnalysisFixture) },
