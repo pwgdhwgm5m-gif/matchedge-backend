@@ -493,7 +493,15 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
     if (lastResult.ok) {
       const rawEvents = (lastResult.data && (lastResult.data.results || lastResult.data.events)) || [];
       const finishedEvents = rawEvents.filter(function (e) {
-        return e.strStatus === 'FT' || e.intHomeScore !== null && e.intHomeScore !== undefined;
+        const hasScore = e.intHomeScore !== null && e.intHomeScore !== undefined &&
+          e.intAwayScore !== null && e.intAwayScore !== undefined;
+        const belongsToTeam = String(e.idHomeTeam || '') === String(teamId) ||
+          String(e.idAwayTeam || '') === String(teamId);
+        return belongsToTeam && (e.strStatus === 'FT' || hasScore);
+      }).sort(function (a, b) {
+        const aTime = Date.parse(a.strTimestamp || a.dateEvent || '') || 0;
+        const bTime = Date.parse(b.strTimestamp || b.dateEvent || '') || 0;
+        return bTime - aTime;
       });
       if (finishedEvents.length > 0) {
         const lastEvents = finishedEvents.slice(0, n);
@@ -537,7 +545,11 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
     }
   }
 
-  const lastEvents = teamEvents.slice(-n);
+  const lastEvents = teamEvents.sort(function (a, b) {
+    const aTime = Date.parse(a.strTimestamp || a.dateEvent || '') || 0;
+    const bTime = Date.parse(b.strTimestamp || b.dateEvent || '') || 0;
+    return bTime - aTime;
+  }).slice(0, n);
 
   return {
     ok: true,
