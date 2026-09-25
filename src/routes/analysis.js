@@ -134,6 +134,10 @@ router.get('/:fixtureId/report-card',async(req,res)=>{try{res.json(await ledger.
 router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
   const Prediction=require('../models/PredictionSnapshot');
   const fixtureId=String(req.params.fixtureId);
+  // Fast path: this is the exact pre-kickoff object shown by the normal analysis page.
+  // Keep it available to the live page while the 6h precomputed cache is alive.
+  const cached=cache.get(`precomputed:${fixtureId}`);
+  if(cached)return res.json({...cached,available:true,prematchSource:'precomputed-cache'});
   const homeTeam=String(req.query.homeTeamName||'').trim(), awayTeam=String(req.query.awayTeamName||'').trim();
   const kickoffQuery=req.query.kickoff?new Date(req.query.kickoff):null;
   const validKickoff=kickoffQuery && !Number.isNaN(kickoffQuery.getTime()) ? kickoffQuery : null;
