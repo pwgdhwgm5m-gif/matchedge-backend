@@ -301,6 +301,7 @@ router.get('/:fixtureId', async (req, res) => {
         awayGF:form.away?.avgGoalsFor ?? null, awayGA:form.away?.avgGoalsAgainst ?? null,
         dataHealth:Number(result.premium?.dataHealth?.score ?? result.qualityDimensions?.historicalSampleCoverage?.score ?? 0),
         marketOddsSource:result.marketOddsSource||null, marketAnchorSource:result.marketAnchorSource||null,
+        selectedHistoryAudit:history.selectedHistoryAudit||null,
         responseSource:'realtime'
       }));
     }
