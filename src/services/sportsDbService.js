@@ -509,6 +509,19 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
           ok: true,
           data: { response: lastEvents.map(toAnalysisFixture) },
           teamId: teamId,
+          historyAudit: lastEvents.slice(0, 5).map(function (e) {
+            return {
+              eventId: e.idEvent || null,
+              date: e.strTimestamp || e.dateEvent || null,
+              homeTeam: e.strHomeTeam || null,
+              awayTeam: e.strAwayTeam || null,
+              homeTeamId: e.idHomeTeam || null,
+              awayTeamId: e.idAwayTeam || null,
+              homeScore: e.intHomeScore ?? null,
+              awayScore: e.intAwayScore ?? null,
+              league: e.strLeague || null,
+            };
+          }),
         };
       }
     }
