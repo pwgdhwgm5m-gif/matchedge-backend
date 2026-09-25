@@ -112,6 +112,17 @@ router.get('/:fixtureId', async (req, res) => {
     }
   }
 
+  if (!match) {
+    const bsdDirect = await quickBound(cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),{ok:false},2800);
+    if (bsdDirect.ok) {
+      const raw = bsdService.extractList(bsdDirect.data).find(e=>String(bsdService.getEventId(e))===String(fixtureId));
+      if (raw) {
+        match={...bsdService.eventToResultMatch(raw),canonicalProvider:'bsd',dataSource:'bsd',providerIds:{bsd:String(fixtureId)}};
+        fromCacheFlag=bsdDirect.fromCache;
+      }
+    }
+  }
+
   // A fixture can legitimately be absent from the provider's compact live/day
   // feeds (especially lower leagues/cups). Resolve the canonical event directly
   // before declaring it missing.
