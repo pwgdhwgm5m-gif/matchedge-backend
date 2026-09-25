@@ -149,6 +149,7 @@ router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
     row=rows.find(x=>!x.kickoff||!x.capturedAt||new Date(x.capturedAt)<=new Date(x.kickoff))||null;
   }
   if(!row)return res.status(404).json({available:false,error:'prematch_snapshot_not_found'});
+  if(row.prematchAnalysisArchive)return res.json({...row.prematchAnalysisArchive,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,kickoff:row.kickoff,capturedAt:row.capturedAt,available:true,prematchSource:'durable-prematch-archive'});
   const p=row.probabilities||{},raw=row.rawProbabilities||{},board=row.marketBoardSnapshot||{};
   const first=(...v)=>v.find(x=>x!==undefined&&x!==null);
   const all=Array.isArray(board.allMarkets)?board.allMarkets:[];
