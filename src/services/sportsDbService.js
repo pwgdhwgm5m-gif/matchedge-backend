@@ -447,8 +447,20 @@ function toAnalysisFixture(e) {
  * ID'ler degismedigi icin 30 gun cache'leniyor - premium kotasini
  * (20 istek/dk) bosa harcamamak icin onemli.
  */
-async function resolveTeamId(teamName) {
-  const cacheKey = `tsdb-teamid:${normalizeTeamName(teamName)}`;
+function isNationalTeamRecord(team) {
+  const league = String(team?.strLeague || '').toLowerCase();
+  const type = String(team?.strTeamType || team?.strSport || '').toLowerCase();
+  const country = String(team?.strCountry || '').toLowerCase();
+  return /national|international/.test(type) ||
+    /uefa nations|world cup|euro qualification|international/.test(league) ||
+    country === 'worldwide';
+}
+
+async function resolveTeamId(teamName, options) {
+  options = options || {};
+  // v3 intentionally invalidates the old 30-day cache whose permissive
+  // teams[0] fallback could bind a country name to a similarly named club.
+  const cacheKey = `tsdb-teamid:v3:${options.international ? 'national:' : 'club:'}${normalizeTeamName(teamName)}`;
   const result = await cache.getOrFetch(cacheKey, 60 * 60 * 24 * 30, async () => {
     const url = BASE_URL + '/' + API_KEY + '/searchteams.php?t=' + encodeURIComponent(teamName);
     const res = await fetchT(url, 8000);
@@ -456,8 +468,14 @@ async function resolveTeamId(teamName) {
     const teams = (res.data && res.data.teams) || [];
     if (!teams.length) return { ok: false };
     const normalized = normalizeTeamName(teamName);
-    const exact = teams.find(function (t) { return normalizeTeamName(t.strTeam) === normalized; });
-    return { ok: true, idTeam: (exact || teams[0]).idTeam };
+    const exact = teams.filter(function (t) { return normalizeTeamName(t.strTeam) === normalized; });
+    if (!exact.length) return { ok: false, error: 'team_identity_not_exact' };
+    const candidates = options.international ? exact.filter(isNationalTeamRecord) : exact;
+    if (!candidates.length) return { ok: false, error: 'team_identity_type_mismatch' };
+    // Ambiguous exact names are unsafe without provider identity metadata.
+    const ids = [...new Set(candidates.map(t => String(t.idTeam || '')).filter(Boolean))];
+    if (ids.length !== 1) return { ok: false, error: 'team_identity_ambiguous' };
+    return { ok: true, idTeam: ids[0] };
   });
   return result.ok ? result.idTeam : null;
 }
@@ -484,10 +502,10 @@ async function getTeamLastEvents(teamId) {
  * @param {string} teamName
  * @param {number|string} fotmobLeagueId
  */
-async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbLeagueIdOverride) {
+async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbLeagueIdOverride, options) {
   const n = count || 15;
 
-  const teamId = await resolveTeamId(teamName);
+  const teamId = await resolveTeamId(teamName, options);
   if (teamId) {
     const lastResult = await getTeamLastEvents(teamId);
     if (lastResult.ok) {
