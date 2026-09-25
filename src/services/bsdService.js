@@ -477,6 +477,24 @@ async function getResultMatchesForDate(dateStr) {
   return {ok:true,source:'bsd',matches,registryAvailable:leagueRegistry.ok};
 }
 
+async function getLiveResultMatches() {
+  const [live, leagueRegistry] = await Promise.all([getLiveFootballEvents(), getLeagueRegistry()]);
+  if (!live.ok) return {ok:false,error:live.error,matches:[]};
+  const registry = leagueRegistry.ok ? leagueRegistry.map : {};
+  const matches = [];
+  for (const event of extractList(live.data)) {
+    const leagueId = String(pickField(event,['league.id','league_id','competition.id','competition_id'])||'');
+    const league = await bsdCompetitionName(event,registry);
+    if (!league) continue;
+    const match = eventToResultMatch({...event,__soccerEdgeLeagueName:league});
+    match.leagueId = leagueId;
+    match.leagueCountry = String(registry[leagueId]?.country||'');
+    match.providerIds = {bsd:match.bsdEventId};
+    if (match.homeTeam && match.awayTeam) matches.push(match);
+  }
+  return {ok:true,matches};
+}
+
 // Settlement must not discard a final score just because the BSD league
 // registry has no entry for the competition (notably cup fixtures).
 async function getRawFinalMatchesForDate(dateStr){
@@ -705,4 +723,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, getLiveResultMatches, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };

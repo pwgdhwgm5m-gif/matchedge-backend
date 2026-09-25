@@ -18,14 +18,15 @@ const competitionRegistry = require('../services/competitionRegistryService');
  */
 router.get('/', async (req,res)=>{
   const date=req.query.date||new Date().toISOString().split('T')[0];
-  const [legacy,live,supplemental,oddsEvents,turkeySm,smDay,bsdDay]=await Promise.all([
+  const [legacy,live,supplemental,oddsEvents,turkeySm,smDay,bsdDay,bsdLive]=await Promise.all([
     cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date)),
     cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),
     cache.getOrFetch(`cup-fixtures:${date}`,config.cache.ttlStatic,()=>cupFixtures.getSupplementalMatches(date)),
     cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date)),
     cache.getOrFetch(`sportmonks:tr:600:${date}`,config.cache.ttlLive,()=>sportmonks.getLeagueFixturesByDate(date,600)),
     Promise.race([cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),new Promise(r=>setTimeout(()=>r({ok:false,error:'sportmonks_date_timeout'}),5000))]),
-    cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date))
+    cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date)),
+    cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches())
   ]);
   const candidates=[];
   const put=(m,provider)=>{
@@ -69,6 +70,15 @@ router.get('/', async (req,res)=>{
   for(const m of (bsdDay?.ok?bsdDay.matches:[])){
     if(sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))continue;
     put({...m,canonicalProvider:'bsd',providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}},'bsd');
+  }
+  // BSD's compact day feed and its live feed can contain different events.
+  // Include same-day live events in the fixture backbone without altering
+  // the live score/statistics pipeline itself.
+  for(const m of (bsdLive?.ok?bsdLive.matches:[])){
+    const kickoff = new Date(m.date || m.kickoff);
+    if (!Number.isFinite(kickoff.getTime()) || kickoff.toISOString().slice(0,10)!==date) continue;
+    if(sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))continue;
+    put(m,'bsd');
   }
 
   // SportMonks owns the six subscribed leagues and replaces matching fallback rows.

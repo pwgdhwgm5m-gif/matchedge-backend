@@ -30,7 +30,7 @@ router.get('/', async (req, res) => {
   const [tsdbLive,smLive,bsdLive]=await Promise.all([
     quickBound(cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),{ok:false,error:'live_lookup_timeout'}),
     quickBound(cache.getOrFetch('sportmonks:inplay',30,()=>sportmonks.getInplay()),{ok:false,error:'sportmonks_timeout'}),
-    quickBound(cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),{ok:false,error:'bsd_live_timeout'})
+    quickBound(cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches()),{ok:false,error:'bsd_live_timeout'})
   ]);
   const candidates=[];
   const addMatch=rawMatch=>{
@@ -48,8 +48,7 @@ router.get('/', async (req, res) => {
     }
   }
   if(bsdLive.ok){
-    for(const e of bsdService.extractList(bsdLive.data)){
-      const m=bsdService.eventToResultMatch(e);
+    for(const m of (bsdLive.matches||[])){
        if(m?.isLive)addMatch({...m,canonicalProvider:'bsd',providerIds:{bsd:String(m.bsdEventId||m.fixtureId)}});
     }
   }
@@ -62,8 +61,8 @@ router.get('/', async (req, res) => {
   }
   const matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{
     toleranceMs:6*60*60*1000
-  }).filter(match => match?.visibleInCompetitionFilter === true && match?.eligibleForHomePriority === true);
-  return res.json({matches,source:'canonical-live-merged',counts:{thesportsdb:tsdbLive.ok?(tsdbLive.data?.livescore||[]).length:0,sportmonks:smLive.ok?(smLive.fixtures||[]).filter(x=>x.isLive).length:0,bsd:bsdLive.ok?bsdService.extractList(bsdLive.data).length:0}});
+  }).filter(match => match?.visibleInCompetitionFilter === true);
+  return res.json({matches,source:'canonical-live-merged',counts:{thesportsdb:tsdbLive.ok?(tsdbLive.data?.livescore||[]).length:0,sportmonks:smLive.ok?(smLive.fixtures||[]).filter(x=>x.isLive).length:0,bsd:bsdLive.ok?(bsdLive.matches||[]).length:0}});
 });
 
 /**

@@ -96,6 +96,24 @@ test('fixture endpoint includes a BSD Eerste Divisie match with an unmapped nume
   }
 });
 
+test('fixture endpoint retains a BSD live match missing from its day feed', async () => {
+  const originalGetOrFetch = cache.getOrFetch;
+  try {
+    cache.getOrFetch = async key => key === 'bsd:fixture-live:canonical'
+      ? {ok:true,matches:[{
+          fixtureId:'bsd-live-only',bsdEventId:'bsd-live-only',league:'Keuken Kampioen Divisie',
+          leagueCountry:'Netherlands',leagueId:'live-league-id',
+          homeTeam:'FC Dordrecht',awayTeam:'Almere City',date:'2026-09-25T19:00:00Z',isLive:true
+        }]}
+      : {ok:false,fixtures:[],matches:[]};
+    const response=responseCapture();
+    await routeHandler(matchesRouter)({query:{date:'2026-09-25'}},response);
+    assert.equal(response.body.matches.length,1);
+    assert.equal(response.body.matches[0].canonicalCompetitionKey,'netherlands-eerste-divisie');
+    assert.equal(response.body.matches[0].visibleInCompetitionFilter,true);
+  } finally {cache.getOrFetch=originalGetOrFetch;}
+});
+
 test('fixture endpoint transforms a verified SportsDB event and rejects an ID/name mismatch', async () => {
   const originalGetOrFetch = cache.getOrFetch;
   const events = [
@@ -172,6 +190,11 @@ test('live endpoint keeps lower-priority competitions visible and merges provide
     homeTeam: 'Chicago Stars', awayTeam: 'Orlando Pride',
     kickoff: '2026-09-24T20:00:00Z', isLive: true, minute: 30
   };
+  const bsdEerste = {
+    fixtureId:'bsd-eerste-1',bsdEventId:'bsd-eerste-1',leagueId:'provider-eerste-id',
+    league:'Eerste Divisie',leagueCountry:'Netherlands',homeTeam:'FC Dordrecht',
+    awayTeam:'Almere City',kickoff:'2026-09-24T19:00:00Z',isLive:true,minute:35
+  };
   const sportmonksMatch = {
     fixtureId: 'sm-pl-1', sportmonksId: 'sm-pl-1', leagueId: '8',
     leagueName: 'Premier League', homeTeam: 'Arsenal', awayTeam: 'Chelsea',
@@ -180,12 +203,12 @@ test('live endpoint keeps lower-priority competitions visible and merges provide
 
   try {
     sportsDb.transformLiveEvent = () => tsdbMls;
-    bsdService.extractList = () => [bsdMls, bsdNwsl];
+    bsdService.extractList = () => [bsdMls, bsdNwsl, bsdEerste];
     bsdService.eventToResultMatch = event => event;
     cache.getOrFetch = async key => {
       if (key === 'live:v2:all') return { ok: true, data: { livescore: [{ strSport: 'Soccer' }] } };
       if (key === 'sportmonks:inplay') return { ok: true, fixtures: [sportmonksMatch] };
-      if (key === 'bsd:live:canonical') return { ok: true, data: { events: [{}, {}] } };
+      if (key === 'bsd:fixture-live:canonical') return { ok: true, matches: [bsdMls, bsdNwsl, bsdEerste] };
       return { ok: false };
     };
 
@@ -198,7 +221,7 @@ test('live endpoint keeps lower-priority competitions visible and merges provide
     assert.equal(mls.canonicalProvider, 'bsd');
     assert.equal(mls.providerIds.bsd, 'bsd-mls-1');
     assert.equal(mls.providerIds.thesportsdb, 'tsdb-mls-1');
-    assert.ok(response.body.matches.some(match => match.league === 'NWSL'));
+    assert.ok(response.body.matches.some(match => match.canonicalCompetitionKey === 'netherlands-eerste-divisie'));
     assert.ok(response.body.matches.some(match => match.canonicalCompetitionKey === 'england-premier-league'));
   } finally {
     cache.getOrFetch = original.getOrFetch;
