@@ -139,7 +139,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // matches, always resolve TheSportsDB team history and prefer whichever verified
   // source yields the larger usable completed-match sample.
   let internationalHomeTeamId = null, internationalAwayTeamId = null;
-  let internationalHomeHistoryAudit = null, internationalAwayHistoryAudit = null;
+  let internationalHomeHistoryAudit = homeFixturesResult.status === 'fulfilled' ? homeFixturesResult.value?.historyAudit || null : null;
+  let internationalAwayHistoryAudit = awayFixturesResult.status === 'fulfilled' ? awayFixturesResult.value?.historyAudit || null : null;
   let homeHistorySource = homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value?.source || null;
   let awayHistorySource = awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value?.source || null;
 

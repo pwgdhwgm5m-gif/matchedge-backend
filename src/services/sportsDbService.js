@@ -534,7 +534,7 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
     const scheduled = Array.isArray(scheduleEvents) ? scheduleEvents.filter(complete).sort((a,b) =>
       (Date.parse(b.strTimestamp || b.dateEvent) || 0) - (Date.parse(a.strTimestamp || a.dateEvent) || 0)).slice(0,n) : [];
     if (scheduled.length >= 5) {
-      return { ok:true, data:{ response:scheduled.map(toAnalysisFixture) }, teamId,
+      return { ok:true, source:'sportsdb-team-schedule', data:{ response:scheduled.map(toAnalysisFixture) }, teamId,
         historyAudit:scheduled.slice(0,5).map(e => ({ eventId:e.idEvent, date:e.strTimestamp || e.dateEvent,
           homeTeam:e.strHomeTeam, awayTeam:e.strAwayTeam, homeTeamId:e.idHomeTeam, awayTeamId:e.idAwayTeam,
           homeScore:e.intHomeScore, awayScore:e.intAwayScore, league:e.strLeague })) };
@@ -557,6 +557,7 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
         const lastEvents = finishedEvents.slice(0, n);
         return {
           ok: true,
+          source: 'sportsdb-last-events',
           data: { response: lastEvents.map(toAnalysisFixture) },
           teamId: teamId,
           historyAudit: lastEvents.slice(0, 5).map(function (e) {
@@ -616,6 +617,7 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
 
   return {
     ok: true,
+    source: 'sportsdb-league-history',
     data: { response: lastEvents.map(toAnalysisFixture) },
     teamId: resolvedTeamId,
   };
