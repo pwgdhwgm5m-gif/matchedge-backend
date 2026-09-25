@@ -507,8 +507,38 @@ async function getTeamLastEvents(teamId) {
 async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbLeagueIdOverride, options) {
   const n = count || 15;
 
-  const teamId = await resolveTeamId(teamName, options);
+  let teamId = await resolveTeamId(teamName, options);
+  // A fixture supplied by TheSportsDB can disambiguate names that searchteams
+  // does not resolve. Never trust a caller-supplied team ID without this lookup.
+  if (!teamId && options?.fixtureId && options?.fixtureSide) {
+    const fixture = await getEventById(options.fixtureId).catch(() => ({ ok: false }));
+    const event = fixture.data?.events?.find(e => String(e.idEvent) === String(options.fixtureId));
+    const side = options.fixtureSide === 'home' ? 'Home' : 'Away';
+    if (event && normalizeTeamName(event['str' + side + 'Team']) === normalizeTeamName(teamName)) {
+      teamId = event['id' + side + 'Team'] || null;
+    }
+  }
   if (teamId) {
+    const schedule = await getTeamSeasonSchedule(teamId).catch(() => ({ ok: false }));
+    const scheduleEvents = Array.isArray(schedule.data) ? schedule.data :
+      (schedule.data?.schedule || schedule.data?.events || []);
+    const cutoff = Date.parse(options?.kickoff || '') || Date.now();
+    const complete = e => {
+      const time = Date.parse(e.strTimestamp || e.dateEvent || '');
+      return String(e.idHomeTeam || '') === String(teamId) || String(e.idAwayTeam || '') === String(teamId)
+        ? Number.isFinite(time) && time < cutoff && e.intHomeScore != null && e.intAwayScore != null &&
+          Number.isFinite(Number(e.intHomeScore)) && Number.isFinite(Number(e.intAwayScore)) &&
+          !['CANC', 'POSTP', 'ABD'].includes(e.strStatus)
+        : false;
+    };
+    const scheduled = Array.isArray(scheduleEvents) ? scheduleEvents.filter(complete).sort((a,b) =>
+      (Date.parse(b.strTimestamp || b.dateEvent) || 0) - (Date.parse(a.strTimestamp || a.dateEvent) || 0)).slice(0,n) : [];
+    if (scheduled.length >= 5) {
+      return { ok:true, data:{ response:scheduled.map(toAnalysisFixture) }, teamId,
+        historyAudit:scheduled.slice(0,5).map(e => ({ eventId:e.idEvent, date:e.strTimestamp || e.dateEvent,
+          homeTeam:e.strHomeTeam, awayTeam:e.strAwayTeam, homeTeamId:e.idHomeTeam, awayTeamId:e.idAwayTeam,
+          homeScore:e.intHomeScore, awayScore:e.intAwayScore, league:e.strLeague })) };
+    }
     const lastResult = await getTeamLastEvents(teamId);
     if (lastResult.ok) {
       const rawEvents = (lastResult.data && (lastResult.data.results || lastResult.data.events)) || [];
