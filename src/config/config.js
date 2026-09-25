@@ -65,6 +65,11 @@ module.exports = {
     baseUrl: 'https://api.the-odds-api.com/v4',
   },
 
+  fiveDollarFootball: {
+    key: process.env.FIVE_DOLLAR_FOOTBALL_API_KEY || '',
+    baseUrl: 'https://api.5dollarfootballapi.com/v1',
+  },
+
   sportsDb: {
     key: process.env.THESPORTSDB_KEY || '3',
     baseUrl: 'https://www.thesportsdb.com/api/v1/json',
