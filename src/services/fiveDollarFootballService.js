@@ -4,6 +4,15 @@ const { teamNamesMatch } = require('../utils/textNormalize');
 
 const memory = new Map();
 const TTL_MS = 10 * 60 * 1000;
+const AUTH_BACKOFF_MS = 15 * 60 * 1000;
+const RATE_BACKOFF_MS = 60 * 60 * 1000;
+let unavailableUntil = 0;
+
+function providerAvailable() { return Date.now() >= unavailableUntil; }
+function markUnavailable(status) {
+  if (status === 429) unavailableUntil = Date.now() + RATE_BACKOFF_MS;
+  else if (status === 401 || status === 403) unavailableUntil = Date.now() + AUTH_BACKOFF_MS;
+}
 const MISS_TTL_MS = 30 * 60 * 1000;
 const RATE_LIMIT_BACKOFF_MS = 60 * 60 * 1000;
 let blockedUntil = 0;
