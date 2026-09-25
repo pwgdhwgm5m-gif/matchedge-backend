@@ -643,7 +643,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const primaryMatchOdds = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
-  const marketOddsBoard = (oddsRaw && homeTeamName && awayTeamName)
+  let marketOddsBoard = (oddsRaw && homeTeamName && awayTeamName)
     ? oddsApi.extractMatchMarketOdds(oddsRaw, homeTeamName, awayTeamName)
     : null;
   const oddsEvent = Array.isArray(oddsRaw) ? oddsRaw.find(m =>
