@@ -187,6 +187,29 @@ router.get('/:fixtureId', async (req, res) => {
   const smMatch = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;
   const smStats = smMatch?.stats || {};
 
+  // Outside the six SportMonks-owned leagues BSD is the live-data owner too,
+  // not merely an xG fallback. Resolve the canonical BSD event and consume its
+  // /stats payload. Missing BSD fields remain null and can be filled by the
+  // secondary provider; they are never converted to zero.
+  const sportmonksOwned = String(match.canonicalProvider || match.dataSource || '').toLowerCase() === 'sportmonks';
+  const bsdLiveStats = !sportmonksOwned
+    ? await bounded(bsdService.getStatsForMatch(match.homeTeam, match.awayTeam, match.kickoff), {available:false,error:'bsd_timeout'}, 2800)
+    : {available:false};
+  const bsdPayload = bsdLiveStats.available ? (bsdLiveStats.data?.stats || bsdLiveStats.data?.data?.stats || bsdLiveStats.data || {}) : {};
+  const bsdHome = bsdPayload.home || {};
+  const bsdAway = bsdPayload.away || {};
+  const bsdNum = (side, keys) => {
+    for (const key of keys) {
+      const value = key.split('.').reduce((o,k)=>o && o[k] !== undefined ? o[k] : undefined, side);
+      const n = Number(value);
+      if (value !== null && value !== undefined && value !== '' && Number.isFinite(n)) return n;
+    }
+    return null;
+  };
+  const bsdHomeXg = bsdNum(bsdHome,['xg.actual','xg','expected_goals']);
+  const bsdAwayXg = bsdNum(bsdAway,['xg.actual','xg','expected_goals']);
+  const bsdXgEstimated = Boolean(bsdLiveStats.data?.xg_estimated || bsdHome?.xg?.estimated || bsdAway?.xg?.estimated);
+
   // Canli xG/momentum/gol yakinligi hesabi icin iki takimin ham istatistiklerini
   // ortak sekle getiriyoruz. TheSportsDB "tehlikeli atak" ve "isabetsiz sut"
   // vermiyor, bu yuzden bu iki alan hep 0 - hesaplamalar geri kalan gercek
@@ -194,24 +217,24 @@ router.get('/:fixtureId', async (req, res) => {
   // henuz yoksa (mac yeni basladiysa) tum degerler 0 olur ve asagidaki
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
-    shotsOnTarget: smStats.shotsOnTargetHome ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? null) : null),
-    shotsOffTarget: smStats.shotsOffTargetHome ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : null),
-    corners: smStats.cornersHome ?? (stats.corners ? (stats.corners.home ?? null) : null),
-    dangerousAttacks: smStats.dangerousAttacksHome ?? null,
-    attacks: smStats.attacksHome ?? null,
-    blockedShots: smStats.blockedShotsHome ?? null,
-    shotsInsideBox: smStats.shotsInsideBoxHome ?? null,
-    bigChances: smStats.bigChancesHome ?? null,
+    shotsOnTarget: smStats.shotsOnTargetHome ?? bsdNum(bsdHome,['shots_on_target','shotsOnTarget','shots.on_target']) ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.home ?? null) : null),
+    shotsOffTarget: smStats.shotsOffTargetHome ?? bsdNum(bsdHome,['shots_off_target','shotsOffTarget','shots.off_target']) ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : null),
+    corners: smStats.cornersHome ?? bsdNum(bsdHome,['corners','corner_kicks']) ?? (stats.corners ? (stats.corners.home ?? null) : null),
+    dangerousAttacks: smStats.dangerousAttacksHome ?? bsdNum(bsdHome,['dangerous_attacks','dangerousAttacks']) ?? null,
+    attacks: smStats.attacksHome ?? bsdNum(bsdHome,['attacks','total_attacks']) ?? null,
+    blockedShots: smStats.blockedShotsHome ?? bsdNum(bsdHome,['blocked_shots','blockedShots']) ?? null,
+    shotsInsideBox: smStats.shotsInsideBoxHome ?? bsdNum(bsdHome,['shots_inside_box','shotsInsideBox']) ?? null,
+    bigChances: smStats.bigChancesHome ?? bsdNum(bsdHome,['big_chances','bigChances']) ?? null,
   };
   const awayRawStats = {
-    shotsOnTarget: smStats.shotsOnTargetAway ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? null) : null),
-    shotsOffTarget: smStats.shotsOffTargetAway ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : null),
-    corners: smStats.cornersAway ?? (stats.corners ? (stats.corners.away ?? null) : null),
-    dangerousAttacks: smStats.dangerousAttacksAway ?? null,
-    attacks: smStats.attacksAway ?? null,
-    blockedShots: smStats.blockedShotsAway ?? null,
-    shotsInsideBox: smStats.shotsInsideBoxAway ?? null,
-    bigChances: smStats.bigChancesAway ?? null,
+    shotsOnTarget: smStats.shotsOnTargetAway ?? bsdNum(bsdAway,['shots_on_target','shotsOnTarget','shots.on_target']) ?? (stats.shotsOnTarget ? (stats.shotsOnTarget.away ?? null) : null),
+    shotsOffTarget: smStats.shotsOffTargetAway ?? bsdNum(bsdAway,['shots_off_target','shotsOffTarget','shots.off_target']) ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : null),
+    corners: smStats.cornersAway ?? bsdNum(bsdAway,['corners','corner_kicks']) ?? (stats.corners ? (stats.corners.away ?? null) : null),
+    dangerousAttacks: smStats.dangerousAttacksAway ?? bsdNum(bsdAway,['dangerous_attacks','dangerousAttacks']) ?? null,
+    attacks: smStats.attacksAway ?? bsdNum(bsdAway,['attacks','total_attacks']) ?? null,
+    blockedShots: smStats.blockedShotsAway ?? bsdNum(bsdAway,['blocked_shots','blockedShots']) ?? null,
+    shotsInsideBox: smStats.shotsInsideBoxAway ?? bsdNum(bsdAway,['shots_inside_box','shotsInsideBox']) ?? null,
+    bigChances: smStats.bigChancesAway ?? bsdNum(bsdAway,['big_chances','bigChances']) ?? null,
   };
 
   // Gercek xG oncelik sirasi: 1) TheSportsDB (Pro/Premium bazi buyuk
@@ -227,7 +250,11 @@ router.get('/:fixtureId', async (req, res) => {
   // TheSportsDB'nin kendi gercek xG'sinden ayirt etmenin baska yolu yoktu.
   let xgSource;
 
-  if (stats.xg && stats.xg.home != null && stats.xg.away != null) {
+  if (!sportmonksOwned && bsdHomeXg != null && bsdAwayXg != null && !bsdXgEstimated) {
+    homeLiveXg = bsdHomeXg;
+    awayLiveXg = bsdAwayXg;
+    xgSource = 'bsd';
+  } else if (stats.xg && stats.xg.home != null && stats.xg.away != null) {
     homeLiveXg = stats.xg.home;
     awayLiveXg = stats.xg.away;
     xgSource = 'thesportsdb';
@@ -250,9 +277,13 @@ router.get('/:fixtureId', async (req, res) => {
   // Gol yakinligi: hangi takim gole daha yakin (isabetli sut + korner + canli xG,
   // xG en agirlikli faktor) - kullanicinin canli ekranda gordugu "kim daha yakin" barı.
   const momentum = liveXg.calculateMomentum(homeRawStats, awayRawStats);
+  const bsdPossHome=bsdNum(bsdHome,['possession','ball_possession','possession_percentage']);
+  const bsdPossAway=bsdNum(bsdAway,['possession','ball_possession','possession_percentage']);
   const possessionObserved = (smStats.possessionHome != null && smStats.possessionAway != null)
     ? { home: smStats.possessionHome, away: smStats.possessionAway }
-    : (stats.possession && stats.possession.home != null && stats.possession.away != null ? { home: stats.possession.home, away: stats.possession.away } : null);
+    : (!sportmonksOwned && bsdPossHome != null && bsdPossAway != null)
+      ? {home:bsdPossHome,away:bsdPossAway}
+      : (stats.possession && stats.possession.home != null && stats.possession.away != null ? { home: stats.possession.home, away: stats.possession.away } : null);
   const redHome = smStats.redCardsHome ?? (stats.redCards ? stats.redCards.home : null);
   const redAway = smStats.redCardsAway ?? (stats.redCards ? stats.redCards.away : null);
   const goalProximity = liveXg.calculateGoalProximity(homeRawStats, awayRawStats, homeLiveXg, awayLiveXg, {
@@ -295,23 +326,23 @@ router.get('/:fixtureId', async (req, res) => {
     goalProximity,
     matchDominance,
     possession: possessionObserved,
-    liveStatsSource: smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null),
+    liveStatsSource: smMatch ? 'sportmonks' : (bsdLiveStats.available ? 'bsd' : (statsResult.available ? 'thesportsdb' : null)),
     stats: {
       shotsOnTargetHome: homeRawStats.shotsOnTarget,
       shotsOnTargetAway: awayRawStats.shotsOnTarget,
       cornersHome: homeRawStats.corners,
       cornersAway: awayRawStats.corners,
       // TheSportsDB "tehlikeli atak" istatistigi vermiyor, gercek karsiligi yok.
-      dangerousAttacksHome: smStats.dangerousAttacksHome ?? null,
-      dangerousAttacksAway: smStats.dangerousAttacksAway ?? null,
-      attacksHome: smStats.attacksHome ?? null,
-      attacksAway: smStats.attacksAway ?? null,
-      blockedShotsHome: smStats.blockedShotsHome ?? null,
-      blockedShotsAway: smStats.blockedShotsAway ?? null,
-      shotsInsideBoxHome: smStats.shotsInsideBoxHome ?? null,
-      shotsInsideBoxAway: smStats.shotsInsideBoxAway ?? null,
-      bigChancesHome: smStats.bigChancesHome ?? null,
-      bigChancesAway: smStats.bigChancesAway ?? null,
+      dangerousAttacksHome: homeRawStats.dangerousAttacks,
+      dangerousAttacksAway: awayRawStats.dangerousAttacks,
+      attacksHome: homeRawStats.attacks,
+      attacksAway: awayRawStats.attacks,
+      blockedShotsHome: homeRawStats.blockedShots,
+      blockedShotsAway: awayRawStats.blockedShots,
+      shotsInsideBoxHome: homeRawStats.shotsInsideBox,
+      shotsInsideBoxAway: awayRawStats.shotsInsideBox,
+      bigChancesHome: homeRawStats.bigChances,
+      bigChancesAway: awayRawStats.bigChances,
       foulsHome: stats.fouls ? stats.fouls.home : null,
       foulsAway: stats.fouls ? stats.fouls.away : null,
       offsidesHome: stats.offsides ? stats.offsides.home : null,
@@ -321,7 +352,7 @@ router.get('/:fixtureId', async (req, res) => {
       redCardsHome: redHome,
       redCardsAway: redAway,
     },
-    statsAvailable: Boolean(smMatch || statsResult.available),
+    statsAvailable: Boolean(smMatch || bsdLiveStats.available || statsResult.available),
     timeline: timelineResult.available ? timelineResult.events : [],
     lineup: lineupResult.available
       ? { home: lineupResult.home, away: lineupResult.away, homeSubs: lineupResult.homeSubs, awaySubs: lineupResult.awaySubs }
