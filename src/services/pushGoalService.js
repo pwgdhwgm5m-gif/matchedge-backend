@@ -6,6 +6,7 @@ const CommunityPick = require('../models/CommunityPick');
 const User = require('../models/User');
 const NotificationEvent = require('../models/NotificationEvent');
 const sportsDb = require('./sportsDbService');
+const bsd = require('./bsdService');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -100,9 +101,14 @@ async function checkGoals() {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     const tracked = await trackedUsersByFixture();
     if (!tracked.all.size) return;
-    const result = await sportsDb.getLiveScores();
-    if (!result.ok) return;
-    const matches = (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(sportsDb.transformLiveEvent);
+    // Goal detection uses both BSD and SportsDB. BSD is queried first because it
+    // is also the primary live source outside the six SportMonks leagues.
+    const [bsdResult, result] = await Promise.all([bsd.getLiveFootballEvents(), sportsDb.getLiveScores()]);
+    const bsdMatches = bsdResult.ok ? bsd.extractList(bsdResult.data).map(bsd.eventToResultMatch).filter(Boolean) : [];
+    const tsdbMatches = result.ok ? (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(sportsDb.transformLiveEvent) : [];
+    const seen=new Set();
+    const matches=[...bsdMatches,...tsdbMatches].filter(m=>{const k=[normalizeTeam(m.homeTeam),normalizeTeam(m.awayTeam),String(m.homeScore),String(m.awayScore)].join('|');if(seen.has(k))return false;seen.add(k);return true;});
+    if (!matches.length) return;
     for (const m of matches) {
       const id = String(m.fixtureId);
       const couponUsers = usersForTrackedMatch(tracked, m, id, true);
