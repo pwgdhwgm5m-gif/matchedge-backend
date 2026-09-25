@@ -288,6 +288,23 @@ router.get('/:fixtureId', async (req, res) => {
         }
       }
     }
+    // Compact, non-secret production diagnostics. This makes provider/history
+    // correctness observable in Render without exposing a public debug endpoint.
+    if (result?.modelDiagnostics) {
+      const history = result.modelDiagnostics.consumedInputs?.history || {};
+      const form = result.modelDiagnostics.form || {};
+      console.log('[analysis-source-diagnostic]', JSON.stringify({
+        fixtureId:String(fixtureId), homeTeam:homeTeamName, awayTeam:awayTeamName,
+        homeSource:history.homeSource||null, awaySource:history.awaySource||null,
+        homePlayed:Number(form.home?.played||0), awayPlayed:Number(form.away?.played||0),
+        homeGF:form.home?.avgGoalsFor ?? null, homeGA:form.home?.avgGoalsAgainst ?? null,
+        awayGF:form.away?.avgGoalsFor ?? null, awayGA:form.away?.avgGoalsAgainst ?? null,
+        dataHealth:Number(result.premium?.dataHealth?.score ?? result.qualityDimensions?.historicalSampleCoverage?.score ?? 0),
+        marketOddsSource:result.marketOddsSource||null, marketAnchorSource:result.marketAnchorSource||null,
+        responseSource:'realtime'
+      }));
+    }
+
     if (result?.modelDiagnostics) {
       const p=result.modelDiagnostics.probabilities?.marketBlended||result.modelDiagnostics.probabilities?.confidenceAdjusted||{};
       const extreme=Math.max(Number(p.homeWinProbability||0),Number(p.awayWinProbability||0))>=75;
