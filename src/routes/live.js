@@ -113,12 +113,26 @@ router.get('/:fixtureId', async (req, res) => {
   }
 
   if (!match) {
-    const bsdDirect = await quickBound(cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),{ok:false},2800);
-    if (bsdDirect.ok) {
-      const raw = bsdService.extractList(bsdDirect.data).find(e=>String(bsdService.getEventId(e))===String(fixtureId));
-      if (raw) {
-        match={...bsdService.eventToResultMatch(raw),canonicalProvider:'bsd',dataSource:'bsd',providerIds:{bsd:String(fixtureId)}};
-        fromCacheFlag=bsdDirect.fromCache;
+    const directBsd = await quickBound(
+      bsdService.getEventById(fixtureId),
+      { available:false, error:'bsd_event_timeout' },
+      2800
+    );
+    if (directBsd.available && directBsd.match) {
+      match = { ...directBsd.match, canonicalProvider:'bsd', dataSource:'bsd' };
+    } else {
+      const bsdDirect = await quickBound(
+        cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),
+        {ok:false},
+        2800
+      );
+      if (bsdDirect.ok) {
+        const raw = bsdService.extractList(bsdDirect.data)
+          .find(e=>String(bsdService.getEventId(e))===String(fixtureId));
+        if (raw) {
+          match={...bsdService.eventToResultMatch(raw),canonicalProvider:'bsd',dataSource:'bsd',providerIds:{bsd:String(fixtureId)}};
+          fromCacheFlag=bsdDirect.fromCache;
+        }
       }
     }
   }
