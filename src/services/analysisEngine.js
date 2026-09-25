@@ -156,9 +156,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     const currentHomeUsable = stats.summarizeMatches(homeFixtures, currentHomeId)?.played || 0;
     const currentAwayUsable = stats.summarizeMatches(awayFixtures, currentAwayId)?.played || 0;
 
+    // Provider ownership beats sample-count shopping. Outside the six
+    // SportMonks leagues BSD is primary, so a valid BSD history must not be
+    // silently replaced merely because SportsDB returns more rows. SportsDB
+    // is used only when the primary source has no usable verified history.
+    const primaryIsBsd = useBsdPrimary;
     if (th?.ok && th.data?.response?.length && th.teamId) {
       const tsdbHomeUsable = stats.summarizeMatches(th.data.response, th.teamId)?.played || 0;
-      if (tsdbHomeUsable > currentHomeUsable) {
+      const mayFallbackHome = primaryIsBsd ? currentHomeUsable === 0 : tsdbHomeUsable > currentHomeUsable;
+      if (mayFallbackHome && tsdbHomeUsable > 0) {
         homeFixtures = th.data.response;
         internationalHomeTeamId = th.teamId;
         homeHistorySource = 'sportsdb-team-history';
@@ -167,7 +173,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
     if (ta?.ok && ta.data?.response?.length && ta.teamId) {
       const tsdbAwayUsable = stats.summarizeMatches(ta.data.response, ta.teamId)?.played || 0;
-      if (tsdbAwayUsable > currentAwayUsable) {
+      const mayFallbackAway = primaryIsBsd ? currentAwayUsable === 0 : tsdbAwayUsable > currentAwayUsable;
+      if (mayFallbackAway && tsdbAwayUsable > 0) {
         awayFixtures = ta.data.response;
         internationalAwayTeamId = ta.teamId;
         awayHistorySource = 'sportsdb-team-history';
