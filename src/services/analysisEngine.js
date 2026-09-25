@@ -145,8 +145,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
 
   if (isInternationalCompetition) {
     const [th, ta] = await Promise.all([
-      sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null).catch(() => null),
-      sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null).catch(() => null),
+      sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null, { international:true }).catch(() => null),
+      sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null, { international:true }).catch(() => null),
     ]);
 
     const currentHomeId = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
