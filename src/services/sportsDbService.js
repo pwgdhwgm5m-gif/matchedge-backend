@@ -60,6 +60,7 @@ const WHITELISTED_LEAGUE_IDS = new Set([
   '4331', // Almanya Bundesliga
   '4334', // Fransa Ligue 1
   '4337', // Hollanda Eredivisie
+  '4641', // Hollanda Eerste Divisie (BSD yoksa doğrulanmış yedek)
   '4344', // Portekiz Primeira Liga
   '4330', // Iskocya Premiership
   '4336', // Yunanistan Super League
@@ -129,6 +130,7 @@ function isWhitelistedLeague(leagueId) {
 // Guard against provider rows whose competition id and displayed league name
 // disagree. A mismatched row must never be relabelled as a trusted competition.
 const STRICT_LEAGUE_NAMES = {
+  '4641': ['dutch eerste divisie','eerste divisie','keuken kampioen divisie'],
   '4482': ['fa cup','english fa cup','the fa cup'],
   '4483': ['copa del rey'],
   '4484': ['coupe de france'],

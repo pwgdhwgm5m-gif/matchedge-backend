@@ -114,6 +114,24 @@ test('fixture endpoint retains a BSD live match missing from its day feed', asyn
   } finally {cache.getOrFetch=originalGetOrFetch;}
 });
 
+test('fixture endpoint uses a verified live fallback when BSD has no Eerste Divisie event', async () => {
+  const original = {getOrFetch:cache.getOrFetch, transformLiveEvent:sportsDb.transformLiveEvent};
+  try {
+    sportsDb.transformLiveEvent = () => ({fixtureId:'2489840',leagueId:'4641',
+      league:'Dutch Eerste Divisie',homeTeam:'Dordrecht',awayTeam:'Almere City',
+      kickoff:'2026-09-25T19:00:00Z',isLive:true});
+    cache.getOrFetch = async key => key === 'live:v2:all'
+      ? {ok:true,data:{livescore:[{strSport:'Soccer'}]}}
+      : {ok:false,fixtures:[],matches:[]};
+    const response=responseCapture();
+    await routeHandler(matchesRouter)({query:{date:'2026-09-25'}},response);
+    assert.equal(response.body.matches.length,1);
+    assert.equal(response.body.matches[0].canonicalCompetitionKey,'netherlands-eerste-divisie');
+    assert.equal(response.body.matches[0].visibleInCompetitionFilter,true);
+    assert.equal(response.body.matches[0].providerIds.sportsdb,'2489840');
+  } finally {cache.getOrFetch=original.getOrFetch;sportsDb.transformLiveEvent=original.transformLiveEvent;}
+});
+
 test('fixture endpoint transforms a verified SportsDB event and rejects an ID/name mismatch', async () => {
   const originalGetOrFetch = cache.getOrFetch;
   const events = [

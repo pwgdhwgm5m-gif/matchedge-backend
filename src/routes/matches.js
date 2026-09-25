@@ -61,6 +61,15 @@ router.get('/', async (req,res)=>{
     if(sportsDb.isWhitelistedLeague(m.leagueId) &&
        sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))put(m,'sportsdb');
   }
+  // The day feed can omit an in-progress fixture that is present in V2.
+  // TheSportsDB remains a fallback when BSD has no row for that match.
+  for(const e of (live?.ok?(live.data?.livescore||[]):[])){
+    if(String(e.strSport||'').toLowerCase()!=='soccer')continue;
+    const m=sportsDb.transformLiveEvent(e);
+    const kickoff=new Date(m?.kickoff||m?.date);
+    if(!m?.isLive||!Number.isFinite(kickoff.getTime())||kickoff.toISOString().slice(0,10)!==date)continue;
+    if(sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))put(m,'sportsdb');
+  }
   const extra=Array.isArray(supplemental)?supplemental:(supplemental?.matches||[]);
   for(const m of extra)put(m);
   for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
