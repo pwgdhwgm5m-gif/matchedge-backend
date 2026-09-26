@@ -217,7 +217,11 @@ router.get('/:fixtureId', async (req, res) => {
 
   const stats = statsResult.available ? statsResult.stats : {};
   const smLiveDetail = await bounded(cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay()), {ok:false,error:'sportmonks_timeout'}, 2800);
-  const smMatch = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;
+  const smCandidate = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;
+  const smMatch = smCandidate && acceptsLiveFixture({homeTeam:smCandidate.homeTeam,awayTeam:smCandidate.awayTeam,
+    kickoff:smCandidate.kickoff,league:smCandidate.leagueName},'sportmonks',{
+    homeTeamName:match.homeTeam,awayTeamName:match.awayTeam,kickoff:match.kickoff||match.date,
+    leagueName:match.league||match.displayName}) ? smCandidate : null;
   const smStats = smMatch?.stats || {};
 
   // Outside the six SportMonks-owned leagues BSD is the live-data owner too,
@@ -344,7 +348,7 @@ router.get('/:fixtureId', async (req, res) => {
     canonicalProvider: match.canonicalProvider || match.dataSource || null,
     providerIds: match.providerIds || {},
     kickoff: match.kickoff || match.date || null,
-    league: match.league || match.leagueName || null,
+    league: match.league || match.leagueName || match.displayName || null,
     canonicalCompetitionKey: match.canonicalCompetitionKey,
     displayName: match.displayName,
     competitionCountry: match.competitionCountry,
