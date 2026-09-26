@@ -32,7 +32,7 @@ function regularizeSparseGoalRate(rate, leagueRate, sample, independentEvidence)
 
 const SUPERLIG_LEAGUE_ID = '71';
 
-async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey, kickoff }) {
+async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey, kickoff, providerIds = {}, providerTeamIds = {} }) {
   const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
   const useSportmonksPrimary = providerPolicy.sportmonks === true;
   const useBsdPrimary = providerPolicy.primary === 'bsd';
@@ -41,6 +41,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const mappedTsdbLeagueId = leagueIdNum ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null;
   const directTsdbLeagueId = tsdbLeagueId ? String(tsdbLeagueId) : null;
   const effectiveTsdbLeagueId = directTsdbLeagueId || (mappedTsdbLeagueId ? String(mappedTsdbLeagueId) : null);
+  const sportsdbFixtureId=providerIds.sportsdb||null;
+  const sportsdbOptions=side=>({fixtureId:sportsdbFixtureId,fixtureSide:side,kickoff,
+    verifiedTeamId:providerTeamIds.sportsdb?.[side]||null});
   const isMappedLeague = Boolean(effectiveTsdbLeagueId && sportsDb.isWhitelistedLeague(effectiveTsdbLeagueId));
   const useOwnSource = isSuperLig || isMappedLeague;
   const isInternationalCompetition = /nations league|world cup|euro|international/i.test(String(leagueName || ''));
@@ -51,18 +54,18 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // - Eslesmesi olmayan ligler -> eskisi gibi API-Football denenir (suspended
   //   oldugu icin muhtemelen bos doner, sistem yine de cokme, notr deger uretir)
   const homeFormFetcher = useBsdPrimary || useSportmonksPrimary
-      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(homeTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,home)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff}) : br); }
+      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(homeTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,home)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,sportsdbOptions('home')) : br); }
     : isSuperLig
       ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
     : isMappedLeague
-      ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff})
+      ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,sportsdbOptions('home'))
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const awayFormFetcher = useBsdPrimary || useSportmonksPrimary
-      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(awayTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,away)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff}) : br); }
+      ? async () => { const br=await bsd.getTeamFixturesForAnalysis(awayTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,away)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,sportsdbOptions('away')) : br); }
     : isSuperLig
       ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
     : isMappedLeague
-      ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff})
+      ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,sportsdbOptions('away'))
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
   const homeFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `bsd-form:v5:${effectiveTsdbLeagueId||'unknown'}:${homeTeamName}`
     : isSuperLig ? `tff-form:${homeTeamName}`
@@ -661,7 +664,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // BSD is the primary rich fixture source. It never overwrites a verified
   // SportMonks field merely because another provider also has it.
   const bsdBundle = await Promise.race([
-    bsd.getFixtureDataBundle(homeTeamName,awayTeamName,kickoff),
+    bsd.getFixtureDataBundle(homeTeamName,awayTeamName,kickoff,providerIds.bsd),
     new Promise(resolve=>setTimeout(()=>resolve({available:false,error:'timeout'}),3500))
   ]);
   const bsdPrediction = bsdBundle?.prediction

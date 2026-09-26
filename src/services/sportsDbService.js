@@ -527,7 +527,7 @@ async function getTeamLastEvents(teamId) {
 async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbLeagueIdOverride, options) {
   const n = count || 15;
 
-  let teamId = await resolveTeamId(teamName, options);
+  let teamId = options?.verifiedTeamId ? String(options.verifiedTeamId) : null;
   // A fixture supplied by TheSportsDB can disambiguate names that searchteams
   // does not resolve. Never trust a caller-supplied team ID without this lookup.
   if (!teamId && options?.fixtureId && options?.fixtureSide) {
@@ -538,6 +538,7 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
       teamId = event['id' + side + 'Team'] || null;
     }
   }
+  if (!teamId) teamId = await resolveTeamId(teamName, options);
   if (teamId) {
     const schedule = await getTeamSeasonSchedule(teamId).catch(() => ({ ok: false }));
     const scheduleEvents = Array.isArray(schedule.data) ? schedule.data :

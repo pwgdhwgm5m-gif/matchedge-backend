@@ -9,6 +9,7 @@ const footballDataOrg = require('../services/footballDataOrgService');
 const sportmonks = require('../services/sportmonksService');
 const competitionRegistry = require('../services/competitionRegistryService');
 const { acceptsLiveFixture, providerKey } = require('../services/liveFixtureIdentity');
+const providerIdentity = require('../services/providerIdentityCache');
 
 const quickBound = (promise, fallback, ms = 2500) => Promise.race([
   promise,
@@ -47,7 +48,7 @@ router.get('/', async (req, res) => {
       const m=sportsDb.transformLiveEvent(e);
        if(m?.isLive&&sportsDb.isWhitelistedLeague(m.leagueId)&&
           sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))
-         addMatch({...m,canonicalProvider:'thesportsdb',providerIds:{thesportsdb:String(m.fixtureId)}});
+         addMatch({...m,canonicalProvider:'thesportsdb',providerIds:{sportsdb:String(m.fixtureId)}});
     }
   }
   if(bsdLive.ok){
@@ -65,6 +66,7 @@ router.get('/', async (req, res) => {
   const matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{
     toleranceMs:6*60*60*1000,preferBsd:true
   }).filter(match => match?.visibleInCompetitionFilter === true);
+  for(const match of matches)providerIdentity.remember(match).catch(err=>console.warn('[provider-identity/live]',err.message));
   return res.json({matches,source:'canonical-live-merged',counts:{thesportsdb:tsdbLive.ok?(tsdbLive.data?.livescore||[]).length:0,sportmonks:smLive.ok?(smLive.fixtures||[]).filter(x=>x.isLive).length:0,bsd:bsdLive.ok?(bsdLive.matches||[]).length:0}});
 });
 
@@ -195,7 +197,24 @@ router.get('/:fixtureId', async (req, res) => {
     match,
     match.canonicalProvider||match.source||match.dataSource
   );
-  const tsdbExtrasId = providerKey(match.canonicalProvider || match.dataSource) === 'sportsdb' ? fixtureId : null;
+  // Every provider endpoint receives only an ID established for that provider.
+  // A matching name alone never turns a BSD event ID into a SportsDB ID.
+  const known=await providerIdentity.lookup(match).catch(()=>null);
+  match.providerIds={...(known?.providerIds||{}),...(match.providerIds||{})};
+  match.providerTeamIds={...(known?.providerTeamIds||{}),...(match.providerTeamIds||{})};
+  if(!match.providerIds.bsd && providerKey(match.canonicalProvider)!=='bsd'){
+    const liveBsd=await quickBound(cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches()),{ok:false},2800);
+    const candidates=(liveBsd.ok?liveBsd.matches:[]).filter(row=>acceptsLiveFixture(row,'bsd',{
+      homeTeamName:match.homeTeam,awayTeamName:match.awayTeam,
+      leagueName:match.league,kickoff:match.kickoff||match.date}));
+    if(candidates.length===1){
+      match.providerIds.bsd=String(candidates[0].bsdEventId);
+      match.providerTeamIds.bsd={home:candidates[0].homeTeamId||null,away:candidates[0].awayTeamId||null};
+      match.bsdLiveStats=candidates[0].liveStats||null;
+      providerIdentity.remember(match).catch(err=>console.warn('[provider-identity/alias]',err.message));
+    }
+  }
+  const tsdbExtrasId = match.providerIds.sportsdb || match.providerIds.thesportsdb || null;
 
   // --- Pro/Premium V2 ek veriler: zaman cizelgesi, istatistik, kadro, TV, highlights ---
   // Bitmis maclarda bu veri degismeyecegi icin uzun (6 saat) cache'leniyor;
@@ -230,11 +249,13 @@ router.get('/:fixtureId', async (req, res) => {
   // not merely an xG fallback. Resolve the canonical BSD event and consume its
   // /stats payload. Missing BSD fields remain null and can be filled by the
   // secondary provider; they are never converted to zero.
-  const sportmonksOwned = String(match.canonicalProvider || match.dataSource || '').toLowerCase() === 'sportmonks';
-  const bsdLiveStats = !sportmonksOwned
-    ? await bounded(bsdService.getStatsForMatch(match.homeTeam, match.awayTeam, match.kickoff), {available:false,error:'bsd_timeout'}, 2800)
+  const sportmonksOwned = Boolean(competitionRegistry.resolveCompetition(match)?.providerIds?.sportmonks);
+  const bsdEventId=match.providerIds.bsd||null;
+  const bsdLiveStats = bsdEventId
+    ? await bounded(bsdService.getStatsByEventId(bsdEventId), {available:false,error:'bsd_timeout'}, 2800)
     : {available:false};
-  const bsdPayload = bsdLiveStats.available ? (bsdLiveStats.data?.stats || bsdLiveStats.data?.data?.stats || bsdLiveStats.data || {}) : {};
+  const bsdPayload = bsdLiveStats.available ? (bsdLiveStats.data?.stats || bsdLiveStats.data?.data?.stats || bsdLiveStats.data || {}) :
+    (match.bsdLiveStats || match.liveStats || {});
   const bsdHome = bsdPayload.home || {};
   const bsdAway = bsdPayload.away || {};
   const bsdNum = (side, keys) => {
@@ -299,7 +320,7 @@ router.get('/:fixtureId', async (req, res) => {
     awayLiveXg = stats.xg.away;
     xgSource = 'thesportsdb';
   } else {
-    const bsdXg = await bounded(bsdService.getRealXgForMatch(match.homeTeam, match.awayTeam, match.kickoff, isFinished), {available:false,error:'bsd_timeout'}, 2200);
+    const bsdXg = bsdEventId ? await bounded(bsdService.getEventXg(bsdEventId), {available:false,error:'bsd_timeout'}, 2200) : {available:false};
     if (bsdXg.available && !bsdXg.estimated) {
       homeLiveXg = bsdXg.home;
       awayLiveXg = bsdXg.away;
@@ -370,7 +391,7 @@ router.get('/:fixtureId', async (req, res) => {
     goalProximity,
     matchDominance,
     possession: possessionObserved,
-    liveStatsSource: !sportmonksOwned && bsdLiveStats.available ? 'bsd' : (smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null)),
+    liveStatsSource: !sportmonksOwned && (bsdLiveStats.available || match.bsdLiveStats || match.liveStats) ? 'bsd' : (smMatch ? 'sportmonks' : (statsResult.available ? 'thesportsdb' : null)),
     stats: {
       shotsOnTargetHome: homeRawStats.shotsOnTarget,
       shotsOnTargetAway: awayRawStats.shotsOnTarget,
@@ -396,7 +417,8 @@ router.get('/:fixtureId', async (req, res) => {
       redCardsHome: redHome,
       redCardsAway: redAway,
     },
-    statsAvailable: Boolean(smMatch || bsdLiveStats.available || statsResult.available),
+    statsAvailable: Boolean((smMatch && Object.values(smStats).some(v=>v!=null)) ||
+      Object.values(homeRawStats).some(v=>v!=null) || Object.values(awayRawStats).some(v=>v!=null) || possessionObserved),
     timeline: timelineResult.available ? timelineResult.events : [],
     lineup: lineupResult.available
       ? { home: lineupResult.home, away: lineupResult.away, homeSubs: lineupResult.homeSubs, awaySubs: lineupResult.awaySubs }
@@ -424,7 +446,7 @@ router.get('/:fixtureId', async (req, res) => {
       const hasShots = Number(homeRawStats.shotsOnTarget) + Number(awayRawStats.shotsOnTarget) > 0;
       const hasCorners = Number(homeRawStats.corners) + Number(awayRawStats.corners) > 0;
       const hasEstimatedXg = Number(homeLiveXg) + Number(awayLiveXg) > 0;
-      const evidence = [statsResult.available, hasShots, hasCorners, hasRealXg].filter(Boolean).length;
+      const evidence = [bsdLiveStats.available || statsResult.available || !!smMatch, hasShots, hasCorners, hasRealXg].filter(Boolean).length;
       const dataHealth = Math.round((evidence / 4) * 100);
       // A live estimate is allowed when it is driven by observed match events.
       // 50/50 is not a prediction; keep that unavailable until one side has evidence.

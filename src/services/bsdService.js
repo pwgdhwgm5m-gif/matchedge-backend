@@ -173,33 +173,13 @@ function isWithinKickoffTolerance(e, kickoffMs) {
  */
 function findMatchingEvent(events, homeTeam, awayTeam, kickoffIso) {
   const kickoffMs = kickoffIso ? new Date(kickoffIso).getTime() : null;
-
-  const bothMatch = events.filter(function (e) {
-    return isNameMatch(getHomeTeamName(e), homeTeam) && isNameMatch(getAwayTeamName(e), awayTeam) && isWithinKickoffTolerance(e, kickoffMs);
-  });
-  if (bothMatch.length) return bothMatch[0];
-
-  const homeOnlyMatch = events.filter(function (e) {
-    return isNameMatch(getHomeTeamName(e), homeTeam) && isWithinKickoffTolerance(e, kickoffMs);
-  });
-  if (homeOnlyMatch.length === 1) return homeOnlyMatch[0];
-  if (homeOnlyMatch.length > 1) {
-    const narrowed = homeOnlyMatch.filter(function (e) { return isNameMatch(getAwayTeamName(e), awayTeam); });
-    return narrowed[0] || homeOnlyMatch[0];
-  }
-
-  const awayOnlyMatch = events.filter(function (e) {
-    return isNameMatch(getAwayTeamName(e), awayTeam) && isWithinKickoffTolerance(e, kickoffMs);
-  });
-  if (awayOnlyMatch.length === 1) return awayOnlyMatch[0];
-
-  // Some providers reverse home/away or append FC/AFC suffixes in cup replays.
-  // Only accept a reversed match when BOTH names match and kickoff is close.
-  const reversed=events.filter(function(e){
-    return isNameMatch(getHomeTeamName(e),awayTeam)&&isNameMatch(getAwayTeamName(e),homeTeam)&&isWithinKickoffTolerance(e,kickoffMs);
-  });
-  if(reversed.length===1)return reversed[0];
-  return null;
+  if(!Number.isFinite(kickoffMs)||!homeTeam||!awayTeam)return null;
+  // Both sides and time must agree. A lone home-team hit can silently attach
+  // another fixture's xG, odds and predictions to this match.
+  const matches=events.filter(e=>isNameMatch(getHomeTeamName(e),homeTeam) &&
+    isNameMatch(getAwayTeamName(e),awayTeam) && getKickoff(e) &&
+    isWithinKickoffTolerance(e,kickoffMs));
+  return matches.length===1 ? matches[0] : null;
 }
 
 /**
@@ -212,9 +192,6 @@ function findMatchingEvent(events, homeTeam, awayTeam, kickoffIso) {
  */
 async function resolveBsdEventId(homeTeam, awayTeam, kickoffIso) {
   if (!API_KEY) return null;
-  const mapped=await fixtureIdentity.lookup({date:kickoffIso,home:homeTeam,away:awayTeam,provider:'bsd'}).catch(()=>null);
-  if(mapped?.id)return mapped.id;
-
   const dateKey = (kickoffIso || '').slice(0, 10) || new Date().toISOString().slice(0, 10);
   const cacheKey = `bsd-resolve:${normalizeTeamName(homeTeam)}:${normalizeTeamName(awayTeam)}:${dateKey}`;
   const cached = cache.get(cacheKey);
@@ -489,6 +466,9 @@ async function getLiveResultMatches() {
     const match = eventToResultMatch({...event,__soccerEdgeLeagueName:league});
     match.leagueId = leagueId;
     match.leagueCountry = String(registry[leagueId]?.country||'');
+    match.homeTeamId = String(pickField(event,['home_team_id','home.id','home_team.id'])||'');
+    match.awayTeamId = String(pickField(event,['away_team_id','away.id','away_team.id'])||'');
+    match.liveStats = event.stats || null;
     match.providerIds = {bsd:match.bsdEventId};
     if (match.homeTeam && match.awayTeam) matches.push(match);
   }
@@ -581,6 +561,14 @@ async function getStatsForMatch(homeTeam,awayTeam,kickoffIso) {
   return {available:true,eventId,source:'bsd',data:result.data};
 }
 
+async function getStatsByEventId(eventId) {
+  if(!API_KEY)return {available:false,error:'no_api_key'};
+  if(!/^\d+$/.test(String(eventId||'')))return {available:false,error:'invalid_bsd_event_id'};
+  const result=await fetchBsdCached('/events/'+eventId+'/stats/',30,6000);
+  return result.ok ? {available:true,eventId:String(eventId),source:'bsd',data:result.data} :
+    {available:false,error:result.error};
+}
+
 
 function normalizeConsensusOdds(payload) {
   const root=payload?.odds || payload?.data?.odds || payload || {};
@@ -607,9 +595,9 @@ function normalizeConsensusOdds(payload) {
   };
 }
 
-async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso) {
+async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso,verifiedBsdEventId) {
   if(!API_KEY) return {available:false,error:'no_api_key'};
-  const eventId=await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
+  const eventId=verifiedBsdEventId || await resolveBsdEventId(homeTeam,awayTeam,kickoffIso);
   if(!eventId) return {available:false,error:'event_not_found'};
   const bundleKey='bsd-bundle:'+eventId;
   const bundleHit=cache.get(bundleKey);
@@ -679,7 +667,10 @@ async function getEventById(eventId){
  const e=result.data?.data||result.data?.event||result.data;
  const match=eventToResultMatch(e);
  if(!match.fixtureId||!match.homeTeam||!match.awayTeam||!match.date)return {available:false,error:'invalid_event_payload'};
- return {available:true,source:'bsd',match:{...match,kickoff:match.date,canonicalProvider:'bsd',providerIds:{bsd:String(match.bsdEventId||eventId)}}};
+ return {available:true,source:'bsd',match:{...match,kickoff:match.date,canonicalProvider:'bsd',liveStats:e.stats||null,
+   homeTeamId:String(pickField(e,['home_team_id','home.id','home_team.id'])||''),
+   awayTeamId:String(pickField(e,['away_team_id','away.id','away_team.id'])||''),
+   providerIds:{bsd:String(match.bsdEventId||eventId)}}};
 }
 
 async function getFinalResultForMatch(homeTeam,awayTeam,kickoffIso){
@@ -723,4 +714,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, getLiveResultMatches, getEventId, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, getLiveResultMatches, getEventId, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getStatsByEventId, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };

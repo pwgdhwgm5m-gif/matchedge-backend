@@ -25,15 +25,18 @@ test('an ambiguous cross-provider ID cannot enter the prediction ledger without 
 
 test('a verified SportsDB fixture survives the identity cache wrapper', async () => {
   const originalTsdb=sportsDb.getEventById,originalBsd=bsd.getEventById;
+  let bsdCalls=0;
   sportsDb.getEventById=async id=>({ok:true,data:{events:[{idEvent:id,strHomeTeam:'FC Emmen',
     strAwayTeam:'TOP Oss',strLeague:'Dutch Eerste Divisie',dateEvent:'2026-09-26',
     strTimestamp:'2026-09-26T18:00:00',strStatus:'NS'}]}});
-  bsd.getEventById=async()=>({available:false});
+  bsd.getEventById=async()=>{bsdCalls++;return {available:false};};
   try {
-    const query={fixtureId:'cache-test-identity-2489842',homeTeamName:'FC Emmen',awayTeamName:'TOP Oss',
+    const query={fixtureId:'cache-test-identity-2489842',provider:'sportsdb',homeTeamName:'FC Emmen',awayTeamName:'TOP Oss',
       leagueName:'Dutch Eerste Divisie',kickoff:'2026-09-26T18:00:00Z'};
     assert.deepEqual(await verifiedFixtureProvider(query),{provider:'sportsdb',id:query.fixtureId});
     assert.deepEqual(await verifiedFixtureProvider(query),{provider:'sportsdb',id:query.fixtureId});
+    assert.equal(await verifiedFixtureProvider({...query,provider:null}),null);
+    assert.equal(bsdCalls,0);
   } finally { sportsDb.getEventById=originalTsdb;bsd.getEventById=originalBsd; }
 });
 

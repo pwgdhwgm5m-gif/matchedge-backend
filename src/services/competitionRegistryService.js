@@ -474,6 +474,7 @@ function resolveCompetition({
 function decorateMatch(match, provider) {
   if (!match || typeof match !== 'object') return match;
   const competition = resolveCompetition({
+    canonicalCompetitionKey: match.canonicalCompetitionKey,
     provider,
     canonicalProvider: match.canonicalProvider,
     source: match.source,
@@ -489,8 +490,12 @@ function decorateMatch(match, provider) {
   });
   const rawName = String(match.displayName || match.leagueName || match.league || '').trim();
   const fallbackKey = normalizeCompetitionName(rawName);
+  const kind=providerKind(provider || match.canonicalProvider || match.source || match.dataSource);
+  const ownTeamIds=kind && (match.homeTeamId || match.awayTeamId || match.homeId || match.awayId)
+    ? { [kind]:{home:String(match.homeTeamId||match.homeId||''),away:String(match.awayTeamId||match.awayId||'')} } : {};
   return {
     ...match,
+    providerTeamIds:{...ownTeamIds,...(match.providerTeamIds||{})},
     canonicalCompetitionKey: competition?.canonicalCompetitionKey ||
       (fallbackKey ? `unmapped:${fallbackKey}` : null),
     displayName: competition?.displayName || rawName,
@@ -546,6 +551,10 @@ function mergeDuplicate(preferred, secondary) {
   merged.providerIds = {
     ...(secondary.providerIds || {}),
     ...(preferred.providerIds || {})
+  };
+  merged.providerTeamIds = {
+    ...(secondary.providerTeamIds || {}),
+    ...(preferred.providerTeamIds || {})
   };
   return merged;
 }

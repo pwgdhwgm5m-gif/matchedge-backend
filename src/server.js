@@ -110,6 +110,7 @@ app.use('/api/match-room', matchRoomRoute);
 app.use('/api/messages', messagesRoute);
 app.use('/api/push', pushRoute);
 app.use('/api/matches', matchesRoute);
+app.use('/api/provider-catalog', require('./routes/providerCatalog'));
 app.use('/api/analysis', analysisRoute);
 app.use('/api/live', liveRoute);
 app.use('/api/odds-history', oddsHistoryRoute);

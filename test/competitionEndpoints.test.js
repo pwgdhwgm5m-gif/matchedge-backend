@@ -238,7 +238,7 @@ test('live endpoint keeps lower-priority competitions visible and merges provide
     assert.ok(mls);
     assert.equal(mls.canonicalProvider, 'bsd');
     assert.equal(mls.providerIds.bsd, 'bsd-mls-1');
-    assert.equal(mls.providerIds.thesportsdb, 'tsdb-mls-1');
+    assert.equal(mls.providerIds.sportsdb, 'tsdb-mls-1');
     assert.ok(response.body.matches.some(match => match.canonicalCompetitionKey === 'netherlands-eerste-divisie'));
     assert.ok(response.body.matches.some(match => match.canonicalCompetitionKey === 'england-premier-league'));
   } finally {
@@ -247,4 +247,33 @@ test('live endpoint keeps lower-priority competitions visible and merges provide
     bsdService.extractList = original.extractList;
     bsdService.eventToResultMatch = original.eventToResultMatch;
   }
+});
+
+test('live details request BSD statistics with the BSD event id, preserving possession',async()=>{
+  const original={getOrFetch:cache.getOrFetch,transformLiveEvent:sportsDb.transformLiveEvent,
+    getStatsByEventId:bsdService.getStatsByEventId};
+  let requested=null;
+  const base={fixtureId:'2489900',leagueId:'4641',league:'Dutch Eerste Divisie',
+    homeTeam:'FC Emmen',awayTeam:'TOP Oss',kickoff:'2026-09-27T18:00:00Z',
+    homeScore:0,awayScore:0,isLive:true,minute:22,statusShort:'1H'};
+  try{
+    sportsDb.transformLiveEvent=()=>base;
+    cache.getOrFetch=async key=>key==='live:v2:all'?{ok:true,data:{livescore:[{idEvent:'2489900'}]}}:
+      key==='bsd:fixture-live:canonical'?{ok:true,matches:[{...base,fixtureId:'223991',bsdEventId:'223991',
+        league:'Eerste Divisie',homeTeamId:'721',awayTeamId:'722'}]}:{ok:false};
+    bsdService.getStatsByEventId=async id=>{requested=id;return {available:true,data:{stats:{
+      home:{possession:57,shots_on_target:3,corners:2},
+      away:{possession:43,shots_on_target:1,corners:0}}}};};
+    const response=responseCapture();
+    await routeHandler(liveRouter,'/:fixtureId')({params:{fixtureId:'2489900'},query:{provider:'sportsdb',
+      homeTeamName:'FC Emmen',awayTeamName:'TOP Oss',leagueName:'Dutch Eerste Divisie',kickoff:base.kickoff}},response);
+    assert.equal(response.statusCode,200);
+    assert.equal(requested,'223991');
+    assert.equal(response.body.providerIds.sportsdb,'2489900');
+    assert.equal(response.body.providerIds.bsd,'223991');
+    assert.deepEqual(response.body.possession,{home:57,away:43});
+    assert.equal(response.body.stats.shotsOnTargetHome,3);
+    assert.equal(response.body.liveStatsSource,'bsd');
+  }finally{cache.getOrFetch=original.getOrFetch;sportsDb.transformLiveEvent=original.transformLiveEvent;
+    bsdService.getStatsByEventId=original.getStatsByEventId;}
 });

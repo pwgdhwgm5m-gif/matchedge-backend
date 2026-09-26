@@ -187,7 +187,7 @@ router.get('/:fixtureId', async (req, res) => {
   } = req.query;
   let { sportKey } = req.query;
   const registeredCompetition=competitionRegistry.resolveCompetition({leagueName,league:leagueName});
-  const effectiveTsdbLeagueId=tsdbLeagueId || registeredCompetition?.providerIds?.sportsdb || undefined;
+  const effectiveTsdbLeagueId=registeredCompetition?.providerIds?.sportsdb || undefined;
 
   // Never rely on every frontend surface to supply bookmaker routing.
   // Resolve the canonical competition server-side and derive the verified
@@ -237,8 +237,19 @@ router.get('/:fixtureId', async (req, res) => {
   }
 
   try {
+    const providerIdentity=require('../services/providerIdentityCache');
+    const requestedProvider=require('../services/liveFixtureIdentity').providerKey(req.query.provider);
+    const known=await providerIdentity.lookup({fixtureId,homeTeam:homeTeamName,awayTeam:awayTeamName,
+      kickoff,canonicalCompetitionKey:registeredCompetition?.canonicalCompetitionKey,
+      canonicalProvider:requestedProvider,providerIds:requestedProvider?{[requestedProvider]:fixtureId}:{}}).catch(()=>null);
+    const verified=known ? null : requestedProvider ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,
+      leagueName,kickoff,provider:requestedProvider}).catch(()=>null) : null;
+    const providerIds={...(known?.providerIds||{})};
+    if(verified)providerIds[verified.provider]=verified.id;
+    const providerTeamIds=known?.providerTeamIds||{};
     const analysisPromise = computeFullAnalysis({
       fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId:effectiveTsdbLeagueId, leagueName, season, sportKey, kickoff,
+      providerIds,providerTeamIds,
     });
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 22000));
     let result = await Promise.race([analysisPromise, timeoutPromise]);
