@@ -15,10 +15,13 @@ async function cachedEventStats(eventId) {
     return r && r.available ? r.stats : null;
   });
 }
-async function teamAdvancedForm(fixtures, teamId, limit=8) {
+async function teamAdvancedForm(fixtures, teamId, limit=8, kickoff=null) {
+  const cutoff=Date.parse(kickoff||'');
   // Team schedules arrive newest first. Select the latest completed events,
   // independent of the provider's original ordering.
   const finished=(fixtures||[]).filter(f=>f?.fixture?.id && f?.goals?.home!=null)
+    .filter(f=>!Number.isFinite(cutoff) || (Number.isFinite(Date.parse(f.fixture?.date)) &&
+      Date.parse(f.fixture.date)<cutoff))
     .sort((a,b)=>(Date.parse(b.fixture?.date)||0)-(Date.parse(a.fixture?.date)||0))
     .slice(0,limit);
   const rows=await Promise.all(finished.map(async f=>{

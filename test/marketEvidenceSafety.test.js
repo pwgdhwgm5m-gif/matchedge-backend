@@ -177,9 +177,9 @@ test('advanced form selects latest completed provider events in either schedule 
   sportsDb.getEventStatsFormatted = async id => ({available:true,stats:{xg:{home:id==='recent'?2:0,away:1}}});
   const fixture=(id,date)=>({fixture:{id,date},teams:{home:{id:'home'},away:{id:'away'}},goals:{home:1,away:0}});
   try {
-    for (const rows of [[fixture('recent','2026-09-20'),fixture('old','2026-05-01')],
-      [fixture('old','2026-05-01'),fixture('recent','2026-09-20')]]) {
-      const form=await accuracy.teamAdvancedForm(rows,'home',1);
+    for (const rows of [[fixture('future','2026-10-01'),fixture('recent','2026-09-20'),fixture('old','2026-05-01')],
+      [fixture('old','2026-05-01'),fixture('recent','2026-09-20'),fixture('future','2026-10-01')]]) {
+      const form=await accuracy.teamAdvancedForm(rows,'home',1,'2026-09-26T18:45:00Z');
       assert.equal(form.avgXgFor,2);
       assert.equal(form.xgSample,1);
     }

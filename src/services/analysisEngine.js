@@ -345,8 +345,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   if(!isSuperLig && !String(homeHistorySource||'').startsWith('sportsdb'))advancedHomeFixtures=[];
   if(!isSuperLig && !String(awayHistorySource||'').startsWith('sportsdb'))advancedAwayFixtures=[];
   const [homeAdvanced, awayAdvanced] = await Promise.all([
-    accuracy.teamAdvancedForm(advancedHomeFixtures, advancedHomeId, 8),
-    accuracy.teamAdvancedForm(advancedAwayFixtures, advancedAwayId, 8),
+    accuracy.teamAdvancedForm(advancedHomeFixtures, advancedHomeId, 8, kickoff),
+    accuracy.teamAdvancedForm(advancedAwayFixtures, advancedAwayId, 8, kickoff),
   ]);
   const xgEffectiveSample = Math.min(Number(homeAdvanced?.xgSample || 0), Number(awayAdvanced?.xgSample || 0));
   const xgProvenance = {
