@@ -40,13 +40,14 @@ router.get('/sportmonks-turkey-diagnostic', async (req, res) => {
 
 router.get('/', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
-  const [turkeySmResult, smResult, bsdResult] = await Promise.all([
+  const [turkeySmResult, smResult, bsdResult, sportsdbDay] = await Promise.all([
     cache.getOrFetch(`sportmonks:tr:600:${date}`, config.cache.ttlLive, () => sportmonks.getLeagueFixturesByDate(date, 600)),
     Promise.race([
       cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
       new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_date_timeout'}), 5000))
     ]),
-    cache.getOrFetch(`bsd:canonical-results:${date}`, 300, () => bsdService.getResultMatchesForDate(date))
+    cache.getOrFetch(`bsd:canonical-results:${date}`, 300, () => bsdService.getResultMatchesForDate(date)),
+    cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date))
   ]);
 
   const todayKey = new Date().toISOString().slice(0,10);
@@ -77,6 +78,13 @@ router.get('/', async (req, res) => {
       ...m, canonicalProvider:'bsd',
       providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
     },'bsd'));
+  const sportsdbMatches=(sportsdbDay?.ok?sportsdbDay.data?.events||[]:[])
+    .filter(e=>sportsDb.isWhitelistedLeague(e.idLeague)&&
+      sportsDb.isLeagueIdentityConsistent(e.idLeague,e.strLeague))
+    .map(e=>sportsDb.transformEvent(e))
+    .filter(m=>m?.homeTeam&&m?.awayTeam)
+    .map(m=>competitionRegistry.decorateMatch({...m,canonicalProvider:'thesportsdb',
+      providerIds:{...(m.providerIds||{}),sportsdb:String(m.fixtureId)}},'sportsdb'));
 
   // The canonical result feeds intentionally omit some competitions that are
   // present in the real-time TheSportsDB feed (notably women's cups). For
@@ -90,11 +98,12 @@ router.get('/', async (req, res) => {
     return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=6*60*60*1000;
   };
   const canonicalMatches=competitionRegistry.dedupeCompetitionFixtures(
-    [...sportmonksMatches,...bsdMatches],{toleranceMs:6*60*60*1000,preferBsd:true});
+    [...sportsdbMatches,...sportmonksMatches,...bsdMatches],{toleranceMs:6*60*60*1000,preferBsd:true});
   const liveRows=(liveResult?.ok?(liveResult.data?.livescore||[]):[])
     .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
     .map(e=>sportsDb.transformLiveEvent(e))
-    .filter(m=>m?.isLive)
+    .filter(m=>m?.isLive&&sportsDb.isWhitelistedLeague(m.leagueId)&&
+      sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))
     .map(m=>competitionRegistry.decorateMatch({
       ...m,canonicalProvider:'thesportsdb',
       providerIds:{thesportsdb:String(m.fixtureId)},dataSource:'thesportsdb'
@@ -125,6 +134,7 @@ router.get('/', async (req, res) => {
     canonicalPolicy:'bsd-score-first-sportmonks-and-sportsdb-fallback',
     sportmonksCount:sportmonksMatches.length,
     bsdCount:bsdMatches.length,
+    sportsdbFallbackCount:sportsdbMatches.length,
     liveCount:liveRows.length,
     bsdRegistryAvailable:!!bsdResult?.registryAvailable
   });

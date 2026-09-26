@@ -9,6 +9,7 @@ const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
 const config = require('../config/config');
 const { acceptsLiveFixture, providerKey } = require('./liveFixtureIdentity');
+const competitionRegistry = require('./competitionRegistryService');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const V2_BASE_URL = 'https://www.thesportsdb.com/api/v2/json';
@@ -158,13 +159,24 @@ const STRICT_LEAGUE_NAMES = {
   '5637': ['emperor cup',"emperor's cup",'emperors cup',"japan emperor's cup",'japan emperors cup'],
   '5635': ['korea cup','korean fa cup'],
   '5525': ['china fa cup','chinese fa cup'],
-  '5180': ['australia cup','australia ffa cup','ffa cup']
+  '5180': ['australia cup','australia ffa cup','ffa cup'],
+  '4351': ['brazilian serie a','brazil serie a','brasileirão','brasileirao'],
+  '4406': ['argentinian primera division','argentine primera division','argentina primera división'],
+  '4501': ['copa libertadores','conmebol libertadores'],
+  '4503': ['fifa club world cup','club world cup'],
+  '4903': ['german super cup','dfl supercup','franz beckenbauer supercup']
 };
 function isLeagueIdentityConsistent(leagueId, leagueName) {
+  const registered=competitionRegistry.resolveCompetition({provider:'sportsdb',leagueId});
+  if (!registered) return false;
+  const named=competitionRegistry.resolveCompetition({leagueName});
+  if (named) return named.canonicalCompetitionKey===registered.canonicalCompetitionKey;
   const expected = STRICT_LEAGUE_NAMES[String(leagueId)];
-  if (!expected) return true;
-  const actual = String(leagueName || '').trim().toLowerCase();
-  return expected.some(name => actual === name || actual.includes(name));
+  const actual = competitionRegistry.normalizeCompetitionName(leagueName);
+  return Boolean(actual) && (expected || registered.aliases).some(name => {
+    const normalized=competitionRegistry.normalizeCompetitionName(name);
+    return normalized && (actual===normalized || actual.includes(normalized));
+  });
 }
 
 async function fetchT(url, timeoutMs) {

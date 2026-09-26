@@ -45,7 +45,9 @@ router.get('/', async (req, res) => {
     for(const e of (tsdbLive.data?.livescore||[])){
       if(String(e.strSport||'').toLowerCase()!=='soccer')continue;
       const m=sportsDb.transformLiveEvent(e);
-       if(m?.isLive)addMatch({...m,canonicalProvider:'thesportsdb',providerIds:{thesportsdb:String(m.fixtureId)}});
+       if(m?.isLive&&sportsDb.isWhitelistedLeague(m.leagueId)&&
+          sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))
+         addMatch({...m,canonicalProvider:'thesportsdb',providerIds:{thesportsdb:String(m.fixtureId)}});
     }
   }
   if(bsdLive.ok){

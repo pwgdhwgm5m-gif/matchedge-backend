@@ -8,7 +8,13 @@ const OFFICIAL_VISIBLE_COMPETITION_KEYS = new Set([
   'russia-premier-league','hungary-nb-i','finland-veikkausliiga','ireland-premier-division',
   'usa-mls','japan-j1-league','south-korea-k-league-1','china-super-league','australia-a-league-men',
   'uefa-champions-league','uefa-europa-league','uefa-conference-league','uefa-super-cup','uefa-nations-league',
-  'england-fa-cup'
+  'england-fa-cup','mexico-liga-mx','brazil-serie-a','argentina-primera-division',
+  'copa-libertadores','fifa-club-world-cup','germany-super-cup',
+  'spain-copa-del-rey','france-coupe-de-france','germany-dfb-pokal','italy-coppa-italia',
+  'england-efl-cup','portugal-taca-de-portugal','netherlands-knvb-beker','turkey-turkish-cup',
+  'belgium-cup','greece-cup','scotland-cup','switzerland-cup','austria-cup',
+  'norway-cup','sweden-cup','poland-cup','russia-cup','usa-us-open-cup',
+  'japan-emperors-cup','south-korea-korea-cup','china-fa-cup','australia-cup'
 ]);
 
 function makeCompetition(
@@ -269,6 +275,9 @@ const COMPETITIONS = Object.freeze([
   makeCompetition('netherlands-knvb-beker', 'KNVB Beker', 'Netherlands', 'domestic-cup', 2, 5,
     { sportsdb: '4902' },
     ['Dutch KNVB Cup', 'KNVB Cup']),
+  makeCompetition('germany-super-cup', 'German Super Cup', 'Germany', 'domestic-cup', 2, 5,
+    { sportsdb: '4903' }, ['DFL Supercup', 'Franz Beckenbauer Supercup'],
+    'verified', { fixtureCoverage: 'not-observed', eligibleForHomePriority: false }),
   makeCompetition('belgium-cup', 'Belgian Cup', 'Belgium', 'domestic-cup', 2, 5,
     { sportsdb: '5831' }, ['Croky Cup'],
     'verified', { fixtureCoverage: 'fixture-producing' }),
@@ -332,6 +341,18 @@ const COMPETITIONS = Object.freeze([
   makeCompetition('australia-cup', 'Australia Cup', 'Australia', 'domestic-cup', 2, 5,
     { sportsdb: '5180' }, ['Australian Cup', 'FFA Cup'],
     'verified', { fixtureCoverage: 'fixture-producing' }),
+  makeCompetition('brazil-serie-a', 'Brazilian Serie A', 'Brazil', 'league', 2, 5,
+    { sportsdb: '4351' }, ['Brazil Serie A', 'Brasileirão', 'Brasileirao'],
+    'verified', { fixtureCoverage: 'not-observed', eligibleForHomePriority: false }),
+  makeCompetition('argentina-primera-division', 'Argentinian Primera Division', 'Argentina', 'league', 2, 5,
+    { sportsdb: '4406' }, ['Argentina Primera División', 'Argentine Primera Division'],
+    'verified', { fixtureCoverage: 'not-observed', eligibleForHomePriority: false }),
+  makeCompetition('copa-libertadores', 'Copa Libertadores', 'South America', 'continental', 2, 5,
+    { sportsdb: '4501' }, ['CONMEBOL Libertadores'],
+    'verified', { fixtureCoverage: 'not-observed', eligibleForHomePriority: false }),
+  makeCompetition('fifa-club-world-cup', 'FIFA Club World Cup', 'World', 'continental', 2, 5,
+    { sportsdb: '4503' }, ['Club World Cup'],
+    'verified', { fixtureCoverage: 'not-observed', eligibleForHomePriority: false }),
   pending('afc-champions-league-elite', 'AFC Champions League Elite', 'Asia', 'continental', 5,
     ['AFC Champions League', 'AFC Champions League Elite']),
   pending('afc-champions-league-two', 'AFC Champions League Two', 'Asia', 'continental', 5,
@@ -349,7 +370,7 @@ const COMPETITIONS = Object.freeze([
   makeCompetition('mexico-liga-mx', 'Mexico Liga MX', 'Mexico', 'league', 2, 99,
     { sportsdb: '4350', bsd: '19' },
     ['Liga MX', 'Liga MX Apertura', 'Mexican Primera League'],
-    'verified', { visibleInCompetitionFilter: false, eligibleForHomePriority: false })
+    'verified', { visibleInCompetitionFilter: true, eligibleForHomePriority: false })
 ]);
 
 const BY_KEY = new Map(COMPETITIONS.map(item => [item.canonicalCompetitionKey, item]));

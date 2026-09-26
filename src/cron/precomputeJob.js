@@ -14,43 +14,6 @@ const modelCalibration = require('../services/modelCalibrationService');
 const premiumLab = require('../services/premiumLabService');
 const prematchArchive = require('../services/prematchArchiveService');
 
-const PRECOMPUTE_TSDB_LEAGUES = {
-  '4339': '71',   // Türkiye Süper Lig (TFF scraper)
-  '4328': '47',   // Premier League
-  '4335': '87',   // La Liga
-  '4332': '55',   // Serie A
-  '4331': '54',   // Bundesliga
-  '4334': '53',   // Ligue 1
-  '4337': '57',   // Eredivisie
-  '4336': '135',  // Yunanistan Super League
-  '4358': '59',   // Norvec Eliteserien
-  '4347': '67',   // Isvec Allsvenskan
-  '4422': '196',  // Polonya Ekstraklasa
-  '4355': '63',   // Rusya Premier Lig
-  '4344': '61',   // Portekiz Liga Portugal
-  '4636': '51',   // Finlandiya Veikkausliiga
-  '4338': '40',   // Belcika First Division A
-  '4340': '46',   // Danimarka Superligaen
-  '4330': '64',   // Iskocya Premiership
-  '4629': '252',  // Hirvatistan HNL
-  '4691': '189',  // Romanya Liga I
-  '4510': '4510', // Portekiz Kupasi
-  '4641': '4641', // Netherlands Eerste Divisie
-  '4490': '4490', // UEFA Nations League
-  '4480': '4480', // UEFA Champions League
-  '4481': '4481', // UEFA Europa League
-  '5071': '5071', // UEFA Conference League
-};
-
-const TSDB_SPORT_KEYS = {
-  '4339':'soccer_turkey_super_league','4328':'soccer_epl','4335':'soccer_spain_la_liga',
-  '4332':'soccer_italy_serie_a','4331':'soccer_germany_bundesliga','4334':'soccer_france_ligue_one',
-  '4337':'soccer_netherlands_eredivisie','4336':'soccer_greece_super_league','4358':'soccer_norway_eliteserien',
-  '4347':'soccer_sweden_allsvenskan','4422':'soccer_poland_ekstraklasa','4355':'soccer_russia_premier_league',
-  '4344':'soccer_portugal_primeira_liga','4636':'soccer_finland_veikkausliiga','4338':'soccer_belgium_first_div',
-  '4340':'soccer_denmark_superliga','4330':'soccer_spl'
-};
-
 const DAYS_AHEAD = 7;
 function selectPrecomputeFixtures(candidates,limit){
   const byTime=(a,b)=>new Date(a.kickoff)-new Date(b.kickoff);
@@ -117,18 +80,20 @@ async function precomputeTodaysMatches() {
     if (!result.ok) continue;
     for(const e of (result.data?.events||[])){
       if(e.strStatus!=='NS')continue;
-      const fotmobLeague=PRECOMPUTE_TSDB_LEAGUES[String(e.idLeague)];
-      if(!fotmobLeague)continue;
+      const id=String(e.idLeague||'');
+      const competition=competitionRegistry.resolveCompetition({provider:'sportsdb',leagueId:id});
+      if(!sportsDb.isWhitelistedLeague(id)||!competition?.visibleInCompetitionFilter||
+         !sportsDb.isLeagueIdentityConsistent(id,e.strLeague))continue;
       const kickoff=sportsDb.toUtcIso(e.strTimestamp||(e.dateEvent+'T'+(e.strTime||'00:00:00')));
       if(!kickoff||new Date(kickoff)<=new Date())continue;
       upcomingFixtures.push({canonicalProvider:'sportsdb',fixtureId:e.idEvent,
         home:e.idHomeTeam,away:e.idAwayTeam,homeTeamName:e.strHomeTeam,awayTeamName:e.strAwayTeam,
-        league:fotmobLeague,tsdbLeagueId:String(e.idLeague),leagueName:e.strLeague,
-        season:new Date().getFullYear(),sportKey:TSDB_SPORT_KEYS[String(e.idLeague)]||null,kickoff});
+        league:sportsDb.getFotmobIdForTsdbLeague(id)||id,tsdbLeagueId:id,leagueName:e.strLeague,
+        season:new Date().getFullYear(),sportKey:sourcePolicy.oddsSportKeyForCompetition(competition.canonicalCompetitionKey)||null,kickoff});
     }
   }
 
-  console.log(`[precompute] ${upcomingFixtures.length} uygun mac bulundu (${Object.keys(PRECOMPUTE_TSDB_LEAGUES).length} lig).`);
+  console.log(`[precompute] ${upcomingFixtures.length} uygun mac bulundu (${sportsDb.WHITELISTED_LEAGUE_IDS.size} SportsDB whitelist ligi).`);
 
   const MAX_FIXTURES_PER_RUN = config.maxPrecomputeFixturesPerRun;
   const candidates=dedupePrecomputeFixtures(upcomingFixtures);

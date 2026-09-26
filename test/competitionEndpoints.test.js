@@ -178,7 +178,7 @@ test('fixture endpoint transforms a verified SportsDB event and rejects an ID/na
     assert.equal(response.body.matches[0].canonicalCompetitionKey, 'belgium-cup');
     assert.equal(response.body.matches[0].mappingStatus, 'verified');
     assert.equal(response.body.matches[0].fixtureCoverage, 'fixture-producing');
-    assert.equal(response.body.matches[0].visibleInCompetitionFilter, false);
+    assert.equal(response.body.matches[0].visibleInCompetitionFilter, true);
   } finally {
     cache.getOrFetch = originalGetOrFetch;
   }
