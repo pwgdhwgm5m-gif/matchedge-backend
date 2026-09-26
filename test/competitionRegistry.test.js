@@ -85,6 +85,7 @@ test('BSD names resolve across the visible league registry before fixture filter
     homeTeam: 'FC Dordrecht', awayTeam: 'Almere City'
   }, 'bsd');
   assert.equal(eerste.canonicalCompetitionKey, 'netherlands-eerste-divisie');
+  assert.equal(eerste.eligibleForHomePriority, true);
   assert.equal(eerste.visibleInCompetitionFilter, true);
   assert.equal(registry.resolveCompetition({provider:'bsd', leagueId:'unknown', leagueName:'Eerste Divisie', leagueCountry:'Belgium'}), null);
 });

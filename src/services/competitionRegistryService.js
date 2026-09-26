@@ -113,7 +113,7 @@ const COMPETITIONS = Object.freeze([
     'verified', { fixtureCoverage: 'fixture-producing' }),
   makeCompetition('netherlands-eerste-divisie', 'Netherlands Eerste Divisie', 'Netherlands', 'league', 2, 3,
     { sportsdb: '4641' }, ['Eerste Divisie', 'Dutch Eerste Divisie', 'Keuken Kampioen Divisie', 'Netherlands Eerste Divisie'],
-    'verified', { fixtureCoverage: 'fixture-producing', visibleInCompetitionFilter: true, eligibleForHomePriority: false }),
+    'verified', { fixtureCoverage: 'fixture-producing', visibleInCompetitionFilter: true, eligibleForHomePriority: true }),
   makeCompetition('belgium-pro-league', 'Belgium Pro League', 'Belgium', 'league', 2, 3,
     { sportsdb: '4338', oddsApi: 'soccer_belgium_first_div' },
     ['Pro League', 'Belgian Pro League', 'Belgian First Division A'],
