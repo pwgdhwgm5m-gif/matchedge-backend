@@ -3,6 +3,8 @@ const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
 const sportmonks = require('./sportmonksService');
 const bsd = require('./bsdService');
+const { providerKey } = require('./liveFixtureIdentity');
+const { resolveCompetition } = require('./competitionRegistryService');
 const VERSION = 'analysis-v4-venue-regularized-2026-09';
 const SELECTION_VERSION = 'top-picks-analysis-value-v3';
 const HALFTIME_GRACE_MS = 6 * 60 * 60 * 1000;
@@ -108,12 +110,18 @@ function kickoffClose(m, p) {
   const b = new Date(p?.kickoff || 0).getTime();
   return Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= 6 * 60 * 60 * 1000;
 }
-function resultIdentityMatches(m,p){return ledgerTeamPairMatch(m,p)&&kickoffClose(m,p)}
+function resultIdentityMatches(m,p){
+  if(!ledgerTeamPairMatch(m,p)||!kickoffClose(m,p))return false;
+  const expected=resolveCompetition({leagueName:p.league});
+  const actual=resolveCompetition({leagueName:m?.league||m?.leagueName});
+  return !(expected&&actual&&expected.canonicalCompetitionKey!==actual.canonicalCompetitionKey);
+}
 function exactProviderMatch(m, p, provider) {
   const id = providerIdFor(p, provider);
   if (!id) return false;
+  if (providerKey(m?.canonicalProvider||m?.source||m?.dataSource)!==provider)return false;
   return String(m?.providerIds?.[provider] || m?.[`${provider}Id`] ||
-    m?.[`${provider}FixtureId`] || m?.sportmonksId || m?.fixtureId || m?.id || '') === id;
+    m?.[`${provider}FixtureId`] || m?.fixtureId || m?.id || '') === id;
 }
 async function directCanonicalResult(p) {
   const bsdId = providerIdFor(p, 'bsd') || (p.canonicalProvider === 'bsd' ? String(p.fixtureId) : null);
@@ -130,11 +138,12 @@ async function directCanonicalResult(p) {
     const match = r.ok && r.data?.data ? sportmonks.transformFixture(r.data.data) : null;
     if (ledgerFinal(match)&&resultIdentityMatches(match,p)) return { match: { ...match, canonicalProvider: 'sportmonks' } };
   }
-  if (p.fixtureId && (!p.canonicalProvider || p.canonicalProvider === 'sportsdb')) {
-    const r = await sportsDb.getEventById(p.fixtureId).catch(() => ({ ok: false }));
+  const tsdbId=providerIdFor(p,'sportsdb');
+  if (tsdbId && p.canonicalProvider === 'sportsdb') {
+    const r = await sportsDb.getEventById(tsdbId).catch(() => ({ ok: false }));
     const event = r.ok ? (r.data?.events || [])[0] : null;
     const match = event && sportsDb.transformEvent(event);
-    if (ledgerFinal(match)&&resultIdentityMatches(match,p)) return { match: { ...match, canonicalProvider: 'sportsdb' } };
+    if (String(event?.idEvent)===tsdbId&&ledgerFinal(match)&&resultIdentityMatches(match,p)) return { match: { ...match, canonicalProvider: 'sportsdb' } };
   }
   return null;
 }
@@ -153,9 +162,9 @@ async function settlePending() {
     ]);
     let fallback=raw.ok?(raw.data?.events||[]).map(sportsDb.transformEvent):[];
     if(verified.ok)fallback=footballDataOrg.mergeVerifiedScores(fallback,verified.matches);
-    providerRows.push(...fallback.filter(ledgerFinal));
-    if(sm.ok)providerRows.push(...(sm.fixtures||[]).filter(ledgerFinal));
-    if(bsdResults.ok)providerRows.push(...(bsdResults.matches||[]).filter(ledgerFinal));
+    providerRows.push(...fallback.filter(ledgerFinal).map(m=>({...m,canonicalProvider:'sportsdb',providerIds:{sportsdb:String(m.fixtureId)}})));
+    if(sm.ok)providerRows.push(...(sm.fixtures||[]).filter(ledgerFinal).map(m=>({...m,canonicalProvider:'sportmonks',providerIds:{sportmonks:String(m.sportmonksId||m.fixtureId)}})));
+    if(bsdResults.ok)providerRows.push(...(bsdResults.matches||[]).filter(ledgerFinal).map(m=>({...m,canonicalProvider:'bsd'})));
   }
   let settled = 0;
   for (const p of pending) {
@@ -163,7 +172,7 @@ async function settlePending() {
     let match=direct?.match || providerRows.find(m =>
       resultIdentityMatches(m,p) && (exactProviderMatch(m,p,'bsd') || exactProviderMatch(m,p,'sportmonks') ||
       exactProviderMatch(m,p,'sportsdb')));
-    if(!match)match=providerRows.find(m=>ledgerTeamPairMatch(m,p)&&kickoffClose(m,p));
+    if(!match)match=providerRows.find(m=>resultIdentityMatches(m,p));
     const halftimeUnavailable=Boolean(match&&ledgerFinal(match)&&
       (Date.now()-new Date(p.kickoff).getTime()>=HALFTIME_GRACE_MS)&&
       (match.halftimeHome==null||match.halftimeAway==null));
@@ -485,4 +494,4 @@ function clvForPick(pick,closingRows){
   return {closingOdds:closing,clvPercent:+((open/closing-1)*100).toFixed(2),closingDeVigProbability:close.deVigProbability??null};
 }
 
-module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, calibrationHealth, selectionPerformance, outcomes, HALFTIME_GRACE_MS, VERSION, SELECTION_VERSION };
+module.exports = { capture, settlePending, performance, strongestPickPerformance, sportmonksBacktest, walkForwardAudit, pairedAudit, reportCard, v4CrossCheckPerformance, v4ActivationStatus, calibrationHealth, selectionPerformance, outcomes, exactProviderMatch, resultIdentityMatches, HALFTIME_GRACE_MS, VERSION, SELECTION_VERSION };
