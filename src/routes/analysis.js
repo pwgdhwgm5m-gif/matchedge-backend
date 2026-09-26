@@ -148,7 +148,8 @@ router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
       league:archived.league,kickoff:archived.kickoff,capturedAt:archived.capturedAt,
       available:true,prematchSource:archived.source});
   }catch(e){console.warn('[prematch-archive/read]',e.message)}
-  const cached=cache.get(`precomputed:${fixtureId}`);
+  const cacheKey=prematchArchive.precomputedKey({fixtureId,homeTeam,awayTeam,kickoff});
+  const cached=cacheKey?cache.get(cacheKey):null;
   if(cached)return res.json({...cached,available:true,prematchSource:'precomputed-cache'});
   const kickoffQuery=kickoff?new Date(kickoff):null;
   const validKickoff=kickoffQuery&&!Number.isNaN(kickoffQuery.getTime())?kickoffQuery:null;
@@ -209,7 +210,8 @@ router.get('/:fixtureId', async (req, res) => {
   const diagnosticFreshRequested = String(req.query.fresh || '').toLowerCase() === 'true';
   const diagnosticToken = req.get('x-socceredge-diagnostic-token');
   const diagnosticFreshAllowed = diagnosticFreshRequested && Boolean(process.env.DIAGNOSTIC_TOKEN) && diagnosticToken === process.env.DIAGNOSTIC_TOKEN;
-  const precomputed = diagnosticFreshAllowed ? null : cache.get(`precomputed:${fixtureId}`);
+  const cacheKey=prematchArchive.precomputedKey({fixtureId,homeTeam:homeTeamName,awayTeam:awayTeamName,kickoff});
+  const precomputed = diagnosticFreshAllowed || !cacheKey ? null : cache.get(cacheKey);
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
       const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider}).catch(()=>null) : null;

@@ -4,6 +4,11 @@ const {normalizeTeamIdentity} = require('./competitionRegistryService');
 
 const TTL_SECONDS=48*60*60;
 const keyForId=id=>`prematch-archive:id:${String(id)}`;
+const precomputedKey=({fixtureId,homeTeam,awayTeam,kickoff})=>{
+  const home=normalizeTeamIdentity(homeTeam),away=normalizeTeamIdentity(awayTeam);
+  const time=kickoff?validDate(kickoff)?.toISOString()||'':'';
+  return fixtureId&&home&&away&&time?`precomputed:v2:${String(fixtureId)}:${home}:${away}:${time}`:null;
+};
 const validDate=value=>{const date=new Date(value);return Number.isFinite(date.getTime())?date:null};
 const matches=(row,context)=>{
   if(!row||!row.analysis||!row.kickoff||!row.capturedAt)return false;
@@ -47,4 +52,4 @@ async function find(context){
   return null;
 }
 
-module.exports={capture,find};
+module.exports={capture,find,precomputedKey};

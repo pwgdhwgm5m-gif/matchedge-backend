@@ -4,6 +4,10 @@ const cache = require('../utils/cache');
 const footballApi = require('../services/footballApiService');
 const oddsApi = require('../services/oddsApiService');
 const sportsDb = require('../services/sportsDbService');
+const bsd = require('../services/bsdService');
+const sourcePolicy = require('../services/sourcePolicyService');
+const competitionRegistry = require('../services/competitionRegistryService');
+const Prediction = require('../models/PredictionSnapshot');
 const { computeFullAnalysis } = require('../services/analysisEngine');
 const ledger = require('../services/predictionLedgerService');
 const modelCalibration = require('../services/modelCalibrationService');
@@ -31,6 +35,11 @@ const PRECOMPUTE_TSDB_LEAGUES = {
   '4629': '252',  // Hirvatistan HNL
   '4691': '189',  // Romanya Liga I
   '4510': '4510', // Portekiz Kupasi
+  '4641': '4641', // Netherlands Eerste Divisie
+  '4490': '4490', // UEFA Nations League
+  '4480': '4480', // UEFA Champions League
+  '4481': '4481', // UEFA Europa League
+  '5071': '5071', // UEFA Conference League
 };
 
 const TSDB_SPORT_KEYS = {
@@ -43,62 +52,96 @@ const TSDB_SPORT_KEYS = {
 };
 
 const DAYS_AHEAD = 7;
+function selectPrecomputeFixtures(candidates,limit){
+  const byTime=(a,b)=>new Date(a.kickoff)-new Date(b.kickoff);
+  const group=f=>{const key=competitionRegistry.resolveCompetition({leagueName:f.leagueName})?.canonicalCompetitionKey||'';
+    return key.startsWith('uefa-')||key==='netherlands-eerste-divisie'?'target':
+      competitionRegistry.resolveCompetition({leagueName:f.leagueName})?.providerIds?.sportmonks?'core':'other';};
+  const selected=[],seen=new Set();
+  const take=(items,n)=>{for(const fixture of items.sort(byTime)){if(selected.length>=limit||n<=0)break;
+    const key=`${fixture.canonicalProvider}:${fixture.fixtureId}`;if(seen.has(key))continue;
+    seen.add(key);selected.push(fixture);n--;}};
+  take(candidates.filter(f=>group(f)==='target'),Math.min(6,limit));
+  take(candidates.filter(f=>group(f)==='core'),Math.min(6,Math.max(0,limit-selected.length)));
+  take(candidates,limit-selected.length);
+  return selected;
+}
+function dedupePrecomputeFixtures(fixtures){
+  const selected=new Map();
+  for(const fixture of fixtures){
+    const competition=competitionRegistry.resolveCompetition({leagueName:fixture.leagueName});
+    const key=[competition?.canonicalCompetitionKey||fixture.leagueName,
+      competitionRegistry.normalizeTeamIdentity(fixture.homeTeamName),
+      competitionRegistry.normalizeTeamIdentity(fixture.awayTeamName),String(fixture.kickoff).slice(0,10)].join(':');
+    if(!selected.has(key)||(fixture.canonicalProvider==='bsd'&&!competition?.providerIds?.sportmonks))selected.set(key,fixture);
+  }
+  return [...selected.values()];
+}
 
 function formatDate(d) {
   return d.toISOString().split('T')[0];
 }
 
 async function precomputeTodaysMatches() {
-  console.log(`[precompute] Onumuzdeki ${DAYS_AHEAD} gun taraniyor (TheSportsDB)...`);
+  console.log(`[precompute] Onumuzdeki ${DAYS_AHEAD} gun taraniyor (BSD, sonra SportsDB)...`);
 
   const upcomingFixtures = [];
+
+  // Discover BSD fixtures first. TheSportsDB fills only matches BSD omitted.
+  for(let i=0;i<DAYS_AHEAD;i++){
+    const date=new Date();date.setDate(date.getDate()+i);
+    const day=formatDate(date);
+    const result=await bsd.fetchBsdAll('/events/?date_from='+day+'&date_to='+day,5*60,8000);
+    if(!result.ok)continue;
+    for(const raw of bsd.extractList(result.data)){
+      const m=bsd.eventToResultMatch(raw);
+      const competition=competitionRegistry.resolveCompetition({leagueName:m.league,provider:'bsd',leagueId:m.leagueId});
+      const kickoff=new Date(m.date||'');
+      if(!competition?.visibleInCompetitionFilter||competition.providerIds?.sportmonks||
+         !m.fixtureId||!m.homeTeam||!m.awayTeam||!Number.isFinite(kickoff.getTime())||kickoff<=new Date()||
+         m.homeScore!=null||m.awayScore!=null)continue;
+      upcomingFixtures.push({canonicalProvider:'bsd',fixtureId:m.fixtureId,
+        homeTeamName:m.homeTeam,awayTeamName:m.awayTeam,leagueName:m.league,
+        tsdbLeagueId:competition.providerIds.sportsdb||null,
+        league:sportsDb.getFotmobIdForTsdbLeague(competition.providerIds.sportsdb)||null,
+        season:new Date().getFullYear(),sportKey:sourcePolicy.oddsSportKeyForCompetition(competition.canonicalCompetitionKey)||null,
+        kickoff:kickoff.toISOString()});
+    }
+  }
 
   for (let i = 0; i < DAYS_AHEAD; i++) {
     const date = new Date();
     date.setDate(date.getDate() + i);
     const dateStr = formatDate(date);
-
     const result = await sportsDb.getMatchesByDate(dateStr);
-    if (!result.ok) {
-      console.error(`[precompute] ${dateStr}: fikstur cekilemedi, atlaniyor.`);
-      continue;
+    if (!result.ok) continue;
+    for(const e of (result.data?.events||[])){
+      if(e.strStatus!=='NS')continue;
+      const fotmobLeague=PRECOMPUTE_TSDB_LEAGUES[String(e.idLeague)];
+      if(!fotmobLeague)continue;
+      const kickoff=sportsDb.toUtcIso(e.strTimestamp||(e.dateEvent+'T'+(e.strTime||'00:00:00')));
+      if(!kickoff||new Date(kickoff)<=new Date())continue;
+      upcomingFixtures.push({canonicalProvider:'sportsdb',fixtureId:e.idEvent,
+        home:e.idHomeTeam,away:e.idAwayTeam,homeTeamName:e.strHomeTeam,awayTeamName:e.strAwayTeam,
+        league:fotmobLeague,tsdbLeagueId:String(e.idLeague),leagueName:e.strLeague,
+        season:new Date().getFullYear(),sportKey:TSDB_SPORT_KEYS[String(e.idLeague)]||null,kickoff});
     }
-
-    const events = (result.data && result.data.events) || [];
-    events.forEach(function (e) {
-      if (e.strStatus !== 'NS') return;
-      const fotmobLeague = PRECOMPUTE_TSDB_LEAGUES[String(e.idLeague)];
-      if (!fotmobLeague) return;
-
-      upcomingFixtures.push({
-        fixtureId: e.idEvent,
-        home: e.idHomeTeam,
-        away: e.idAwayTeam,
-        homeTeamName: e.strHomeTeam,
-        awayTeamName: e.strAwayTeam,
-        league: fotmobLeague,
-        leagueName: e.strLeague,
-        season: new Date().getFullYear(),
-        sportKey: TSDB_SPORT_KEYS[String(e.idLeague)] || null,
-        kickoff: sportsDb.toUtcIso(e.strTimestamp || (e.dateEvent + 'T' + (e.strTime || '00:00:00'))),
-
-      });
-    });
   }
 
   console.log(`[precompute] ${upcomingFixtures.length} uygun mac bulundu (${Object.keys(PRECOMPUTE_TSDB_LEAGUES).length} lig).`);
 
   const MAX_FIXTURES_PER_RUN = config.maxPrecomputeFixturesPerRun;
-  const prioritized = upcomingFixtures
-    .sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff))
-    .slice(0, MAX_FIXTURES_PER_RUN);
+  const candidates=dedupePrecomputeFixtures(upcomingFixtures);
+  const prioritized=selectPrecomputeFixtures(candidates,MAX_FIXTURES_PER_RUN);
 
-  if (upcomingFixtures.length > MAX_FIXTURES_PER_RUN) {
-    console.log(`[precompute] Kota korumasi: ${upcomingFixtures.length} mactan ilk ${MAX_FIXTURES_PER_RUN} tanesi onden hesaplanacak.`);
+  if (candidates.length > MAX_FIXTURES_PER_RUN) {
+    console.log(`[precompute] Kota korumasi: ${candidates.length} mactan ${MAX_FIXTURES_PER_RUN} tanesi onden hesaplanacak.`);
   }
 
   for (const fixture of prioritized) {
     try {
+      const canonicalFixtureKey=`${fixture.canonicalProvider}:${fixture.fixtureId}`;
+      if(await Prediction.exists({canonicalFixtureKey,modelVersion:ledger.VERSION}))continue;
       const result = await computeFullAnalysis({
         fixtureId: fixture.fixtureId,
         home: fixture.home,
@@ -106,9 +149,11 @@ async function precomputeTodaysMatches() {
         homeTeamName: fixture.homeTeamName,
         awayTeamName: fixture.awayTeamName,
         league: fixture.league,
+        tsdbLeagueId:fixture.tsdbLeagueId,
         leagueName: fixture.leagueName,
         season: fixture.season,
         sportKey: fixture.sportKey,
+        kickoff:fixture.kickoff,
       });
 
       const precomputed = {
@@ -120,15 +165,17 @@ async function precomputeTodaysMatches() {
         computedAt: new Date().toISOString(),
       };
 
-      cache.set(`precomputed:${fixture.fixtureId}`, precomputed, config.cache.ttlPrecomputed);
+      const cacheKey=prematchArchive.precomputedKey({fixtureId:fixture.fixtureId,
+        homeTeam:fixture.homeTeamName,awayTeam:fixture.awayTeamName,kickoff:fixture.kickoff});
+      if(cacheKey)cache.set(cacheKey, precomputed, config.cache.ttlPrecomputed);
       try {
         await prematchArchive.capture(precomputed,{fixtureId:fixture.fixtureId,kickoff:fixture.kickoff,
           league:fixture.leagueName,homeTeam:fixture.homeTeamName,awayTeam:fixture.awayTeamName,
-          canonicalProvider:'sportsdb'});
+          canonicalProvider:fixture.canonicalProvider});
       }catch(e){console.warn('[precompute/prematch-archive]',e.message)}
       await ledger.capture(precomputed, { fixtureId: fixture.fixtureId, kickoff: fixture.kickoff, league: fixture.leagueName,
-        homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName, canonicalProvider:'sportsdb',
-        providerIds:{sportsdb:String(fixture.fixtureId)} });
+        homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName, canonicalProvider:fixture.canonicalProvider,
+        providerIds:{[fixture.canonicalProvider]:String(fixture.fixtureId)} });
       await premiumLab.lockFixtureValidation(fixture.fixtureId);
     } catch (err) {
       console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
@@ -178,4 +225,4 @@ function startOddsSnapshotCron() {
   // Startup'ta 34 ligi ayni anda vurmak 429 firtinasi yaratiyordu. Ilk tarama cron saatinde yapilir.
 }
 
-module.exports = { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron, precomputeTodaysMatches };
+module.exports = { startPrecomputeCron, startKeepAlive, startOddsSnapshotCron, precomputeTodaysMatches, selectPrecomputeFixtures, dedupePrecomputeFixtures };
