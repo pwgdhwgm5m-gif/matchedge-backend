@@ -86,8 +86,9 @@ function outcomes(m, options = {}) {
   if (!Number.isFinite(h) || !Number.isFinite(a)) return null;
   const out={ home: h > a ? 1 : 0, draw: h === a ? 1 : 0, away: a > h ? 1 : 0,
     over25: h + a > 2 ? 1 : 0, btts: h > 0 && a > 0 ? 1 : 0, homeScore: h, awayScore: a };
-  const hh=Number(m.halftimeHome),ha=Number(m.halftimeAway);
-  if(Number.isFinite(hh)&&Number.isFinite(ha)){
+  const hh=m.halftimeHome==null||m.halftimeHome===''?null:Number(m.halftimeHome);
+  const ha=m.halftimeAway==null||m.halftimeAway===''?null:Number(m.halftimeAway);
+  if(!options.halftimeUnavailable&&Number.isFinite(hh)&&Number.isFinite(ha)&&hh>=0&&ha>=0&&hh<=h&&ha<=a){
     out.halftimeHome=hh;out.halftimeAway=ha;
     out.fhHomeScores=hh>0?1:0;out.fhAwayScores=ha>0?1:0;out.fhOver05=hh+ha>0?1:0;
     out.shHomeScores=h-hh>0?1:0;out.shAwayScores=a-ha>0?1:0;out.shOver05=(h-hh)+(a-ha)>0?1:0;
