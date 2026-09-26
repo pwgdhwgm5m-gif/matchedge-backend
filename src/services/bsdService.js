@@ -39,12 +39,18 @@
 const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
 const fixtureIdentity = require('./fixtureIdentityService');
+const { BsdRequestBudget } = require('./bsdRequestBudget');
 
 const BASE_URL = 'https://sports.bzzoiro.com/api/v2';
 const API_KEY = process.env.BSD_API_KEY || '';
+const requestBudget = new BsdRequestBudget({
+  dailyBudget:Math.min(7000,Math.max(1,Number(process.env.BSD_DAILY_REQUEST_BUDGET)||6000)),
+});
+const inFlight = new Map();
 
 async function fetchBsd(path, timeoutMs) {
   if (!API_KEY) return { ok: false, error: 'no_api_key' };
+  if (!requestBudget.reserve()) return {ok:false,error:'bsd_request_budget'};
 
   const ms = timeoutMs || 8000;
   const controller = new AbortController();
@@ -54,6 +60,7 @@ async function fetchBsd(path, timeoutMs) {
       signal: controller.signal,
       headers: { 'Authorization': 'Token ' + API_KEY },
     });
+    requestBudget.observe(res);
     if (!res.ok) {
       return { ok: false, error: 'http_' + res.status };
     }
@@ -70,11 +77,17 @@ async function fetchBsdCached(path, ttlSeconds, timeoutMs) {
   const key='bsd-http:'+path;
   const hit=cache.get(key);
   if(hit !== undefined) return {...hit,cached:true};
-  const result=await fetchBsd(path,timeoutMs);
-  // Cache successes normally and failures briefly so one unavailable BSD
-  // endpoint cannot burn the daily allowance through repeated UI refreshes.
-  cache.set(key,result,result.ok ? ttlSeconds : Math.min(60,ttlSeconds));
-  return result;
+  if(inFlight.has(key))return inFlight.get(key);
+  const pending=(async()=>{
+    const result=await fetchBsd(path,timeoutMs);
+    // Do not cache a budget denial: a cached older result may become available
+    // through another endpoint or after the UTC quota reset.
+    if(result.error!=='bsd_request_budget')
+      cache.set(key,result,result.ok ? ttlSeconds : Math.min(60,ttlSeconds));
+    return result;
+  })();
+  inFlight.set(key,pending);
+  try{return await pending;}finally{inFlight.delete(key);}
 }
 
 async function fetchBsdAll(path, ttlSeconds, timeoutMs) {
@@ -111,7 +124,7 @@ function extractList(data) {
 }
 
 async function getLiveFootballEvents() {
-  return fetchBsdCached('/events/live/', 20, 8000);
+  return fetchBsdCached('/events/live/', 60, 8000);
 }
 
 async function getFootballEventsForDate(dateStr, teamName) {
@@ -564,7 +577,7 @@ async function getStatsForMatch(homeTeam,awayTeam,kickoffIso) {
 async function getStatsByEventId(eventId) {
   if(!API_KEY)return {available:false,error:'no_api_key'};
   if(!/^\d+$/.test(String(eventId||'')))return {available:false,error:'invalid_bsd_event_id'};
-  const result=await fetchBsdCached('/events/'+eventId+'/stats/',30,6000);
+  const result=await fetchBsdCached('/events/'+eventId+'/stats/',60,6000);
   return result.ok ? {available:true,eventId:String(eventId),source:'bsd',data:result.data} :
     {available:false,error:result.error};
 }

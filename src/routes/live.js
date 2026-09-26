@@ -32,7 +32,7 @@ router.get('/', async (req, res) => {
   const [tsdbLive,smLive,bsdLive]=await Promise.all([
     quickBound(cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),{ok:false,error:'live_lookup_timeout'}),
     quickBound(cache.getOrFetch('sportmonks:inplay',30,()=>sportmonks.getInplay()),{ok:false,error:'sportmonks_timeout'}),
-    quickBound(cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches()),{ok:false,error:'bsd_live_timeout'})
+    quickBound(cache.getOrFetch('bsd:fixture-live:canonical',60,()=>bsdService.getLiveResultMatches()),{ok:false,error:'bsd_live_timeout'})
   ]);
   const candidates=[];
   const addMatch=rawMatch=>{
@@ -133,7 +133,7 @@ router.get('/:fixtureId', async (req, res) => {
       match = { ...directBsd.match, canonicalProvider:'bsd', dataSource:'bsd' };
     } else {
       const bsdDirect = await quickBound(
-        cache.getOrFetch('bsd:live:canonical',20,()=>bsdService.getLiveFootballEvents()),
+        cache.getOrFetch('bsd:live:canonical',60,()=>bsdService.getLiveFootballEvents()),
         {ok:false},
         2800
       );
@@ -203,7 +203,7 @@ router.get('/:fixtureId', async (req, res) => {
   match.providerIds={...(known?.providerIds||{}),...(match.providerIds||{})};
   match.providerTeamIds={...(known?.providerTeamIds||{}),...(match.providerTeamIds||{})};
   if(!match.providerIds.bsd && providerKey(match.canonicalProvider)!=='bsd'){
-    const liveBsd=await quickBound(cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches()),{ok:false},2800);
+    const liveBsd=await quickBound(cache.getOrFetch('bsd:fixture-live:canonical',60,()=>bsdService.getLiveResultMatches()),{ok:false},2800);
     const candidates=(liveBsd.ok?liveBsd.matches:[]).filter(row=>acceptsLiveFixture(row,'bsd',{
       homeTeamName:match.homeTeam,awayTeamName:match.awayTeam,
       leagueName:match.league,kickoff:match.kickoff||match.date}));
