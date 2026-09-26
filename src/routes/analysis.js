@@ -185,20 +185,22 @@ router.get('/:fixtureId', async (req, res) => {
     homeTeamName, awayTeamName, leagueName, kickoff, tsdbLeagueId,
   } = req.query;
   let { sportKey } = req.query;
+  const registeredCompetition=competitionRegistry.resolveCompetition({leagueName,league:leagueName});
+  const effectiveTsdbLeagueId=tsdbLeagueId || registeredCompetition?.providerIds?.sportsdb || undefined;
 
   // Never rely on every frontend surface to supply bookmaker routing.
   // Resolve the canonical competition server-side and derive the verified
   // odds key centrally. This fixes analysis-detail/deep-link requests too.
   if (!sportKey) {
     const competition = competitionRegistry.resolveCompetition({
-      leagueName, league: leagueName, leagueId: tsdbLeagueId
+      leagueName, league: leagueName, leagueId: effectiveTsdbLeagueId
     });
     sportKey = sourcePolicy.oddsSportKeyForCompetition(competition?.canonicalCompetitionKey) || undefined;
   }
 
   let { league } = req.query;
-  if (!league && tsdbLeagueId) {
-    league = sportsDb.getFotmobIdForTsdbLeague(tsdbLeagueId) || undefined;
+  if (!league && effectiveTsdbLeagueId) {
+    league = sportsDb.getFotmobIdForTsdbLeague(effectiveTsdbLeagueId) || undefined;
   }
 
   // Internal diagnostics can explicitly bypass the precomputed response without
@@ -234,7 +236,7 @@ router.get('/:fixtureId', async (req, res) => {
 
   try {
     const analysisPromise = computeFullAnalysis({
-      fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey, kickoff,
+      fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId:effectiveTsdbLeagueId, leagueName, season, sportKey, kickoff,
     });
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 22000));
     let result = await Promise.race([analysisPromise, timeoutPromise]);
