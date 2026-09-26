@@ -50,29 +50,27 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // - Eslesmesi bilinen diger ligler -> TheSportsDB (Premium)
   // - Eslesmesi olmayan ligler -> eskisi gibi API-Football denenir (suspended
   //   oldugu icin muhtemelen bos doner, sistem yine de cokme, notr deger uretir)
-  const homeFormFetcher = isSuperLig
-    ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
-    : useBsdPrimary
+  const homeFormFetcher = useBsdPrimary || useSportmonksPrimary
       ? async () => { const br=await bsd.getTeamFixturesForAnalysis(homeTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,home)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff}) : br); }
+    : isSuperLig
+      ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,{fixtureId,fixtureSide:'home',kickoff})
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
-  const awayFormFetcher = isSuperLig
-    ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
-    : useBsdPrimary
+  const awayFormFetcher = useBsdPrimary || useSportmonksPrimary
       ? async () => { const br=await bsd.getTeamFixturesForAnalysis(awayTeamName,15); const usable=br.ok&&br.data?.response?.length&&stats.summarizeMatches(br.data.response,away)?.played; return usable ? br : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff}) : br); }
+    : isSuperLig
+      ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,{fixtureId,fixtureSide:'away',kickoff})
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
-  const homeFormCacheKey = isSuperLig
-    ? `tff-form:${homeTeamName}`
-    : useBsdPrimary ? `bsd-form:v4:${homeTeamName}`
+  const homeFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `bsd-form:v5:${effectiveTsdbLeagueId||'unknown'}:${homeTeamName}`
+    : isSuperLig ? `tff-form:${homeTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${homeTeamName}`
       : `form:${home}`;
-  const awayFormCacheKey = isSuperLig
-    ? `tff-form:${awayTeamName}`
-    : useBsdPrimary ? `bsd-form:v4:${awayTeamName}`
+  const awayFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `bsd-form:v5:${effectiveTsdbLeagueId||'unknown'}:${awayTeamName}`
+    : isSuperLig ? `tff-form:${awayTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${awayTeamName}`
       : `form:${away}`;
@@ -695,13 +693,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ]);
     if (extended?.ok) extendedOddsBoard=oddsApi.extractExtendedMarketOdds(extended.data,homeTeamName,awayTeamName);
   }
-  // BSD remains the first market source. Only when BSD has no fresh complete
-  // 1X2 consensus do we spend one cached 5DollarFootball day-window request.
-  // The response supplies an executable Bet365 quote; failures and plan gaps
-  // are fail-open and remain null (never fabricated).
+  // BSD consensus anchors the probabilities. Value requires a separate,
+  // executable bookmaker quote; the consensus price is not a bettable offer.
+  // The bookmaker lookup is day-cached and fails open when unavailable.
   const bsdAnchorOdds = bsdConsensus?.fresh && bsdConsensus?.h2h?.home && bsdConsensus?.h2h?.draw && bsdConsensus?.h2h?.away
     ? bsdConsensus.h2h : null;
-  const fiveDollarOdds = (!bsdAnchorOdds && homeTeamName && awayTeamName)
+  const fiveDollarOdds = (homeTeamName && awayTeamName)
     ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
     : null;
   if (!marketOddsBoard && fiveDollarOdds?.marketBoard) marketOddsBoard = fiveDollarOdds.marketBoard;
@@ -971,13 +968,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       },
       bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
       calibrationApplied: calibrated.applied,
-      architecture:'analysis-v3-market-ensemble',
+      architecture:'analysis-v4-venue-regularized-ensemble',
       dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
       powerRating:{ homeElo, awayElo, homeGames:homeEloGames, awayGames:awayEloGames, persistent:Boolean(persistedHomePower||persistedAwayPower), homePersistent:Boolean(persistedHomePower), awayPersistent:Boolean(persistedAwayPower), homeStoredTeamId:persistedHomePower?.teamId||null, awayStoredTeamId:persistedAwayPower?.teamId||null, homeIdentityMatch:persistedHomePower ? (persistedHomePower._identityMatch || (String(persistedHomePower.teamId)===String(homeTeamIdForStats)?'id':'stored')) : null, awayIdentityMatch:persistedAwayPower ? (persistedAwayPower._identityMatch || (String(persistedAwayPower.teamId)===String(awayTeamIdForStats)?'id':'stored')) : null, adjustment:eloAdjustment },
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
       analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), evidenceFamilies, playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
-      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), marketAnchorSource:bsdAnchorOdds?'bsd-consensus':(primaryMatchOdds?'the-odds-api':(footballDataMatchOdds?'football-data.co.uk':null)), executableOddsSource:primaryMatchOdds?'the-odds-api':(footballDataMatchOdds?'football-data.co.uk':null), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
+      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), marketAnchorSource:bsdAnchorOdds?'bsd-consensus':(primaryMatchOdds?'the-odds-api':(fiveDollarOdds?.matchOdds?'5dollarfootball-bet365':(footballDataMatchOdds?'football-data.co.uk':null))), executableOddsSource:primaryMatchOdds?'the-odds-api':(fiveDollarOdds?.matchOdds?'5dollarfootball-bet365':(footballDataMatchOdds?'football-data.co.uk':null)), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
       probabilityPipeline:['venue-recent-form','opponent-strength','independent-evidence-ensemble','mismatch-preservation','dixon-coles','market-calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },

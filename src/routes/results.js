@@ -56,8 +56,8 @@ router.get('/', async (req, res) => {
 
 
 
-  // Canonical ownership is intentionally strict:
-  // six subscribed leagues => SportMonks; every other competition => BSD v2.
+  // BSD owns scores and results across leagues. SportMonks remains the
+  // verified fallback in the six subscribed competitions.
   const smRaw=[...(turkeySmResult?.ok?turkeySmResult.fixtures:[]),...(smResult?.ok?smResult.fixtures:[])];
   const smUnique=new Map();
   for(const f of smRaw){
@@ -73,7 +73,6 @@ router.get('/', async (req, res) => {
   );
 
   const bsdMatches=(bsdResult?.ok?bsdResult.matches:[])
-    .filter(m=>!sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))
     .map(m=>competitionRegistry.decorateMatch({
       ...m, canonicalProvider:'bsd',
       providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
@@ -90,23 +89,8 @@ router.get('/', async (req, res) => {
     const at=new Date(a?.kickoff||a?.date||0).getTime(),bt=new Date(b?.kickoff||b?.date||0).getTime();
     return Number.isFinite(at)&&Number.isFinite(bt)&&Math.abs(at-bt)<=6*60*60*1000;
   };
-  const canonicalMatches=[];
-  // Guard against the same real-world fixture arriving with different provider
-  // IDs or slightly different league labels. Provider ownership remains
-  // SportMonks for the six subscribed leagues; duplicates are merged only
-  // when normalized teams and kickoff are the same fixture.
-  for(const candidate of [...sportmonksMatches,...bsdMatches]){
-    const index=canonicalMatches.findIndex(m=>teamKey(m)===teamKey(candidate)&&isCloseKickoff(m,candidate));
-    if(index<0){canonicalMatches.push(candidate);continue;}
-    const old=canonicalMatches[index];
-    const preferCandidate=String(candidate.canonicalProvider)==='sportmonks'&&String(old.canonicalProvider)!=='sportmonks';
-    const primary=preferCandidate?candidate:old,secondary=preferCandidate?old:candidate;
-    canonicalMatches[index]={...secondary,...primary,
-      homeScore:primary.homeScore??secondary.homeScore,awayScore:primary.awayScore??secondary.awayScore,
-      halftimeHome:primary.halftimeHome??secondary.halftimeHome,halftimeAway:primary.halftimeAway??secondary.halftimeAway,
-      providerIds:{...(secondary.providerIds||{}),...(primary.providerIds||{})}
-    };
-  }
+  const canonicalMatches=competitionRegistry.dedupeCompetitionFixtures(
+    [...sportmonksMatches,...bsdMatches],{toleranceMs:6*60*60*1000,preferBsd:true});
   const liveRows=(liveResult?.ok?(liveResult.data?.livescore||[]):[])
     .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
     .map(e=>sportsDb.transformLiveEvent(e))
@@ -124,9 +108,11 @@ router.get('/', async (req, res) => {
     if(index<0){canonicalMatches.push(live);continue;}
     const old=canonicalMatches[index];
     canonicalMatches[index]={...old,
-      homeScore:live.homeScore??old.homeScore, awayScore:live.awayScore??old.awayScore,
-      minute:live.minute??old.minute, statusShort:live.statusShort||old.statusShort,
-      isLive:true
+      homeScore:old.homeScore??live.homeScore, awayScore:old.awayScore??live.awayScore,
+      minute:old.minute??live.minute,
+      statusShort:old.statusShort&&old.statusShort!=='NS'?old.statusShort:live.statusShort||old.statusShort,
+      isLive:old.statusShort==='FT'?false:Boolean(old.isLive||live.isLive),
+      providerIds:{...(live.providerIds||{}),...(old.providerIds||{})}
     };
   }
   await sportsDb.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='thesportsdb'));
@@ -136,7 +122,7 @@ router.get('/', async (req, res) => {
     .sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   res.json({
     date,matches,
-    canonicalPolicy:'sportmonks-6-else-bsd-plus-today-live',
+    canonicalPolicy:'bsd-score-first-sportmonks-and-sportsdb-fallback',
     sportmonksCount:sportmonksMatches.length,
     bsdCount:bsdMatches.length,
     liveCount:liveRows.length,

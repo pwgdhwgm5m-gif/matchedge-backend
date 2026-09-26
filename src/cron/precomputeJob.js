@@ -91,10 +91,10 @@ async function precomputeTodaysMatches() {
   for(let i=0;i<DAYS_AHEAD;i++){
     const date=new Date();date.setDate(date.getDate()+i);
     const day=formatDate(date);
-    const result=await bsd.fetchBsdAll('/events/?date_from='+day+'&date_to='+day,5*60,8000);
+    // This helper enriches BSD league IDs from its verified league registry.
+    const result=await bsd.getResultMatchesForDate(day);
     if(!result.ok)continue;
-    for(const raw of bsd.extractList(result.data)){
-      const m=bsd.eventToResultMatch(raw);
+    for(const m of result.matches||[]){
       const competition=competitionRegistry.resolveCompetition({leagueName:m.league,provider:'bsd',leagueId:m.leagueId});
       const kickoff=new Date(m.date||'');
       if(!competition?.visibleInCompetitionFilter||competition.providerIds?.sportmonks||

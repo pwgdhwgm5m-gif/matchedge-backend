@@ -74,10 +74,9 @@ router.get('/', async (req,res)=>{
   for(const m of extra)put(m);
   for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
 
-  // BSD outside the subscribed six leagues: preferred identity/data, but it
-  // augments rather than erases fixtures absent from BSD's day response.
+  // BSD owns scores/results across leagues. Retain SportMonks and SportsDB as
+  // verified fallbacks for fixtures missing from BSD's day response.
   for(const m of (bsdDay?.ok?bsdDay.matches:[])){
-    if(sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))continue;
     put({...m,canonicalProvider:'bsd',providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}},'bsd');
   }
   // BSD's compact day feed and its live feed can contain different events.
@@ -86,7 +85,6 @@ router.get('/', async (req,res)=>{
   for(const m of (bsdLive?.ok?bsdLive.matches:[])){
     const kickoff = new Date(m.date || m.kickoff);
     if (!Number.isFinite(kickoff.getTime()) || kickoff.toISOString().slice(0,10)!==date) continue;
-    if(sourcePolicy.isBsdCoreLeague({leagueName:m.league,country:m.leagueCountry}))continue;
     put(m,'bsd');
   }
 
@@ -98,7 +96,7 @@ router.get('/', async (req,res)=>{
     put({...m,canonicalProvider:'sportmonks',providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}},'sportmonks');
   }
 
-  let matches=competitionRegistry.dedupeCompetitionFixtures(candidates)
+  let matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{preferBsd:true})
     .sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   if(live?.ok){
     const raw=(live.data?.livescore||[]).filter(e=>String(e.strSport||'').toLowerCase()==='soccer');
@@ -106,7 +104,7 @@ router.get('/', async (req,res)=>{
   }
   matches=competitionRegistry.dedupeCompetitionFixtures(matches.map(m=>
     competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource)
-  ));
+  ),{preferBsd:true});
   // Keep the complete fixture backbone here. Some provider rows do not carry
   // enough league metadata to resolve a registry key at this stage; filtering
   // them here can erase the whole day. Fixtures/Home apply the central registry

@@ -10,7 +10,9 @@ function chooseVerifiedCandidate(choices, preferred) {
 }
 
 async function verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider,sportmonksId}) {
-  if (sportmonksId) return {provider:'sportmonks',id:String(sportmonksId)};
+  // A matched SportMonks fixture can be a cross-provider alias. It does not
+  // establish that the requested numeric event ID belongs to SportMonks.
+  if (sportmonksId && String(sportmonksId)===String(fixtureId)) return {provider:'sportmonks',id:String(fixtureId)};
   if (!fixtureId || !homeTeamName || !awayTeamName || !kickoff) return null;
   const context={homeTeamName,awayTeamName,leagueName,kickoff};
   const preferred=providerKey(provider);

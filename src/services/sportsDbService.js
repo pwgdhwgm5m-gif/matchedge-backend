@@ -8,6 +8,7 @@
 const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
 const config = require('../config/config');
+const { acceptsLiveFixture, providerKey } = require('./liveFixtureIdentity');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const V2_BASE_URL = 'https://www.thesportsdb.com/api/v2/json';
@@ -335,8 +336,15 @@ function applyLiveOverlay(matches, liveEvents) {
   liveEvents.forEach(function (e) { liveMap.set(String(e.idEvent), e); });
 
   return matches.map(function (m) {
+    // Numeric event IDs are only unique inside their own provider. A BSD or
+    // SportMonks row must never inherit an unrelated SportsDB live score.
+    if (providerKey(m.canonicalProvider || m.dataSource || m.source) !== 'sportsdb') return m;
     const raw = liveMap.get(String(m.fixtureId));
     if (!raw) return m;
+    if (!acceptsLiveFixture(transformLiveEvent(raw),'sportsdb',{
+      homeTeamName:m.homeTeam,awayTeamName:m.awayTeam,kickoff:m.kickoff||m.date,
+      leagueName:m.league||m.leagueName
+    })) return m;
 
     const rawStatus = String(raw.strStatus || '').trim();
     const statusUpper = rawStatus.toUpperCase();

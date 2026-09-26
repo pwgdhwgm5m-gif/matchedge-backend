@@ -29,6 +29,11 @@ function pickPrice(block) {
   if (!block) return null;
   return block.closing || block.opening || null;
 }
+function priceFreshness(f){
+  const stamp=f?.oddsUpdatedAt||f?.odds_updated_at||f?.last_update_at||f?.updated_at||null;
+  const age=stamp?Date.now()-Date.parse(stamp):NaN;
+  return {updatedAt:stamp,fresh:Number.isFinite(age)&&age>=0&&age<=6*60*60*1000};
+}
 function normalizeFixture(f, homeName, awayName) {
   if (!f || !teamNamesMatch(f.teams?.home?.name, homeName) || !teamNamesMatch(f.teams?.away?.name, awayName)) return null;
   const odds = f.odds || {};
@@ -37,8 +42,9 @@ function normalizeFixture(f, homeName, awayName) {
   const btts = pickPrice(odds.btts);
   const matchOdds = h2h && Number(h2h.home)>1 && Number(h2h.draw)>1 && Number(h2h.away)>1
     ? { home:Number(h2h.home), draw:Number(h2h.draw), away:Number(h2h.away) } : null;
+  const freshness=priceFreshness(f);
   const marketBoard = {
-    bookmakers: [{ bookmaker:'Bet 365', h2h:matchOdds, totals:goals && Number(goals.line)===2.5 ? {over25:Number(goals.over)||null,under25:Number(goals.under)||null}:null, btts:btts ? {yes:Number(btts.yes)||null,no:Number(btts.no)||null}:null, fresh:true }],
+    bookmakers: [{ bookmaker:'Bet 365', h2h:matchOdds, totals:goals && Number(goals.line)===2.5 ? {over25:Number(goals.over)||null,under25:Number(goals.under)||null}:null, btts:btts ? {yes:Number(btts.yes)||null,no:Number(btts.no)||null}:null, ...freshness }],
     bookmakerCount: 1,
     best: matchOdds ? {home:{bookmaker:'Bet 365',price:matchOdds.home},draw:{bookmaker:'Bet 365',price:matchOdds.draw},away:{bookmaker:'Bet 365',price:matchOdds.away}} : {},
     btts: btts || null,
@@ -95,7 +101,7 @@ async function getMatchOdds(homeName, awayName, kickoff) {
     }
   }
   const bet365 = oddsRow.data?.bookmakers?.find(b => String(b.slug||'').toLowerCase()==='bet365') || oddsRow.data?.bookmakers?.[0];
-  return normalizeFixture({...fixture, odds:bet365?.odds || {}},homeName,awayName);
+  return normalizeFixture({...fixture, odds:bet365?.odds || {}, oddsUpdatedAt:bet365?.last_update_at||bet365?.updated_at||oddsRow.data?.last_update_at||oddsRow.data?.updated_at},homeName,awayName);
 }
 
-module.exports = { enabled, getMatchOdds };
+module.exports = { enabled, getMatchOdds, priceFreshness };

@@ -505,10 +505,10 @@ function normalizeTeamIdentity(value) {
   return aliases[key] || key;
 }
 
-function sourceRank(match) {
+function sourceRank(match, preferBsd = false) {
   const provider = normalizeCompetitionName(match?.canonicalProvider || match?.source || match?.dataSource);
-  if (provider.includes('sportmonks')) return 3;
-  if (provider === 'bsd' || provider.includes('bzzoiro')) return 2;
+  if (provider.includes('sportmonks')) return preferBsd ? 2 : 3;
+  if (provider === 'bsd' || provider.includes('bzzoiro')) return preferBsd ? 3 : 2;
   if (provider.includes('sportsdb')) return 1;
   return 0;
 }
@@ -567,7 +567,7 @@ function dedupeCompetitionFixtures(rows, options = {}) {
     }
 
     const previous = kept[duplicateIndex];
-    const preferNew = sourceRank(match) > sourceRank(previous);
+    const preferNew = sourceRank(match, options.preferBsd === true) > sourceRank(previous, options.preferBsd === true);
     kept[duplicateIndex] = preferNew
       ? mergeDuplicate(match, previous)
       : mergeDuplicate(previous, match);

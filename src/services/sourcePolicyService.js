@@ -1,11 +1,11 @@
 // Central provider-routing policy. Keep this list aligned with the paid SportMonks subscription.
 const SPORTMONKS_PRIMARY = [
-  { key:'premier-league', names:['premier league'], sportmonksId:'8', oddsKey:'soccer_epl' },
-  { key:'la-liga', names:['la liga','primera division'], sportmonksId:'564', oddsKey:'soccer_spain_la_liga' },
-  { key:'bundesliga', names:['bundesliga'], sportmonksId:'82', oddsKey:'soccer_germany_bundesliga' },
-  { key:'serie-a', names:['serie a'], sportmonksId:'384', oddsKey:'soccer_italy_serie_a' },
-  { key:'ligue-1', names:['ligue 1','ligue one'], sportmonksId:'301', oddsKey:'soccer_france_ligue_one' },
-  { key:'turkish-super-lig', names:['turkish super lig','super lig','süper lig'], sportmonksId:'600', oddsKey:'soccer_turkey_super_league' },
+  { key:'premier-league', names:['premier league','england premier league','english premier league','epl'], sportmonksId:'8', oddsKey:'soccer_epl' },
+  { key:'la-liga', names:['la liga','primera division','spain la liga','spanish la liga'], sportmonksId:'564', oddsKey:'soccer_spain_la_liga' },
+  { key:'bundesliga', names:['bundesliga','germany bundesliga','german bundesliga'], sportmonksId:'82', oddsKey:'soccer_germany_bundesliga' },
+  { key:'serie-a', names:['serie a','italy serie a','italian serie a'], sportmonksId:'384', oddsKey:'soccer_italy_serie_a' },
+  { key:'ligue-1', names:['ligue 1','ligue one','france ligue 1','french ligue 1'], sportmonksId:'301', oddsKey:'soccer_france_ligue_one' },
+  { key:'turkish-super-lig', names:['turkish super lig','super lig','süper lig','turkey super lig','turkey super league','trendyol super lig'], sportmonksId:'600', oddsKey:'soccer_turkey_super_league' },
 ];
 
 // Verified The Odds API routing. These keys affect bookmaker-price lookup only;
@@ -31,19 +31,18 @@ function oddsSportKeyForCompetition(canonicalCompetitionKey){
 const norm=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 function resolve({leagueName,sportKey}={}){
   const n=norm(leagueName), sk=String(sportKey||'').trim();
-  return SPORTMONKS_PRIMARY.find(x=>x.oddsKey===sk||x.names.some(name=>n===norm(name)))||null;
+  // A caller-supplied odds key must never turn an unrelated league into a
+  // subscribed SportMonks competition.
+  return SPORTMONKS_PRIMARY.find(x=>n ? x.names.some(name=>n===norm(name)) : x.oddsKey===sk)||null;
 }
 function isBsdCoreLeague({leagueName,country}={}){
   const n=norm(leagueName), c=norm(country);
-  const rules=[
-    {names:['premier league'],countries:['england','united kingdom','uk']},
-    {names:['la liga','laliga'],countries:['spain']},
-    {names:['bundesliga'],countries:['germany']},
-    {names:['serie a'],countries:['italy']},
-    {names:['ligue 1','ligue one'],countries:['france']},
-    {names:['turkish super lig','super lig','süper lig'],countries:['turkey','turkiye']}
-  ];
-  return rules.some(r=>r.names.some(x=>n===norm(x)) && (!c || r.countries.some(x=>c===norm(x))));
+  const core=resolve({leagueName});
+  if(!core)return false;
+  const countries={'premier-league':['england','united kingdom','uk'],'la-liga':['spain'],
+    bundesliga:['germany'],'serie-a':['italy'],'ligue-1':['france'],
+    'turkish-super-lig':['turkey','turkiye']};
+  return !c||(countries[core.key]||[]).some(x=>c===norm(x));
 }
 function policy(ctx={}){
   const core=resolve(ctx);
