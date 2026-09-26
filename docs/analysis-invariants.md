@@ -21,6 +21,8 @@ when changing providers, caching, historical form or probability calculations.
    verified. A competitor's published percentage is a benchmark, never an
    input or a target hard-coded for one fixture. Compare frozen pre-match
    snapshots on settled games using Brier score and calibration by league.
+   A change in the goal formula starts a new model and calibration version;
+   previously settled predictions remain attached to the old version.
 
 If a rule changes, update the relevant unit test and document why before
 deploying. `npm run verify:invariants` is also the `npm start` prerequisite.

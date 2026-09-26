@@ -23,6 +23,23 @@ const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
 const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
+function smoothedGoalStrength(rate, sample, leagueRate) {
+  if(!Number.isFinite(rate)||!Number.isFinite(sample)||sample<=0||!Number.isFinite(leagueRate)||leagueRate<=0)return 1;
+  // Eight league-average pseudo games temper short, one-sided international
+  // schedules. A zero goals sample is evidence of weakness, not certainty of
+  // zero scoring in the next match.
+  const posterior=(Math.max(0,rate)*sample+leagueRate*8)/(sample+8);
+  return Math.max(.35,Math.min(2.4,posterior/leagueRate));
+}
+
+function temperedExpectedGoals(attack, opponentDefenseWeak, leagueGoals) {
+  // Attack and defence ratings both contain recent results. Damping their
+  // product avoids counting the same scoreline twice while retaining direction.
+  const a=Math.max(.35,Math.min(2.4,Number(attack)||0));
+  const d=Math.max(.4,Math.min(2.4,Number(opponentDefenseWeak)||0));
+  return +Math.max(.25,Math.min(3.8,leagueGoals*Math.pow(a,.8)*Math.pow(d,.6))).toFixed(2);
+}
+
 function regularizeSparseGoalRate(rate, leagueRate, sample, independentEvidence) {
   if (!Number.isFinite(rate) || !Number.isFinite(leagueRate) || leagueRate <= 0 ||
       !Number.isFinite(sample) || sample <= 0 || sample >= 5 || independentEvidence) return rate;
@@ -159,8 +176,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
 
   if (isInternationalCompetition) {
     const [th, ta] = await Promise.all([
-      sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null, { international:true }).catch(() => null),
-      sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null, { international:true }).catch(() => null),
+      sportsDb.getTeamFixturesForAnalysis(homeTeamName, null, 15, null, { ...sportsdbOptions('home'),international:true }).catch(() => null),
+      sportsDb.getTeamFixturesForAnalysis(awayTeamName, null, 15, null, { ...sportsdbOptions('away'),international:true }).catch(() => null),
     ]);
 
     const currentHomeId = useOwnSource && homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
@@ -283,10 +300,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const homeForm = isInternationalCompetition ? homeOverallHistory : homeAwaySplit.home;
   const awayForm = isInternationalCompetition ? awayOverallHistory : homeAwaySplit.away;
 
-  const homeAttackBase = homeForm.played > 0 ? homeForm.avgGoalsFor / LEAGUE_AVG_HOME_GOALS : 1.0;
-  const homeDefenseWeakBase = homeForm.played > 0 ? homeForm.avgGoalsAgainst / LEAGUE_AVG_AWAY_GOALS : 1.0;
-  const awayAttackBase = awayForm.played > 0 ? awayForm.avgGoalsFor / LEAGUE_AVG_AWAY_GOALS : 1.0;
-  const awayDefenseWeakBase = awayForm.played > 0 ? awayForm.avgGoalsAgainst / LEAGUE_AVG_HOME_GOALS : 1.0;
+  const homeAttackBase = smoothedGoalStrength(homeForm.avgGoalsFor,homeForm.played,LEAGUE_AVG_HOME_GOALS);
+  const homeDefenseWeakBase = smoothedGoalStrength(homeForm.avgGoalsAgainst,homeForm.played,LEAGUE_AVG_AWAY_GOALS);
+  const awayAttackBase = smoothedGoalStrength(awayForm.avgGoalsFor,awayForm.played,LEAGUE_AVG_AWAY_GOALS);
+  const awayDefenseWeakBase = smoothedGoalStrength(awayForm.avgGoalsAgainst,awayForm.played,LEAGUE_AVG_HOME_GOALS);
   const powerComponents = {
     home: { attack:+((persistedHomePower?.attack||homeAttackBase)*.35+homeAttackBase*.65).toFixed(3), defense:+((persistedHomePower?.defense||(1/Math.max(.45,homeDefenseWeakBase)))*.35+(1/Math.max(.45,homeDefenseWeakBase))*.65).toFixed(3) },
     away: { attack:+((persistedAwayPower?.attack||awayAttackBase)*.35+awayAttackBase*.65).toFixed(3), defense:+((persistedAwayPower?.defense||(1/Math.max(.45,awayDefenseWeakBase)))*.35+(1/Math.max(.45,awayDefenseWeakBase))*.65).toFixed(3) }
@@ -302,8 +319,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const leagueHomeGoals = leagueBase?.homeGoals || LEAGUE_AVG_HOME_GOALS;
   const leagueAwayGoals = leagueBase?.awayGoals || LEAGUE_AVG_AWAY_GOALS;
 
-  const homeLambdaBase = poisson.calculateExpectedGoals(homeAttack, awayDefenseWeak, leagueHomeGoals, 1);
-  const awayLambdaBase = poisson.calculateExpectedGoals(awayAttack, homeDefenseWeak, leagueAwayGoals, 1);
+  const homeLambdaBase = temperedExpectedGoals(homeAttack, awayDefenseWeak, leagueHomeGoals);
+  const awayLambdaBase = temperedExpectedGoals(awayAttack, homeDefenseWeak, leagueAwayGoals);
   let homeLambda = +(homeLambdaBase * motivationHome.multiplier).toFixed(2);
   let awayLambda = +(awayLambdaBase * motivationAway.multiplier).toFixed(2);
 
@@ -986,7 +1003,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       },
       bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
       calibrationApplied: calibrated.applied,
-      architecture:'analysis-v4-venue-regularized-ensemble',
+      architecture:'analysis-v4-historical-shrinkage-ensemble',
       dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
       powerRating:{ homeElo, awayElo, homeGames:homeEloGames, awayGames:awayEloGames, persistent:Boolean(persistedHomePower||persistedAwayPower), homePersistent:Boolean(persistedHomePower), awayPersistent:Boolean(persistedAwayPower), homeStoredTeamId:persistedHomePower?.teamId||null, awayStoredTeamId:persistedAwayPower?.teamId||null, homeIdentityMatch:persistedHomePower ? (persistedHomePower._identityMatch || (String(persistedHomePower.teamId)===String(homeTeamIdForStats)?'id':'stored')) : null, awayIdentityMatch:persistedAwayPower ? (persistedAwayPower._identityMatch || (String(persistedAwayPower.teamId)===String(awayTeamIdForStats)?'id':'stored')) : null, adjustment:eloAdjustment },
       powerComponents,
@@ -1000,4 +1017,4 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   };
 }
 
-module.exports = { computeFullAnalysis, regularizeSparseGoalRate, goalRateCeiling, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
+module.exports = { computeFullAnalysis, regularizeSparseGoalRate, goalRateCeiling, smoothedGoalStrength, temperedExpectedGoals, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };

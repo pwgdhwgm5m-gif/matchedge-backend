@@ -6,7 +6,7 @@
  */
 
 function normalizeTeamName(str) {
-  return String(str || '')
+  const normalized = String(str || '')
     .replace(/İ/g, 'I')
     .replace(/ı/g, 'i')
     .normalize('NFD')
@@ -18,6 +18,9 @@ function normalizeTeamName(str) {
     .replace(/ß/g, 'ss')
     .toLowerCase()
     .trim();
+  // National teams may use either official short or long English names.
+  // Keep this alias exact so a club with a similar substring is not matched.
+  return normalized === 'czechia' ? 'czech republic' : normalized;
 }
 
 /** Iki takim adinin normalize edilince ayni olup olmadigini kontrol eder */
@@ -27,4 +30,3 @@ function teamNamesMatch(nameA, nameB) {
 }
 
 module.exports = { normalizeTeamName, teamNamesMatch };
-

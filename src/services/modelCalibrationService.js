@@ -5,8 +5,8 @@ const { resolveCompetition } = require('./competitionRegistryService');
 const MARKETS = ['home','draw','away','over25','btts'];
 const HALF_MARKETS = ['fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
 const ALL_MARKETS = [...MARKETS,...HALF_MARKETS];
-const CALIBRATION_VERSION = 'cal-v4-venue-regularized';
-const MODEL_VERSION = 'analysis-v4-venue-regularized-2026-09';
+const CALIBRATION_VERSION = 'cal-v4-historical-shrinkage';
+const MODEL_VERSION = 'analysis-v4-historical-shrinkage-2026-09';
 // Self-improvement is restricted to well-covered core leagues. Each league
 // learns its own calibration only after enough prospective settled samples;
 // the shared "all" prior is built from the same trusted league set.

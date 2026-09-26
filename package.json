@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/server.js",
     "prestart": "npm run verify:invariants",
-    "verify:invariants": "node --test test/bsdRequestBudget.test.js test/liveFixtureIdentity.test.js test/providerIdentityCache.test.js test/providerPriorityCoverage.test.js test/marketEvidenceSafety.test.js test/whitelistCoverage.test.js",
+    "verify:invariants": "node --test test/bsdRequestBudget.test.js test/liveFixtureIdentity.test.js test/providerIdentityCache.test.js test/providerPriorityCoverage.test.js test/marketEvidenceSafety.test.js test/whitelistCoverage.test.js test/goalStrengthPrior.test.js",
     "dev": "node --watch src/server.js",
     "test": "node --test test/*.test.js",
     "migrate:fixture-identity": "node scripts/migrateCanonicalFixtureIdentity.js"

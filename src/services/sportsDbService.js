@@ -484,7 +484,8 @@ async function resolveTeamId(teamName, options) {
   // teams[0] fallback could bind a country name to a similarly named club.
   const cacheKey = `tsdb-teamid:v3:${options.international ? 'national:' : 'club:'}${normalizeTeamName(teamName)}`;
   const result = await cache.getOrFetch(cacheKey, 60 * 60 * 24 * 30, async () => {
-    const url = BASE_URL + '/' + API_KEY + '/searchteams.php?t=' + encodeURIComponent(teamName);
+    const lookupName = normalizeTeamName(teamName)==='czech republic' ? 'Czech Republic' : teamName;
+    const url = BASE_URL + '/' + API_KEY + '/searchteams.php?t=' + encodeURIComponent(lookupName);
     const res = await fetchT(url, 8000);
     if (!res.ok) return { ok: false };
     const teams = (res.data && res.data.teams) || [];
