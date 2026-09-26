@@ -3,7 +3,7 @@ const sportsDb = require('./sportsDbService');
 const footballDataOrg = require('./footballDataOrgService');
 const sportmonks = require('./sportmonksService');
 const bsd = require('./bsdService');
-const VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
+const VERSION = 'analysis-v4-venue-regularized-2026-09';
 const SELECTION_VERSION = 'top-picks-analysis-value-v3';
 const HALFTIME_GRACE_MS = 6 * 60 * 60 * 1000;
 const percent = value => Number.isFinite(Number(value)) ? Math.max(0, Math.min(100, Number(value))) / 100 : null;

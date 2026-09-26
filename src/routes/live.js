@@ -8,6 +8,7 @@ const bsdService = require('../services/bsdService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const sportmonks = require('../services/sportmonksService');
 const competitionRegistry = require('../services/competitionRegistryService');
+const { acceptsLiveFixture, providerKey } = require('../services/liveFixtureIdentity');
 
 const quickBound = (promise, fallback, ms = 2500) => Promise.race([
   promise,
@@ -77,24 +78,29 @@ router.get('/', async (req, res) => {
  */
 router.get('/:fixtureId', async (req, res) => {
   const { fixtureId } = req.params;
+  const identity = req.query;
+  const accepts = (candidate, provider) => acceptsLiveFixture(candidate, provider, identity);
+  const allows = provider => !providerKey(identity.provider) || providerKey(identity.provider) === provider;
 
-  const liveResult = await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () =>
-    sportsDb.getLiveScores()
-  );
+  const liveResult = allows('sportsdb')
+    ? await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores())
+    : {ok:false};
 
   let match = null;
   let fromCacheFlag = false;
 
   if (liveResult.ok) {
     const rawLive = liveResult.data?.livescore || [];
-    const rawMatch = rawLive.find(e => String(e.idEvent) === String(fixtureId));
+    const liveMatch=e=>{const transformed=sportsDb.transformLiveEvent(e);return { ...transformed, kickoff:transformed.kickoff ||
+      (e.strTimestamp ? sportsDb.toUtcIso(e.strTimestamp) : null) };};
+    const rawMatch = allows('sportsdb') && rawLive.find(e => String(e.idEvent) === String(fixtureId) && accepts(liveMatch(e),'sportsdb'));
     if (rawMatch) {
-      match = sportsDb.transformLiveEvent(rawMatch);
+      match = liveMatch(rawMatch);
       fromCacheFlag = liveResult.fromCache;
     }
   }
 
-  if (!match) {
+  if (!match && allows('sportsdb')) {
     const today = new Date().toISOString().split('T')[0];
     const result = await quickBound(
       cache.getOrFetch(`live:all:${today}`, config.cache.ttlLive, () => sportsDb.getMatchesByDate(today)),
@@ -103,7 +109,7 @@ router.get('/:fixtureId', async (req, res) => {
 
     if (result.ok) {
       const rawEvents = result.data?.events || [];
-      const raw = rawEvents.find(e => String(e.idEvent) === String(fixtureId));
+      const raw = allows('sportsdb') && rawEvents.find(e => String(e.idEvent) === String(fixtureId) && accepts(sportsDb.transformEvent(e),'sportsdb'));
       if (raw) {
         match = sportsDb.transformEvent(raw);
         fromCacheFlag = result.fromCache;
@@ -111,13 +117,13 @@ router.get('/:fixtureId', async (req, res) => {
     }
   }
 
-  if (!match) {
+  if (!match && allows('bsd')) {
     const directBsd = await quickBound(
       bsdService.getEventById(fixtureId),
       { available:false, error:'bsd_event_timeout' },
       2800
     );
-    if (directBsd.available && directBsd.match) {
+    if (directBsd.available && accepts(directBsd.match,'bsd')) {
       match = { ...directBsd.match, canonicalProvider:'bsd', dataSource:'bsd' };
     } else {
       const bsdDirect = await quickBound(
@@ -127,7 +133,7 @@ router.get('/:fixtureId', async (req, res) => {
       );
       if (bsdDirect.ok) {
         const raw = bsdService.extractList(bsdDirect.data)
-          .find(e=>String(bsdService.getEventId(e))===String(fixtureId));
+          .find(e=>String(bsdService.getEventId(e))===String(fixtureId) && accepts(bsdService.eventToResultMatch(e),'bsd'));
         if (raw) {
           match={...bsdService.eventToResultMatch(raw),canonicalProvider:'bsd',dataSource:'bsd',providerIds:{bsd:String(fixtureId)}};
           fromCacheFlag=bsdDirect.fromCache;
@@ -139,14 +145,14 @@ router.get('/:fixtureId', async (req, res) => {
   // A fixture can legitimately be absent from the provider's compact live/day
   // feeds (especially lower leagues/cups). Resolve the canonical event directly
   // before declaring it missing.
-  if (!match) {
+  if (!match && allows('sportsdb')) {
     const direct = await quickBound(
       cache.getOrFetch(`tsdb-event:${fixtureId}`, 60, () => sportsDb.getEventById(fixtureId)),
       { ok:false, error:'event_lookup_timeout' }
     );
     if (direct.ok) {
       const raw = direct.data?.events?.[0] || direct.data?.event?.[0] || direct.data?.event || null;
-      if (raw && String(raw.idEvent) === String(fixtureId)) {
+      if (raw && String(raw.idEvent) === String(fixtureId) && accepts(sportsDb.transformEvent(raw),'sportsdb')) {
         match = sportsDb.transformEvent(raw);
         fromCacheFlag = direct.fromCache;
       }
@@ -156,13 +162,13 @@ router.get('/:fixtureId', async (req, res) => {
   // SportMonks fixture ids are different from TheSportsDB ids. For subscribed
   // leagues, resolve an in-play fixture by its canonical SportMonks id as a
   // second direct path rather than relying on team-name matching.
-  if (!match) {
+  if (!match && allows('sportmonks')) {
     const smDirect = await quickBound(
       cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay()),
       { ok:false, error:'sportmonks_timeout' }
     );
     if (smDirect.ok) {
-      const sm = (smDirect.fixtures || []).find(x => String(x.sportmonksId) === String(fixtureId));
+      const sm = (smDirect.fixtures || []).find(x => String(x.sportmonksId) === String(fixtureId) && accepts({homeTeam:x.homeTeam,awayTeam:x.awayTeam,kickoff:x.kickoff,league:x.leagueName},'sportmonks'));
       if (sm) {
         match = {
           fixtureId:String(sm.sportmonksId), sportmonksId:sm.sportmonksId,
@@ -171,7 +177,7 @@ router.get('/:fixtureId', async (req, res) => {
           homeScore:sm.homeScore, awayScore:sm.awayScore,
           halftimeHome:sm.halftimeHome, halftimeAway:sm.halftimeAway,
           kickoff:sm.kickoff, minute:sm.minute, statusShort:sm.statusShort,
-          isLive:!!sm.isLive, dataSource:'sportmonks'
+          isLive:!!sm.isLive, dataSource:'sportmonks',canonicalProvider:'sportmonks',providerIds:{sportmonks:String(sm.sportmonksId)}
         };
         fromCacheFlag = smDirect.fromCache;
       }
@@ -185,6 +191,7 @@ router.get('/:fixtureId', async (req, res) => {
     match,
     match.canonicalProvider||match.source||match.dataSource
   );
+  const tsdbExtrasId = providerKey(match.canonicalProvider || match.dataSource) === 'sportsdb' ? fixtureId : null;
 
   // --- Pro/Premium V2 ek veriler: zaman cizelgesi, istatistik, kadro, TV, highlights ---
   // Bitmis maclarda bu veri degismeyecegi icin uzun (6 saat) cache'leniyor;
@@ -199,11 +206,11 @@ router.get('/:fixtureId', async (req, res) => {
     new Promise(resolve => setTimeout(() => resolve(fallback), ms))
   ]);
   const [timelineResult, statsResult, lineupResult, tvResult, highlightsResult] = await Promise.all([
-    bounded(cache.getOrFetch(`tsdb-timeline:${fixtureId}`, extrasTtl, () => sportsDb.getEventTimelineFormatted(fixtureId)), {available:false,events:[],timeout:true}),
-    bounded(cache.getOrFetch(`tsdb-stats:${fixtureId}`, extrasTtl, () => sportsDb.getEventStatsFormatted(fixtureId)), {available:false,stats:{},timeout:true}),
-    bounded(cache.getOrFetch(`tsdb-lineup:${fixtureId}`, extrasTtl, () => sportsDb.getEventLineupFormatted(fixtureId)), {available:false,timeout:true}),
-    bounded(cache.getOrFetch(`tsdb-tv:${fixtureId}`, extrasTtl, () => sportsDb.getEventTVFormatted(fixtureId)), {available:false,broadcasts:[],timeout:true}),
-    bounded(cache.getOrFetch(`tsdb-highlights:${fixtureId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(fixtureId)), {available:false,timeout:true}),
+    tsdbExtrasId ? bounded(cache.getOrFetch(`tsdb-timeline:${tsdbExtrasId}`, extrasTtl, () => sportsDb.getEventTimelineFormatted(tsdbExtrasId)), {available:false,events:[],timeout:true}) : {available:false,events:[]},
+    tsdbExtrasId ? bounded(cache.getOrFetch(`tsdb-stats:${tsdbExtrasId}`, extrasTtl, () => sportsDb.getEventStatsFormatted(tsdbExtrasId)), {available:false,stats:{},timeout:true}) : {available:false,stats:{}},
+    tsdbExtrasId ? bounded(cache.getOrFetch(`tsdb-lineup:${tsdbExtrasId}`, extrasTtl, () => sportsDb.getEventLineupFormatted(tsdbExtrasId)), {available:false,timeout:true}) : {available:false},
+    tsdbExtrasId ? bounded(cache.getOrFetch(`tsdb-tv:${tsdbExtrasId}`, extrasTtl, () => sportsDb.getEventTVFormatted(tsdbExtrasId)), {available:false,broadcasts:[],timeout:true}) : {available:false,broadcasts:[]},
+    tsdbExtrasId ? bounded(cache.getOrFetch(`tsdb-highlights:${tsdbExtrasId}`, extrasTtl, () => sportsDb.getEventHighlightsFormatted(tsdbExtrasId)), {available:false,timeout:true}) : {available:false},
   ]);
 
   const stats = statsResult.available ? statsResult.stats : {};
@@ -331,6 +338,8 @@ router.get('/:fixtureId', async (req, res) => {
 
   res.json({
     fixtureId,
+    canonicalProvider: match.canonicalProvider || match.dataSource || null,
+    providerIds: match.providerIds || {},
     kickoff: match.kickoff || match.date || null,
     league: match.league || match.leagueName || null,
     canonicalCompetitionKey: match.canonicalCompetitionKey,

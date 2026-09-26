@@ -1,15 +1,21 @@
 const Prediction = require('../models/PredictionSnapshot');
 const ModelCalibration = require('../models/ModelCalibration');
+const { resolveCompetition } = require('./competitionRegistryService');
 
 const MARKETS = ['home','draw','away','over25','btts'];
 const HALF_MARKETS = ['fhHomeScores','fhAwayScores','fhOver05','shHomeScores','shAwayScores','shOver05'];
 const ALL_MARKETS = [...MARKETS,...HALF_MARKETS];
-const CALIBRATION_VERSION = 'cal-v3-model-isolated';
-const MODEL_VERSION = 'analysis-v3-adaptive-ensemble-2026-09';
+const CALIBRATION_VERSION = 'cal-v4-venue-regularized';
+const MODEL_VERSION = 'analysis-v4-venue-regularized-2026-09';
 // Self-improvement is restricted to well-covered core leagues. Each league
 // learns its own calibration only after enough prospective settled samples;
 // the shared "all" prior is built from the same trusted league set.
-const TARGET_LEAGUE = /(?:turk|türk|super lig|süper lig|premier league|bundesliga|serie a|la liga|primera division|primera división|ligue 1)/i;
+const CORE_KEYS = new Set(['england-premier-league','france-ligue-1','italy-serie-a','spain-la-liga','turkey-super-lig','germany-bundesliga']);
+const isCoreLeague=league=>CORE_KEYS.has(resolveCompetition({leagueName:String(league||'')})?.canonicalCompetitionKey);
+function calibrationScopes(league) {
+  const own = String(league || 'Unknown');
+  return isCoreLeague(own) ? [own, 'all'] : [own];
+}
 let cached = new Map();
 let cacheUntil = 0;
 const clamp = (x, low, high) => Math.min(high, Math.max(low, x));
@@ -32,6 +38,31 @@ const MARKET_POLICY = Object.freeze({
   fhHomeScores:{minTrain:50,minValidation:20}, fhAwayScores:{minTrain:50,minValidation:20}, fhOver05:{minTrain:55,minValidation:20},
   shHomeScores:{minTrain:50,minValidation:20}, shAwayScores:{minTrain:50,minValidation:20}, shOver05:{minTrain:55,minValidation:20}
 });
+function requiredSample(market, shared=false) {
+  const policy=MARKET_POLICY[market];
+  if(!policy)return null;
+  return Math.max(Math.ceil((shared?Math.max(80,policy.minTrain):policy.minTrain)/.75),
+    Math.ceil(policy.minValidation/.25));
+}
+async function coverage() {
+  const rows=await Prediction.find({status:'settled',modelVersion:MODEL_VERSION})
+    .select('league kickoff capturedAt actual rawProbabilities probabilities').lean();
+  const counts=new Map();
+  for(const row of rows){
+    if(!row.kickoff||!row.capturedAt||row.capturedAt>=row.kickoff)continue;
+    for(const scope of calibrationScopes(row.league)){
+      for(const market of ALL_MARKETS){
+        const p=HALF_MARKETS.includes(market)?row.rawProbabilities?.[market]:(row.rawProbabilities?.[market]??row.probabilities?.[market]);
+        if(!Number.isFinite(p)||p<=0||p>=1||![0,1].includes(row.actual?.[market]))continue;
+        const key=scope+'::'+market;counts.set(key,(counts.get(key)||0)+1);
+      }
+    }
+  }
+  return {modelVersion:MODEL_VERSION,calibrationVersion:CALIBRATION_VERSION,
+    markets:[...counts].map(([key,n])=>{const index=key.lastIndexOf('::'),league=key.slice(0,index),market=key.slice(index+2);
+      const required=requiredSample(market,league==='all');return {league,market,settled:n,required,readiness:n>=required?'eligible-for-holdout-check':'collecting'};
+    }).sort((a,b)=>a.league.localeCompare(b.league)||a.market.localeCompare(b.market))};
+}
 function fit(rows, minTrain = 40, minValidation = 20) {
   const cutoff = Math.floor(rows.length * .75);
   const train = rows.slice(0, cutoff), validation = rows.slice(cutoff);
@@ -52,10 +83,10 @@ async function retrain() {
   const snapshots = await Prediction.find({
     status:'settled', settledAt:{$gte:since}, capturedAt:{$lt:new Date()},
   }).select('modelVersion league kickoff capturedAt probabilities rawProbabilities actual').sort({ kickoff:1 }).lean();
-  // Adaptive calibration learns only from prospective snapshots in the
-  // well-covered core leagues. Sparse/small leagues remain analysis-only and
-  // cannot distort the shared calibration prior.
-  const targetSnapshots = snapshots.filter(s => s.modelVersion === MODEL_VERSION && TARGET_LEAGUE.test(String(s.league || '')));
+  // Every competition may learn its own mapping once its prospective sample
+  // passes the holdout gates. Only the well-covered core leagues may train the
+  // shared fallback, so sparse cup/minor-league data never distorts it.
+  const targetSnapshots = snapshots.filter(s => s.modelVersion === MODEL_VERSION);
   const groups = new Map();
   for (const s of targetSnapshots) {
     if (!s.kickoff || !s.capturedAt || s.capturedAt >= s.kickoff) continue;
@@ -67,7 +98,7 @@ async function retrain() {
       const p = isHalf ? s.rawProbabilities?.[market] : (s.rawProbabilities?.[market] ?? s.probabilities?.[market]);
       const y = s.actual?.[market];
       if (!Number.isFinite(p) || ![0,1].includes(y) || p <= 0 || p >= 1) continue;
-      for (const league of ['all', s.league || 'Unknown']) {
+      for (const league of calibrationScopes(s.league)) {
         const key = MODEL_VERSION + ':' + league + ':' + market;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push({ p, y });
@@ -96,7 +127,7 @@ async function retrain() {
     if (result.active) active++;
   }
   cacheUntil = 0;
-  return { calibrationVersion:CALIBRATION_VERSION, league:'core-leagues', observations:targetSnapshots.length, evaluated:groups.size, active };
+  return { calibrationVersion:CALIBRATION_VERSION, league:'per-league-with-core-shared-prior', observations:targetSnapshots.length, evaluated:groups.size, active };
 }
 async function deactivateStaleOrRegressed() {
   // Re-check active mappings against the latest chronological prospective
@@ -114,8 +145,7 @@ async function deactivateStaleOrRegressed() {
     const isHalf=HALF_MARKETS.includes(row.market);
     const samples=snapshots.filter(s=>
       s.capturedAt && s.kickoff && s.capturedAt < s.kickoff &&
-      TARGET_LEAGUE.test(String(s.league||'')) &&
-      (row.league==='all' || String(s.league||'')===String(row.league||''))
+      (row.league==='all' ? isCoreLeague(s.league) : String(s.league||'')===String(row.league||''))
     ).map(s=>({
       p:isHalf?s.rawProbabilities?.[row.market]:(s.rawProbabilities?.[row.market]??s.probabilities?.[row.market]),
       y:s.actual?.[row.market]
@@ -201,4 +231,4 @@ async function applyHalf({league, half}) {
   }
   return {half:out,applied,calibrationVersion:CALIBRATION_VERSION};
 }
-module.exports = { fit, shift, retrain, deactivateStaleOrRegressed, apply, applyHalf, MARKET_POLICY, CALIBRATION_VERSION, MODEL_VERSION };
+module.exports = { fit, shift, calibrationScopes, requiredSample, coverage, retrain, deactivateStaleOrRegressed, apply, applyHalf, MARKET_POLICY, CALIBRATION_VERSION, MODEL_VERSION };

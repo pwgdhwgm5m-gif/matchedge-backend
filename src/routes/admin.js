@@ -177,7 +177,9 @@ router.post('/power-rating-rebuild-league', async (req,res)=>{
 router.get('/calibration-health', async (req,res)=>{
   try{
     const ledger=require('../services/predictionLedgerService');
-    res.json(await ledger.calibrationHealth());
+    const modelCalibration=require('../services/modelCalibrationService');
+    const [health,competitionCoverage]=await Promise.all([ledger.calibrationHealth(),modelCalibration.coverage()]);
+    res.json({...health,competitionCoverage});
   }catch(error){console.error('[calibration-health]',error);res.status(500).json({error:'Calibration health alınamadı.'});}
 });
 

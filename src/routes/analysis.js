@@ -9,6 +9,7 @@ const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
 const premiumLab = require('../services/premiumLabService');
 const prematchArchive = require('../services/prematchArchiveService');
+const { verifiedFixtureProvider } = require('../services/fixtureProviderIdentityService');
 const { hasStrongEvidence } = require('../services/marketEvidenceService');
 const { requireAuth } = require('../middleware/authMiddleware');
 
@@ -209,16 +210,15 @@ router.get('/:fixtureId', async (req, res) => {
   const precomputed = diagnosticFreshAllowed ? null : cache.get(`precomputed:${fixtureId}`);
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
+      const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider}).catch(()=>null) : null;
       try {
         await prematchArchive.capture(precomputed,{fixtureId,kickoff,league:leagueName,
           homeTeam:homeTeamName,awayTeam:awayTeamName,
-          canonicalProvider:sourcePolicy.policy({leagueName,sportKey}).primary});
+          canonicalProvider:verified?.provider||''});
       } catch(e) { console.warn('[prematch-archive/capture]',e.message); }
       try {
-        const precomputedPolicy=sourcePolicy.policy({leagueName,sportKey});
-        const canonicalProvider=precomputedPolicy.primary==='sportmonks'?'sportmonks':precomputedPolicy.primary==='bsd'?'bsd':'sportsdb';
-        await ledger.capture(precomputed,{fixtureId,kickoff,league:leagueName,homeTeam:homeTeamName,awayTeam:awayTeamName,
-          canonicalProvider,providerIds:{[canonicalProvider]:String(fixtureId)}});
+        if(verified)await ledger.capture(precomputed,{fixtureId,kickoff,league:leagueName,homeTeam:homeTeamName,awayTeam:awayTeamName,
+          canonicalProvider:verified.provider,providerIds:{[verified.provider]:verified.id}});
         await premiumLab.lockFixtureValidation(fixtureId);
       } catch(e) { console.warn('[prediction-capture/precomputed]',e.message); }
     }
@@ -364,16 +364,15 @@ router.get('/:fixtureId', async (req, res) => {
       }));
     }
     if (kickoff && homeTeamName && awayTeamName) {
+      const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider,sportmonksId:sm?.sportmonksId}).catch(()=>null) : null;
       try {
         await prematchArchive.capture(result,{fixtureId,kickoff,league:leagueName,
           homeTeam:homeTeamName,awayTeam:awayTeamName,
-          canonicalProvider:sm?.sportmonksId?'sportmonks':providerPolicy.primary});
+          canonicalProvider:verified?.provider||''});
       } catch(e) { console.warn('[prematch-archive/capture]',e.message); }
       try {
-        const canonicalProvider=sm?.sportmonksId?'sportmonks':providerPolicy.primary==='bsd'?'bsd':'sportsdb';
-        const canonicalId=sm?.sportmonksId||fixtureId;
-        await ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName,
-          canonicalProvider,providerIds:{[canonicalProvider]:String(canonicalId)} });
+        if(verified)await ledger.capture(result, { fixtureId, kickoff, league: leagueName, homeTeam: homeTeamName, awayTeam: awayTeamName,
+          canonicalProvider:verified.provider,providerIds:{[verified.provider]:verified.id} });
         await premiumLab.lockFixtureValidation(fixtureId);
       } catch(err) { console.error('[prediction-capture]', err); }
     }
