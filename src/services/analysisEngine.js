@@ -32,6 +32,11 @@ function regularizeSparseGoalRate(rate, leagueRate, sample, independentEvidence)
 
 const SUPERLIG_LEAGUE_ID = '71';
 
+function goalRateCeiling(structuralRate, matchupRate, sample, independentXg, mismatch=0) {
+  const structural=structuralRate*(1.38+.22*Math.max(0,Math.min(1,mismatch)));
+  return sample>=8&&independentXg ? Math.max(structural,matchupRate*1.05) : structural;
+}
+
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey, kickoff, providerIds = {}, providerTeamIds = {} }) {
   const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
   const useSportmonksPrimary = providerPolicy.sportmonks === true;
@@ -266,7 +271,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const homeInjuryImpact = stats.calculateInjuryImpact(injuries.home.length);
   const awayInjuryImpact = stats.calculateInjuryImpact(injuries.away.length);
 
-  const homeAdvantageMultiplier = stats.calculateTeamHomeAdvantageMultiplier(homeTeamFullSplit, LEAGUE_ADVANTAGE_RATIO);
+  // International home/away samples are too sparse and often mix tournament
+  // venues; the league baseline already carries a home edge.
+  const homeAdvantageMultiplier = isInternationalCompetition ? 1 :
+    stats.calculateTeamHomeAdvantageMultiplier(homeTeamFullSplit, LEAGUE_ADVANTAGE_RATIO);
 
   // National-team schedules are sparse and venue splits can easily contain zero
   // matches even when we have valid recent team history. Club leagues keep the
@@ -332,6 +340,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     if (th?.ok) { advancedHomeFixtures = th.data?.response || []; advancedHomeId = th.teamId; }
     if (ta?.ok) { advancedAwayFixtures = ta.data?.response || []; advancedAwayId = ta.teamId; }
   }
+  // BSD event IDs are not SportsDB event IDs. Advanced event-stat lookups
+  // require a SportsDB historical fixture, regardless of the primary source.
+  if(!isSuperLig && !String(homeHistorySource||'').startsWith('sportsdb'))advancedHomeFixtures=[];
+  if(!isSuperLig && !String(awayHistorySource||'').startsWith('sportsdb'))advancedAwayFixtures=[];
   const [homeAdvanced, awayAdvanced] = await Promise.all([
     accuracy.teamAdvancedForm(advancedHomeFixtures, advancedHomeId, 8),
     accuracy.teamAdvancedForm(advancedAwayFixtures, advancedAwayId, 8),
@@ -466,7 +478,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     const prior=structuralLambda,evidence=Math.min(1,sample/8);
     const recentRatio=Math.max(.72,Math.min(1.28,matchupModel/Math.max(.35,structuralLambda)));
     blended *= 1 + (recentRatio - 1) * (.22 + .13 * evidence);
-    const lower=prior*(.70-.05*evidence), upper=prior*(1.38+.22*mismatch);
+    const lower=prior*(.70-.05*evidence);
+    // With substantial independent goal and xG history, a very low product
+    // of attack and defence ratios must not cap the entire ensemble near zero.
+    const upper=goalRateCeiling(prior,matchupModel,sample,xgReady,mismatch);
     return +Math.max(lower,Math.min(upper,blended)).toFixed(2);
   };
   homeLambda=ensembleLambda(homeLambda,homeForm,awayForm,homeAdvanced,awayAdvanced,leagueHomeGoals,Math.max(0,strengthGap));
@@ -985,4 +1000,4 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   };
 }
 
-module.exports = { computeFullAnalysis, regularizeSparseGoalRate, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
+module.exports = { computeFullAnalysis, regularizeSparseGoalRate, goalRateCeiling, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
