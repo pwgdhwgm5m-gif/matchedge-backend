@@ -15,7 +15,7 @@ async function verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leag
   const context={homeTeamName,awayTeamName,leagueName,kickoff};
   const preferred=providerKey(provider);
   const key=`verified-fixture-provider:v1:${fixtureId}:${leagueName}:${homeTeamName}:${awayTeamName}:${kickoff}`;
-  const choices=await cache.getOrFetch(key,600,async()=>{
+  const result=await cache.getOrFetch(key,600,async()=>{
     const timeout=p=>Promise.race([p,new Promise(resolve=>setTimeout(()=>resolve(null),3000))]);
     const [tsdbResult,bsdResult]=await Promise.all([
       timeout(sportsDb.getEventById(fixtureId)).catch(()=>null),
@@ -25,9 +25,9 @@ async function verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leag
     const sportsdb=raw && acceptsLiveFixture(sportsDb.transformEvent(raw),'sportsdb',context);
     const bsdMatch=bsdResult?.available && String(bsdResult.match?.bsdEventId||bsdResult.match?.fixtureId)===String(fixtureId) &&
       acceptsLiveFixture(bsdResult.match,'bsd',context);
-    return [sportsdb && {provider:'sportsdb',id:String(fixtureId)},bsdMatch && {provider:'bsd',id:String(fixtureId)}].filter(Boolean);
+    return {ok:true,choices:[sportsdb && {provider:'sportsdb',id:String(fixtureId)},bsdMatch && {provider:'bsd',id:String(fixtureId)}].filter(Boolean)};
   });
-  return chooseVerifiedCandidate(choices,preferred);
+  return chooseVerifiedCandidate(result.choices||[],preferred);
 }
 
 module.exports={verifiedFixtureProvider,chooseVerifiedCandidate};
