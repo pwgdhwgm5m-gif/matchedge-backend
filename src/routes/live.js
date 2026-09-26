@@ -81,6 +81,8 @@ router.get('/:fixtureId', async (req, res) => {
   const identity = req.query;
   const accepts = (candidate, provider) => acceptsLiveFixture(candidate, provider, identity);
   const allows = provider => !providerKey(identity.provider) || providerKey(identity.provider) === provider;
+  const withTsdbIdentity = candidate => ({...candidate,canonicalProvider:'sportsdb',dataSource:'thesportsdb',
+    providerIds:{sportsdb:String(fixtureId)}});
 
   const liveResult = allows('sportsdb')
     ? await cache.getOrFetch('live:v2:all', config.cache.ttlLive, () => sportsDb.getLiveScores())
@@ -95,7 +97,7 @@ router.get('/:fixtureId', async (req, res) => {
       (e.strTimestamp ? sportsDb.toUtcIso(e.strTimestamp) : null) };};
     const rawMatch = allows('sportsdb') && rawLive.find(e => String(e.idEvent) === String(fixtureId) && accepts(liveMatch(e),'sportsdb'));
     if (rawMatch) {
-      match = liveMatch(rawMatch);
+      match = withTsdbIdentity(liveMatch(rawMatch));
       fromCacheFlag = liveResult.fromCache;
     }
   }
@@ -111,7 +113,7 @@ router.get('/:fixtureId', async (req, res) => {
       const rawEvents = result.data?.events || [];
       const raw = allows('sportsdb') && rawEvents.find(e => String(e.idEvent) === String(fixtureId) && accepts(sportsDb.transformEvent(e),'sportsdb'));
       if (raw) {
-        match = sportsDb.transformEvent(raw);
+        match = withTsdbIdentity(sportsDb.transformEvent(raw));
         fromCacheFlag = result.fromCache;
       }
     }
@@ -153,7 +155,7 @@ router.get('/:fixtureId', async (req, res) => {
     if (direct.ok) {
       const raw = direct.data?.events?.[0] || direct.data?.event?.[0] || direct.data?.event || null;
       if (raw && String(raw.idEvent) === String(fixtureId) && accepts(sportsDb.transformEvent(raw),'sportsdb')) {
-        match = sportsDb.transformEvent(raw);
+        match = withTsdbIdentity(sportsDb.transformEvent(raw));
         fromCacheFlag = direct.fromCache;
       }
     }
