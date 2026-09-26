@@ -16,7 +16,11 @@ async function cachedEventStats(eventId) {
   });
 }
 async function teamAdvancedForm(fixtures, teamId, limit=8) {
-  const finished=(fixtures||[]).filter(f=>f?.fixture?.id && f?.goals?.home!=null).slice(-limit);
+  // Team schedules arrive newest first. Select the latest completed events,
+  // independent of the provider's original ordering.
+  const finished=(fixtures||[]).filter(f=>f?.fixture?.id && f?.goals?.home!=null)
+    .sort((a,b)=>(Date.parse(b.fixture?.date)||0)-(Date.parse(a.fixture?.date)||0))
+    .slice(0,limit);
   const rows=await Promise.all(finished.map(async f=>{
     const s=await cachedEventStats(f.fixture.id); if(!s) return null;
     const isHome=String(f.teams?.home?.id)===String(teamId);
