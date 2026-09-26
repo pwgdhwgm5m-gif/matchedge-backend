@@ -23,6 +23,13 @@ const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
 const LEAGUE_ADVANTAGE_RATIO = LEAGUE_AVG_HOME_GOALS / LEAGUE_AVG_AWAY_GOALS;
 
+function regularizeSparseGoalRate(rate, leagueRate, sample, independentEvidence) {
+  if (!Number.isFinite(rate) || !Number.isFinite(leagueRate) || leagueRate <= 0 ||
+      !Number.isFinite(sample) || sample <= 0 || sample >= 5 || independentEvidence) return rate;
+  const reliability = sample / (sample + 6);
+  return +(leagueRate + (rate - leagueRate) * reliability).toFixed(2);
+}
+
 const SUPERLIG_LEAGUE_ID = '71';
 
 async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId, leagueName, season, sportKey, kickoff }) {
@@ -471,6 +478,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const fittedRho=poisson.DEFAULT_RHO*(1-dcReliability)+leagueDc.rho*dcReliability;
   const dynamicHome=Math.pow(leagueDc.homeAdvantage/LEAGUE_ADVANTAGE_RATIO,Math.min(.35,dcReliability*.35));
   homeLambda=+(homeLambda*Math.max(.94,Math.min(1.06,dynamicHome))).toFixed(2);
+  // Four venue matches can send a multiplicative scoring model far above its
+  // league baseline. Keep the direction of the matchup, but require five venue
+  // matches or independent chance-quality evidence for the full goal rate.
+  const venueSample=Math.min(Number(homeForm?.played||0),Number(awayForm?.played||0));
+  const independentGoals=xgEffectiveSample>=3 ||
+    Math.min(Number(sportmonksHistorical?.home?.sample||0),Number(sportmonksHistorical?.away?.sample||0))>=5;
+  homeLambda=regularizeSparseGoalRate(homeLambda,leagueHomeGoals,venueSample,independentGoals);
+  awayLambda=regularizeSparseGoalRate(awayLambda,leagueAwayGoals,venueSample,independentGoals);
   const rawMatchProbabilities = poisson.calculateMatchProbabilities(homeLambda, awayLambda,10,fittedRho);
   const rawMarketProbabilities = poisson.calculateMarketProbabilities(homeLambda, awayLambda,10,fittedRho);
   const calibrated = await modelCalibration.apply({league: leagueName || String(league || ''), match: rawMatchProbabilities, goals: rawMarketProbabilities});
@@ -970,4 +985,4 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   };
 }
 
-module.exports = { computeFullAnalysis, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
+module.exports = { computeFullAnalysis, regularizeSparseGoalRate, LEAGUE_AVG_HOME_GOALS, LEAGUE_AVG_AWAY_GOALS };
