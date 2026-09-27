@@ -15,6 +15,7 @@ const authRoute = require('./routes/auth');
 const adminPasskeyRoute = require('./routes/adminPasskey');
 const notesRoute = require('./routes/notes');
 const favoritesRoute = require('./routes/favorites');
+const { cleanupFinishedFavorites } = require('./services/favoriteCleanupService');
 const adminRoute = require('./routes/admin');
 const couponsRoute = require('./routes/coupons');
 const chatRoute = require('./routes/chat');
@@ -187,6 +188,19 @@ app.listen(config.port, async () => {
     }, delay);
   };
   scheduleCouponMidnightCleanup();
+  // Remove only provider-confirmed finished favorites after the Istanbul day
+  // ends. Also sweep recent legacy rows once after startup.
+  const cleanFavorites = async () => {
+    try { console.log('[favorites/midnight-cleanup] deleted:',await cleanupFinishedFavorites()); }
+    catch (error) { console.warn('[favorites/midnight-cleanup]',error.message); }
+  };
+  const scheduleFavoriteCleanup = () => {
+    const now=Date.now(), local=new Date(now+3*60*60*1000);
+    const next=Date.UTC(local.getUTCFullYear(),local.getUTCMonth(),local.getUTCDate()+1,0,5)-3*60*60*1000;
+    setTimeout(async()=>{await cleanFavorites();scheduleFavoriteCleanup();},Math.max(1000,next-now));
+  };
+  setTimeout(cleanFavorites,90*1000);
+  scheduleFavoriteCleanup();
   // Verified community picks settle independently from coupons. Analyst accuracy,
   // streak and tier source fields are rebuilt only from settled Verified Picks.
   const settleVerifiedPicks=async()=>{try{const svc=require('./services/communityPickSettlementService');const result=await svc.settlePending();if(result.settled)console.log('[verified-picks/auto-settle]',JSON.stringify(result))}catch(error){console.warn('[verified-picks/auto-settle]',error.message)}};
