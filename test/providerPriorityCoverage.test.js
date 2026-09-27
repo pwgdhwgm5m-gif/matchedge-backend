@@ -1,5 +1,7 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
 const sourcePolicy=require('../src/services/sourcePolicyService');
 const registry=require('../src/services/competitionRegistryService');
 const {verifiedFixtureProvider}=require('../src/services/fixtureProviderIdentityService');
@@ -14,6 +16,20 @@ test('all six subscribed competition display names route to their verified Sport
     assert.equal(sourcePolicy.isBsdCoreLeague({leagueName:league.displayName,country:league.country}),true);
   }
   assert.equal(sourcePolicy.policy({leagueName:'UEFA Nations League',sportKey:'soccer_epl'}).sportmonks,false);
+});
+
+test('shared analysis engine resolves SportMonks form before BSD fallback in all six leagues',()=>{
+  // An explicit wiring guard: a helper test alone would still pass if the
+  // engine were later changed back to BSD-first historical form.
+  const source=fs.readFileSync(path.join(__dirname,'../src/services/analysisEngine.js'),'utf8');
+  const sportmonks=source.indexOf('const smContext=useSportmonksPrimary ? await sportmonksHistory.load');
+  const fallback=source.indexOf('const homeFormFetcher');
+  assert.ok(sportmonks>=0&&fallback>sportmonks);
+  assert.match(source,/preferredForm\(smContext\?\.home,\(\)=>cache\.getOrFetch\(homeFormCacheKey/);
+  assert.match(source,/preferredForm\(smContext\?\.away,\(\)=>cache\.getOrFetch\(awayFormCacheKey/);
+  const precompute=fs.readFileSync(path.join(__dirname,'../src/cron/precomputeJob.js'),'utf8');
+  assert.match(precompute,/sportmonks\.getFixturesByDate\(day\)/);
+  assert.match(precompute,/canonicalProvider:'sportmonks',fixtureId:f\.sportmonksId/);
 });
 
 test('BSD wins a verified duplicate in score/live feeds while preserving both event IDs',()=>{
