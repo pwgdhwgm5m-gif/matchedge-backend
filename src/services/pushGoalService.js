@@ -5,8 +5,12 @@ const Coupon = require('../models/Coupon');
 const CommunityPick = require('../models/CommunityPick');
 const User = require('../models/User');
 const NotificationEvent = require('../models/NotificationEvent');
+const ProviderIdentity = require('../models/ProviderIdentity');
 const sportsDb = require('./sportsDbService');
 const bsd = require('./bsdService');
+const cache = require('../utils/cache');
+const {createHash}=require('crypto');
+const {attachAliases,goalMatchKey,nextGoalScore}=require('./goalNotificationIdentity');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -39,16 +43,19 @@ function configured() {
 }
 
 async function sendToUsers(userIds, payload) {
-  if (!userIds.length || !configured()) return;
+  if (!userIds.length || !configured()) return {subscriptions:0,accepted:0};
   const subs = await PushSubscription.find({ userId: { $in: userIds } }).lean();
-  await Promise.allSettled(subs.map(async s => {
+  const outcomes=await Promise.allSettled(subs.map(async s => {
     try {
       await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, JSON.stringify(payload), { TTL: 120 });
+      return true;
     } catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) await PushSubscription.deleteOne({ _id: s._id });
       else console.warn('[push/send]', e.statusCode || e.message);
+      return false;
     }
   }));
+  return {subscriptions:subs.length,accepted:outcomes.filter(x=>x.status==='fulfilled'&&x.value===true).length};
 }
 async function claimPushEvent(eventId, kind='coupon') {
   try { await NotificationEvent.create({ eventId, kind }); return true; }
@@ -57,7 +64,7 @@ async function claimPushEvent(eventId, kind='coupon') {
 
 
 async function trackedUsersByFixture() {
-  const all = new Map(), coupons = new Map(), matches = [];
+  const all = new Map(), coupons = new Map(), matches = [], trackedRows=[];
   const add = (map, fixtureId, userId) => {
     if (!fixtureId || !userId) return;
     const id = String(fixtureId);
@@ -68,23 +75,43 @@ async function trackedUsersByFixture() {
     const ids = [leg.fixtureId, ...Object.values(leg.providerIds || {})].filter(Boolean);
     ids.forEach(id => { add(all, id, userId); add(coupons, id, userId); });
     matches.push({ userId:String(userId), homeTeam:leg.homeTeam, awayTeam:leg.awayTeam, kickoff:leg.kickoff });
+    trackedRows.push({userId:String(userId),fixtureId:leg.fixtureId,homeTeam:leg.homeTeam,
+      awayTeam:leg.awayTeam,kickoff:leg.kickoff,coupon:true});
   };
   const [favorites, couponRows] = await Promise.all([
-    Favorite.find({}).select('userId fixtureId').lean(),
+    Favorite.find({}).select('userId fixtureId homeTeam awayTeam').lean(),
     Coupon.find({$or:[{status:'pending'},{'legs.selection.result':'pending'},{'selections.result':'pending'}]}).select('userId fixtureId homeTeam awayTeam kickoff legs').lean()
   ]);
-  favorites.forEach(x => add(all, x.fixtureId, x.userId));
+  favorites.forEach(x => {add(all, x.fixtureId, x.userId);
+    trackedRows.push({userId:String(x.userId),fixtureId:x.fixtureId,homeTeam:x.homeTeam,awayTeam:x.awayTeam,coupon:false});});
   couponRows.forEach(c => {
     if (c.legs && c.legs.length) c.legs.forEach(l => addCoupon(l, c.userId));
     else addCoupon({fixtureId:c.fixtureId, homeTeam:c.homeTeam, awayTeam:c.awayTeam, kickoff:c.kickoff}, c.userId);
   });
-  return { all, coupons, matches };
+  return { all, coupons, matches, trackedRows };
+}
+async function withProviderAliases(tracked){
+  const ids=[...tracked.all.keys()].sort();
+  if(!ids.length)return tracked;
+  const now=Date.now();
+  const q={$gte:new Date(now-4*60*60*1000),$lte:new Date(now+4*60*60*1000)};
+  try {
+    const key=createHash('sha1').update(ids.join(',')).digest('hex');
+    const result=await cache.getOrFetch(`push:provider-aliases:${key}`,30,async()=>({ok:true,
+      rows:await ProviderIdentity.find({kickoff:q,$or:['bsd','sportsdb','sportmonks']
+        .map(provider=>({[`providerIds.${provider}`]:{$in:ids}}))})
+        .select('canonicalKey kickoff home away providerIds').lean()}));
+    return attachAliases(tracked,result.rows||[]);
+  } catch(e) {
+    console.warn('[push/identity]',e.message);
+    return {...tracked,identities:[]};
+  }
 }
 function normalizeTeam(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/\b(fc|cf|sc|afc|fk|sk|calcio|football|club)\b/g,' ').replace(/[^a-z0-9]+/g,' ').trim()}
 function sameTrackedMatch(row, match){
   const h=normalizeTeam(row.homeTeam),a=normalizeTeam(row.awayTeam),mh=normalizeTeam(match.homeTeam),ma=normalizeTeam(match.awayTeam);
   const ka=new Date(row.kickoff||0).getTime(),kb=new Date(match.kickoff||0).getTime();
-  return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))&&Number.isFinite(ka)&&Number.isFinite(kb)&&Math.abs(ka-kb)<=6*60*60*1000;
+  return !!h&&!!a&&!!mh&&!!ma&&(mh===h||mh.includes(h)||h.includes(mh))&&(ma===a||ma.includes(a)||a.includes(ma))&&Number.isFinite(ka)&&Number.isFinite(kb)&&Math.abs(ka-kb)<=15*60*1000;
 }
 function usersForTrackedMatch(tracked, match, fixtureId, couponsOnly=false){
   const users=new Set((couponsOnly?tracked.coupons:tracked.all).get(String(fixtureId))||[]);
@@ -97,45 +124,55 @@ function usersForTrackedMatch(tracked, match, fixtureId, couponsOnly=false){
 async function checkGoals() {
   if (running || !configured()) return;
   running = true;
+  const cycleStarted=Date.now();
   try {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
-    const tracked = await trackedUsersByFixture();
+    const tracked = await withProviderAliases(await trackedUsersByFixture());
     if (!tracked.all.size) return;
     // Goal detection uses both BSD and SportsDB. BSD is queried first because it
     // is also the primary live source outside the six SportMonks leagues.
     const [bsdResult, result] = await Promise.all([bsd.getLiveFootballEvents(), sportsDb.getLiveScores()]);
+    const fetchMs=Date.now()-cycleStarted;
     const bsdMatches = bsdResult.ok ? bsd.extractList(bsdResult.data).map(bsd.eventToResultMatch).filter(Boolean) : [];
-    const tsdbMatches = result.ok ? (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(sportsDb.transformLiveEvent) : [];
+    const tsdbMatches = result.ok ? (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(e=>({...sportsDb.transformLiveEvent(e),source:'sportsdb'})) : [];
     const seen=new Set();
-    const matches=[...bsdMatches,...tsdbMatches].filter(m=>{const k=[normalizeTeam(m.homeTeam),normalizeTeam(m.awayTeam),String(m.homeScore),String(m.awayScore)].join('|');if(seen.has(k))return false;seen.add(k);return true;});
+    const matches=[...bsdMatches,...tsdbMatches].filter(m=>{const k=[goalMatchKey(tracked.identities,m),String(m.homeScore),String(m.awayScore)].join('|');if(seen.has(k))return false;seen.add(k);return true;});
     if (!matches.length) return;
     for (const m of matches) {
       const id = String(m.fixtureId);
+      const matchKey=goalMatchKey(tracked.identities,m);
       const couponUsers = usersForTrackedMatch(tracked, m, id, true);
       const matchUsers = usersForTrackedMatch(tracked, m, id, false);
       if (!matchUsers.size) continue;
       const trackedRow = tracked.matches.find(row => sameTrackedMatch(row, m));
       const homeTeam = String(m.homeTeam || trackedRow?.homeTeam || 'Maç');
       const awayTeam = String(m.awayTeam || trackedRow?.awayTeam || '');
-      const home = Number(m.homeScore || 0), away = Number(m.awayScore || 0), total = home + away;
-      const old = lastScores.get(id);
+      const home = Number(m.homeScore || 0), away = Number(m.awayScore || 0);
+      const old = lastScores.get(matchKey);
       const isLive = m.isLive === true || ['LIVE','1H','2H','HT'].includes(String(m.statusShort || '').toUpperCase());
-      lastScores.set(id, { home, away, total, started: Boolean(old?.started || isLive) });
+      const observation=nextGoalScore(old,home,away,isLive);
+      lastScores.set(matchKey,observation.score);
       if (isLive && couponUsers.size && !old?.started) {
-        const eventId = 'coupon-start:' + id;
+        const eventId = 'coupon-start:' + matchKey;
         if (await claimPushEvent(eventId, 'coupon-start')) await sendToUsers([...couponUsers], {
           type:'match-start', eventId, fixtureId:id, title:'⚽ Maç başladı', body:homeTeam+' – '+awayTeam+' başladı.',
           homeTeam, awayTeam, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
         });
       }
-      if (!old || total <= old.total) continue;
-      const eventKey = goalEventKey(id, home, away);
+      if (!observation.advanced) continue;
+      const eventKey = goalEventKey(matchKey, home, away);
       if (wasGoalAlreadySent(eventKey)) continue;
-      markGoalSent(eventKey);
-      if (await claimPushEvent(eventKey, 'goal')) await sendToUsers([...matchUsers], {
+      if (await claimPushEvent(eventKey, 'goal')) {
+        markGoalSent(eventKey);
+        const pushStarted=Date.now();
+        const delivery=await sendToUsers([...matchUsers], {
         type:'goal', eventId:eventKey, fixtureId:id, title:'⚽ GOL!', body:homeTeam+' '+home+' – '+away+' '+awayTeam,
         homeTeam:m.homeTeam, awayTeam:m.awayTeam, homeScore:home, awayScore:away, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
-      });
+        });
+        console.log('[push/goal-latency]',JSON.stringify({provider:m.source||'unknown',
+          fetchMs,pushAckMs:Date.now()-pushStarted,cycleMs:Date.now()-cycleStarted,
+          bsdCached:bsdResult.cached===true,subscriptions:delivery.subscriptions,accepted:delivery.accepted}));
+      } else markGoalSent(eventKey);
     }
   } catch (e) { console.warn('[push/goals]', e.message); }
   finally { running = false; }

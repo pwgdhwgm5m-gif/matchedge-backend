@@ -133,7 +133,7 @@ router.get('/:fixtureId', async (req, res) => {
       match = { ...directBsd.match, canonicalProvider:'bsd', dataSource:'bsd' };
     } else {
       const bsdDirect = await quickBound(
-        cache.getOrFetch('bsd:live:canonical',60,()=>bsdService.getLiveFootballEvents()),
+        cache.getOrFetch('bsd:live:canonical',30,()=>bsdService.getLiveFootballEvents()),
         {ok:false},
         2800
       );

@@ -124,7 +124,10 @@ function extractList(data) {
 }
 
 async function getLiveFootballEvents() {
-  return fetchBsdCached('/events/live/', 60, 8000);
+  // A minute-old score makes goal pushes late even with a 5s monitor. The
+  // shared cache bounds this endpoint to at most one request per 30 seconds;
+  // BsdRequestBudget still enforces the daily cap and remaining reserve.
+  return fetchBsdCached('/events/live/', 30, 8000);
 }
 
 async function getFootballEventsForDate(dateStr, teamName) {

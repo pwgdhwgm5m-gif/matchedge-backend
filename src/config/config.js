@@ -82,7 +82,7 @@ module.exports = {
 
   cache: {
     ttlStatic: parseInt(process.env.CACHE_TTL_STATIC || '900', 10),      // 15 dk
-    ttlLive: parseInt(process.env.CACHE_TTL_LIVE || '45', 10),           // 45 sn
+    ttlLive: Math.min(30, Math.max(5, parseInt(process.env.CACHE_TTL_LIVE || '30', 10) || 30)),
     ttlPrecomputed: parseInt(process.env.CACHE_TTL_PRECOMPUTED || '21600', 10), // 6 saat
   },
 
