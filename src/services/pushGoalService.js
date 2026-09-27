@@ -8,9 +8,11 @@ const NotificationEvent = require('../models/NotificationEvent');
 const ProviderIdentity = require('../models/ProviderIdentity');
 const sportsDb = require('./sportsDbService');
 const bsd = require('./bsdService');
+const sportmonks = require('./sportmonksService');
 const cache = require('../utils/cache');
 const {createHash}=require('crypto');
 const {attachAliases,goalMatchKey,nextGoalScore}=require('./goalNotificationIdentity');
+const {hasTrackedSportmonksFixture,sportmonksGoalMatches}=require('./goalPushSourcePolicy');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -19,6 +21,7 @@ const sentGoalKeys = new Map();
 const sentSmartKeys = new Map();
 const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
+let lastTrackedLiveAt = 0;
 
 function goalEventKey(fixtureId, home, away) {
   return `${String(fixtureId)}:${Number(home)}-${Number(away)}`;
@@ -129,14 +132,22 @@ async function checkGoals() {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     const tracked = await withProviderAliases(await trackedUsersByFixture());
     if (!tracked.all.size) return;
-    // Goal detection uses both BSD and SportsDB. BSD is queried first because it
-    // is also the primary live source outside the six SportMonks leagues.
-    const [bsdResult, result] = await Promise.all([bsd.getLiveFootballEvents(), sportsDb.getLiveScores()]);
+    // A shorter BSD freshness window applies only while a tracked match is
+    // actually live. The shared BSD request budget still limits all requests.
+    const bsdTtl=Date.now()-lastTrackedLiveAt<3*60*1000 ? 15 : 30;
+    // Query the subscribed six leagues by their native SportMonks fixture IDs.
+    // Do not spend SportMonks calls for unrelated leagues or stale favorites.
+    const checkSportmonks=hasTrackedSportmonksFixture(tracked.identities);
+    const [bsdResult, result, smResult] = await Promise.all([
+      bsd.getLiveFootballEvents(bsdTtl), sportsDb.getLiveScores(),
+      checkSportmonks ? cache.getOrFetch('push:sportmonks:inplay',10,()=>sportmonks.getInplay(4000)) : Promise.resolve({ok:false})
+    ]);
     const fetchMs=Date.now()-cycleStarted;
+    const smMatches=smResult.ok ? sportmonksGoalMatches(smResult.fixtures) : [];
     const bsdMatches = bsdResult.ok ? bsd.extractList(bsdResult.data).map(bsd.eventToResultMatch).filter(Boolean) : [];
     const tsdbMatches = result.ok ? (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(e=>({...sportsDb.transformLiveEvent(e),source:'sportsdb'})) : [];
     const seen=new Set();
-    const matches=[...bsdMatches,...tsdbMatches].filter(m=>{const k=[goalMatchKey(tracked.identities,m),String(m.homeScore),String(m.awayScore)].join('|');if(seen.has(k))return false;seen.add(k);return true;});
+    const matches=[...smMatches,...bsdMatches,...tsdbMatches].filter(m=>{const k=[goalMatchKey(tracked.identities,m),String(m.homeScore),String(m.awayScore)].join('|');if(seen.has(k))return false;seen.add(k);return true;});
     if (!matches.length) return;
     for (const m of matches) {
       const id = String(m.fixtureId);
@@ -147,9 +158,12 @@ async function checkGoals() {
       const trackedRow = tracked.matches.find(row => sameTrackedMatch(row, m));
       const homeTeam = String(m.homeTeam || trackedRow?.homeTeam || 'Maç');
       const awayTeam = String(m.awayTeam || trackedRow?.awayTeam || '');
-      const home = Number(m.homeScore || 0), away = Number(m.awayScore || 0);
+      if(m.homeScore==null || m.awayScore==null ||
+          !Number.isFinite(Number(m.homeScore)) || !Number.isFinite(Number(m.awayScore)))continue;
+      const home = Number(m.homeScore), away = Number(m.awayScore);
       const old = lastScores.get(matchKey);
       const isLive = m.isLive === true || ['LIVE','1H','2H','HT'].includes(String(m.statusShort || '').toUpperCase());
+      if(isLive)lastTrackedLiveAt=Date.now();
       const observation=nextGoalScore(old,home,away,isLive);
       lastScores.set(matchKey,observation.score);
       if (isLive && couponUsers.size && !old?.started) {
@@ -171,7 +185,8 @@ async function checkGoals() {
         });
         console.log('[push/goal-latency]',JSON.stringify({provider:m.source||'unknown',
           fetchMs,pushAckMs:Date.now()-pushStarted,cycleMs:Date.now()-cycleStarted,
-          bsdCached:bsdResult.cached===true,subscriptions:delivery.subscriptions,accepted:delivery.accepted}));
+          bsdCached:bsdResult.cached===true,bsdAgeMs:bsdResult.fetchedAt?Date.now()-bsdResult.fetchedAt:null,
+          sportmonksCached:smResult.fromCache===true,subscriptions:delivery.subscriptions,accepted:delivery.accepted}));
       } else markGoalSent(eventKey);
     }
   } catch (e) { console.warn('[push/goals]', e.message); }

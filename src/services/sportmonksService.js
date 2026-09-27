@@ -6,12 +6,12 @@ function token() {
   return process.env.SPORTMONKS_API_TOKEN || '';
 }
 
-async function request(path, params = {}) {
+async function request(path, params = {}, timeoutMs = 12000) {
   if (!token()) return { ok: false, error: 'SPORTMONKS_API_TOKEN missing', data: null };
   try {
     const response = await axios.get(`${BASE_URL}${path}`, {
       params: { ...params, api_token: token() },
-      timeout: 12000,
+      timeout: timeoutMs,
     });
     return { ok: true, data: response.data };
   } catch (err) {
@@ -183,10 +183,10 @@ function transformFixture(f) {
   };
 }
 
-async function getInplay() {
+async function getInplay(timeoutMs = 12000) {
   const result = await request('/livescores/inplay', {
     include: 'participants;scores;statistics.type;periods;events',
-  });
+  }, timeoutMs);
   if (!result.ok) return result;
   return { ok: true, fixtures: (result.data?.data || []).map(transformFixture) };
 }

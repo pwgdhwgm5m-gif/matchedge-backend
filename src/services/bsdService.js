@@ -76,15 +76,20 @@ async function fetchBsd(path, timeoutMs) {
 async function fetchBsdCached(path, ttlSeconds, timeoutMs) {
   const key='bsd-http:'+path;
   const hit=cache.get(key);
-  if(hit !== undefined) return {...hit,cached:true};
+  // The goal monitor may ask for a fresher live snapshot while a tracked
+  // fixture is in play. Honor that age without creating a second cache key
+  // (and therefore duplicate BSD requests from the live screen).
+  if(hit !== undefined && (path!=='/events/live/' || !hit.fetchedAt ||
+      Date.now()-hit.fetchedAt < ttlSeconds*1000)) return {...hit,cached:true};
   if(inFlight.has(key))return inFlight.get(key);
   const pending=(async()=>{
     const result=await fetchBsd(path,timeoutMs);
     // Do not cache a budget denial: a cached older result may become available
     // through another endpoint or after the UTC quota reset.
+    const snapshot=path==='/events/live/' ? {...result,fetchedAt:Date.now()} : result;
     if(result.error!=='bsd_request_budget')
-      cache.set(key,result,result.ok ? ttlSeconds : Math.min(60,ttlSeconds));
-    return result;
+      cache.set(key,snapshot,result.ok ? Math.max(30,ttlSeconds) : Math.min(60,ttlSeconds));
+    return snapshot;
   })();
   inFlight.set(key,pending);
   try{return await pending;}finally{inFlight.delete(key);}
@@ -123,11 +128,11 @@ function extractList(data) {
   return data.results || data.events || data.data || [];
 }
 
-async function getLiveFootballEvents() {
+async function getLiveFootballEvents(ttlSeconds=30) {
   // A minute-old score makes goal pushes late even with a 5s monitor. The
   // shared cache bounds this endpoint to at most one request per 30 seconds;
   // BsdRequestBudget still enforces the daily cap and remaining reserve.
-  return fetchBsdCached('/events/live/', 30, 8000);
+  return fetchBsdCached('/events/live/', ttlSeconds, 8000);
 }
 
 async function getFootballEventsForDate(dateStr, teamName) {
