@@ -600,8 +600,32 @@ async function getTeamFixturesForAnalysis(teamName, fotmobLeagueId, count, tsdbL
     }
   }
 
-  // --- Fallback: eski yontem (ligin son olaylari icinden isimle filtrele) ---
+  // eventslast and the team schedule may be incomplete for a club even when
+  // the current league season contains its completed fixtures. Query the
+  // season once per league (shared cache), then filter by the SportsDB team ID.
   const tsdbLeagueId = tsdbLeagueIdOverride || LEAGUE_ID_MAP[String(fotmobLeagueId)];
+  if (tsdbLeagueId && teamId) {
+    const season=getCurrentSeasonString();
+    const seasonResult=await cache.getOrFetch(`tsdb-analysis-season:v1:${tsdbLeagueId}:${season}`,1800,
+      () => getLeagueSeasonSchedule(tsdbLeagueId,season));
+    const rows=Array.isArray(seasonResult.data) ? seasonResult.data :
+      (seasonResult.data?.schedule || seasonResult.data?.events || []);
+    const cutoff=Date.parse(options?.kickoff || '') || Date.now();
+    const completed=(Array.isArray(rows)?rows:[]).filter(e=>{
+      const belongs=String(e.idHomeTeam||'')===String(teamId)||String(e.idAwayTeam||'')===String(teamId);
+      const time=Date.parse(e.strTimestamp||e.dateEvent||'');
+      return belongs&&Number.isFinite(time)&&time<cutoff&&e.intHomeScore!=null&&e.intAwayScore!=null&&
+        Number.isFinite(Number(e.intHomeScore))&&Number.isFinite(Number(e.intAwayScore))&&
+        !['CANC','POSTP','ABD'].includes(String(e.strStatus||'').toUpperCase());
+    }).sort((a,b)=>Date.parse(b.strTimestamp||b.dateEvent)-Date.parse(a.strTimestamp||a.dateEvent)).slice(0,n);
+    if(completed.length)return {ok:true,source:'sportsdb-league-season',teamId,
+      data:{response:completed.map(toAnalysisFixture)},
+      historyAudit:completed.slice(0,5).map(e=>({eventId:e.idEvent,date:e.strTimestamp||e.dateEvent,
+        homeTeam:e.strHomeTeam,awayTeam:e.strAwayTeam,homeTeamId:e.idHomeTeam,awayTeamId:e.idAwayTeam,
+        homeScore:e.intHomeScore,awayScore:e.intAwayScore,league:e.strLeague}))};
+  }
+
+  // --- Fallback: eski yontem (ligin son olaylari icinden isimle filtrele) ---
   if (!tsdbLeagueId) {
     return { ok: false, error: 'league_not_mapped' };
   }

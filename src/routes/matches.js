@@ -106,7 +106,8 @@ router.get('/', async (req,res)=>{
     competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource)
   ),{preferBsd:true});
   const providerIdentity=require('../services/providerIdentityCache');
-  for(const match of matches)providerIdentity.remember(match).catch(err=>console.warn('[provider-identity/fixtures]',err.message));
+  const identityWrites=await Promise.allSettled(matches.map(match=>providerIdentity.remember(match)));
+  for(const write of identityWrites)if(write.status==='rejected')console.warn('[provider-identity/fixtures]',write.reason?.message);
   // Keep the complete fixture backbone here. Some provider rows do not carry
   // enough league metadata to resolve a registry key at this stage; filtering
   // them here can erase the whole day. Fixtures/Home apply the central registry

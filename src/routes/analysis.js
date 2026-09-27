@@ -381,6 +381,22 @@ router.get('/:fixtureId', async (req, res) => {
     if (kickoff && homeTeamName && awayTeamName) {
       const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider,sportmonksId:sm?.sportmonksId}).catch(()=>null) : null;
       try {
+        const history=result.modelDiagnostics?.consumedInputs?.history||{};
+        const teamIds={...providerTeamIds};
+        for(const side of ['home','away']){
+          const source=String(history[side+'Source']||'');
+          const p=source.startsWith('sportsdb')?'sportsdb':source==='bsd'?'bsd':null;
+          const id=history[side+'TeamId'];
+          if(p&&id!=null)teamIds[p]={...(teamIds[p]||{}),[side]:String(id)};
+        }
+        const ids={...providerIds};
+        if(verified)ids[verified.provider]=String(verified.id);
+        if(sm?.sportmonksId)ids.sportmonks=String(sm.sportmonksId);
+        if(Object.keys(ids).length)await providerIdentity.remember({fixtureId,homeTeam:homeTeamName,
+          awayTeam:awayTeamName,kickoff,canonicalCompetitionKey:registeredCompetition?.canonicalCompetitionKey,
+          canonicalProvider:verified?.provider||requestedProvider,providerIds:ids,providerTeamIds:teamIds});
+      } catch(e) { console.warn('[provider-identity/analysis]',e.message); }
+      try {
         await prematchArchive.capture(result,{fixtureId,kickoff,league:leagueName,
           homeTeam:homeTeamName,awayTeam:awayTeamName,
           canonicalProvider:verified?.provider||''});

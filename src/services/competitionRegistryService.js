@@ -540,6 +540,13 @@ function sourceRank(match, preferBsd = false) {
 }
 
 function mergeDuplicate(preferred, secondary) {
+  const scopedTeamIds = row => {
+    const source=String(row.canonicalProvider||row.source||row.dataSource||'').toLowerCase();
+    const provider=source.includes('sportmonk')?'sportmonks':source==='bsd'?'bsd':source.includes('sportsdb')?'sportsdb':null;
+    const native=provider && (row.homeTeamId!=null||row.awayTeamId!=null)
+      ? {[provider]:{home:row.homeTeamId==null?null:String(row.homeTeamId),away:row.awayTeamId==null?null:String(row.awayTeamId)}} : {};
+    return {...native,...(row.providerTeamIds||{})};
+  };
   const merged = { ...secondary, ...preferred };
   for (const field of [
     'homeScore', 'awayScore', 'halftimeHome', 'halftimeAway',
@@ -553,8 +560,8 @@ function mergeDuplicate(preferred, secondary) {
     ...(preferred.providerIds || {})
   };
   merged.providerTeamIds = {
-    ...(secondary.providerTeamIds || {}),
-    ...(preferred.providerTeamIds || {})
+    ...scopedTeamIds(secondary),
+    ...scopedTeamIds(preferred)
   };
   return merged;
 }

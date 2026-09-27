@@ -20,3 +20,16 @@ test('different competition, kickoff or conflicting provider ID cannot reuse ide
   assert.equal(await identity.lookup({...base,kickoff:'2026-09-26T23:00:00Z'}),null);
   assert.equal(await identity.lookup({...base,fixtureId:'other-event'}),null);
 });
+
+test('same-day rematches retain separate event IDs while near-time provider aliases merge',async()=>{
+  const base={canonicalCompetitionKey:'netherlands-eerste-divisie',homeTeam:'De Graafschap',awayTeam:'Den Bosch'};
+  const first={...base,fixtureId:'db:first',canonicalProvider:'sportsdb',kickoff:'2026-09-27T12:30:00Z'};
+  const alias={...base,fixtureId:'bsd:first',canonicalProvider:'bsd',kickoff:'2026-09-27T12:35:00Z'};
+  const rematch={...base,fixtureId:'db:second',canonicalProvider:'sportsdb',kickoff:'2026-09-27T18:30:00Z'};
+  await identity.remember(first);
+  await identity.remember(alias);
+  await identity.remember(rematch);
+  assert.deepEqual((await identity.lookup(first)).providerIds,{sportsdb:'db:first',bsd:'bsd:first'});
+  assert.deepEqual((await identity.lookup(rematch)).providerIds,{sportsdb:'db:second'});
+  assert.notEqual(identity.keyOf(first),identity.keyOf(rematch));
+});

@@ -13,6 +13,7 @@ const ledger = require('../services/predictionLedgerService');
 const modelCalibration = require('../services/modelCalibrationService');
 const premiumLab = require('../services/premiumLabService');
 const prematchArchive = require('../services/prematchArchiveService');
+const providerIdentity = require('../services/providerIdentityCache');
 
 const DAYS_AHEAD = 7;
 function selectPrecomputeFixtures(candidates,limit){
@@ -33,10 +34,23 @@ function dedupePrecomputeFixtures(fixtures){
   const selected=new Map();
   for(const fixture of fixtures){
     const competition=competitionRegistry.resolveCompetition({leagueName:fixture.leagueName});
-    const key=[competition?.canonicalCompetitionKey||fixture.leagueName,
+    const pair=[competition?.canonicalCompetitionKey||fixture.leagueName,
       competitionRegistry.normalizeTeamIdentity(fixture.homeTeamName),
       competitionRegistry.normalizeTeamIdentity(fixture.awayTeamName),String(fixture.kickoff).slice(0,10)].join(':');
-    if(!selected.has(key)||(fixture.canonicalProvider==='bsd'&&!competition?.providerIds?.sportmonks))selected.set(key,fixture);
+    const fixtureTime=Date.parse(fixture.kickoff);
+    const key=[...selected.entries()].find(([candidateKey,candidate])=>candidateKey.startsWith(pair+'|')&&
+      Number.isFinite(fixtureTime)&&Math.abs(Date.parse(candidate.kickoff)-fixtureTime)<=15*60000)?.[0]||
+      pair+'|'+String(fixture.kickoff);
+    const previous=selected.get(key);
+    const nativeIds={...(fixture.providerIds||{}),[fixture.canonicalProvider]:String(fixture.fixtureId)};
+    const nativeTeams=fixture.canonicalProvider==='sportsdb' ?
+      {sportsdb:{home:fixture.home==null?null:String(fixture.home),away:fixture.away==null?null:String(fixture.away)}} : {};
+    const preferNew=!previous||(fixture.canonicalProvider==='bsd'&&!competition?.providerIds?.sportmonks);
+    const chosen=preferNew?fixture:previous;
+    selected.set(key,{...chosen,
+      providerIds:{...(previous?.providerIds||{}),...nativeIds},
+      providerTeamIds:{...(previous?.providerTeamIds||{}),...nativeTeams},
+      canonicalCompetitionKey:competition?.canonicalCompetitionKey||previous?.canonicalCompetitionKey});
   }
   return [...selected.values()];
 }
@@ -105,6 +119,10 @@ async function precomputeTodaysMatches() {
 
   for (const fixture of prioritized) {
     try {
+      await providerIdentity.remember({fixtureId:fixture.fixtureId,canonicalProvider:fixture.canonicalProvider,
+        canonicalCompetitionKey:fixture.canonicalCompetitionKey,kickoff:fixture.kickoff,
+        homeTeam:fixture.homeTeamName,awayTeam:fixture.awayTeamName,
+        providerIds:fixture.providerIds,providerTeamIds:fixture.providerTeamIds});
       const canonicalFixtureKey=`${fixture.canonicalProvider}:${fixture.fixtureId}`;
       if(await Prediction.exists({canonicalFixtureKey,modelVersion:ledger.VERSION}))continue;
       const result = await computeFullAnalysis({
@@ -119,6 +137,8 @@ async function precomputeTodaysMatches() {
         season: fixture.season,
         sportKey: fixture.sportKey,
         kickoff:fixture.kickoff,
+        providerIds:fixture.providerIds,
+        providerTeamIds:fixture.providerTeamIds,
       });
 
       const precomputed = {
@@ -140,7 +160,7 @@ async function precomputeTodaysMatches() {
       }catch(e){console.warn('[precompute/prematch-archive]',e.message)}
       await ledger.capture(precomputed, { fixtureId: fixture.fixtureId, kickoff: fixture.kickoff, league: fixture.leagueName,
         homeTeam: fixture.homeTeamName, awayTeam: fixture.awayTeamName, canonicalProvider:fixture.canonicalProvider,
-        providerIds:{[fixture.canonicalProvider]:String(fixture.fixtureId)} });
+        providerIds:fixture.providerIds });
       await premiumLab.lockFixtureValidation(fixture.fixtureId);
     } catch (err) {
       console.error(`[precompute] Mac ${fixture.fixtureId} icin hata:`, err.message);
