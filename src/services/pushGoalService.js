@@ -13,6 +13,7 @@ const cache = require('../utils/cache');
 const {createHash}=require('crypto');
 const {attachAliases,goalMatchKey,nextGoalScore}=require('./goalNotificationIdentity');
 const {hasTrackedSportmonksFixture,sportmonksGoalMatches}=require('./goalPushSourcePolicy');
+const {runGoalSources}=require('./goalSourceRunner');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -132,23 +133,23 @@ async function checkGoals() {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     const tracked = await withProviderAliases(await trackedUsersByFixture());
     if (!tracked.all.size) return;
-    // A shorter BSD freshness window applies only while a tracked match is
-    // actually live. The shared BSD request budget still limits all requests.
-    const bsdTtl=Date.now()-lastTrackedLiveAt<3*60*1000 ? 15 : 30;
+    // Refresh more often around a tracked kickoff and while a tracked match
+    // is live. The shared BSD request budget still limits all requests.
+    const now=Date.now();
+    const nearKickoff=tracked.trackedRows.some(row=>{
+      const kickoff=Date.parse(row.kickoff||'');
+      return Number.isFinite(kickoff) && kickoff>=now-3*60*60*1000 && kickoff<=now+10*60*1000;
+    }) || tracked.identities.some(row=>{
+      const kickoff=Date.parse(row.kickoff||'');
+      return Number.isFinite(kickoff) && kickoff>=now-3*60*60*1000 && kickoff<=now+10*60*1000;
+    });
+    const bsdTtl=nearKickoff || now-lastTrackedLiveAt<3*60*1000 ? 10 : 30;
     // Query the subscribed six leagues by their native SportMonks fixture IDs.
     // Do not spend SportMonks calls for unrelated leagues or stale favorites.
     const checkSportmonks=hasTrackedSportmonksFixture(tracked.identities);
-    const [bsdResult, result, smResult] = await Promise.all([
-      bsd.getLiveFootballEvents(bsdTtl), sportsDb.getLiveScores(),
-      checkSportmonks ? cache.getOrFetch('push:sportmonks:inplay',10,()=>sportmonks.getInplay(4000)) : Promise.resolve({ok:false})
-    ]);
-    const fetchMs=Date.now()-cycleStarted;
-    const smMatches=smResult.ok ? sportmonksGoalMatches(smResult.fixtures) : [];
-    const bsdMatches = bsdResult.ok ? bsd.extractList(bsdResult.data).map(bsd.eventToResultMatch).filter(Boolean) : [];
-    const tsdbMatches = result.ok ? (result.data?.livescore || []).filter(e => String(e.strSport || '').toLowerCase() === 'soccer').map(e=>({...sportsDb.transformLiveEvent(e),source:'sportsdb'})) : [];
-    const seen=new Set();
-    const matches=[...smMatches,...bsdMatches,...tsdbMatches].filter(m=>{const k=[goalMatchKey(tracked.identities,m),String(m.homeScore),String(m.awayScore)].join('|');if(seen.has(k))return false;seen.add(k);return true;});
-    if (!matches.length) return;
+    // Process each provider as soon as it responds. Waiting for all providers
+    // made a fast score wait behind a slow (or timed-out) fallback request.
+    const processMatches = async (matches, sourceInfo={}) => {
     for (const m of matches) {
       const id = String(m.fixtureId);
       const matchKey=goalMatchKey(tracked.identities,m);
@@ -184,11 +185,21 @@ async function checkGoals() {
         homeTeam:m.homeTeam, awayTeam:m.awayTeam, homeScore:home, awayScore:away, url:'/canli-simulator.html?fixtureId='+encodeURIComponent(id)
         });
         console.log('[push/goal-latency]',JSON.stringify({provider:m.source||'unknown',
-          fetchMs,pushAckMs:Date.now()-pushStarted,cycleMs:Date.now()-cycleStarted,
-          bsdCached:bsdResult.cached===true,bsdAgeMs:bsdResult.fetchedAt?Date.now()-bsdResult.fetchedAt:null,
-          sportmonksCached:smResult.fromCache===true,subscriptions:delivery.subscriptions,accepted:delivery.accepted}));
+          fetchMs:sourceInfo.fetchMs,pushAckMs:Date.now()-pushStarted,cycleMs:Date.now()-cycleStarted,
+          cached:sourceInfo.cached===true,sourceAgeMs:sourceInfo.fetchedAt?Date.now()-sourceInfo.fetchedAt:null,
+          subscriptions:delivery.subscriptions,accepted:delivery.accepted}));
       } else markGoalSent(eventKey);
     }
+    };
+    const outcomes=await runGoalSources([
+      {fetch:()=>bsd.getLiveFootballEvents(bsdTtl),transform:result=>bsd.extractList(result.data).map(bsd.eventToResultMatch).filter(Boolean)},
+      {fetch:()=>sportsDb.getLiveScores(),transform:result=>(result.data?.livescore||[])
+        .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
+        .map(e=>({...sportsDb.transformLiveEvent(e),source:'sportsdb'}))},
+      ...(checkSportmonks ? [{fetch:()=>cache.getOrFetch('push:sportmonks:inplay',10,()=>sportmonks.getInplay(4000)),
+        transform:result=>sportmonksGoalMatches(result.fixtures)}] : [])
+    ],processMatches);
+    for(const outcome of outcomes)if(outcome.status==='rejected')console.warn('[push/source]',outcome.reason?.message||outcome.reason);
   } catch (e) { console.warn('[push/goals]', e.message); }
   finally { running = false; }
 }
