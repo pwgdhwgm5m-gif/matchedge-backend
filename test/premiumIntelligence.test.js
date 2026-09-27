@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { buildPremiumIntelligence, buildDataHealth, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
+const { buildPremiumIntelligence, buildDataHealth, buildMarketBoard, selectConfidenceSamples } = require('../src/services/premiumIntelligenceService');
 const { calculateHalfMarkets, calculateMarketProbabilities, estimateCornerMetrics } = require('../src/services/poissonService');
 const { calculateMatchDominance } = require('../src/services/liveXgService');
 
@@ -76,6 +76,17 @@ const fiveVenue=buildPremiumIntelligence({modelProbabilities:{homeWinProbability
   marketEvidence:sufficientHomeEvidence,homeOverallPlayed:8,awayOverallPlayed:8,
   homePlayed:5,awayPlayed:5,hasStandings:true});
 assert.equal(fiveVenue.status,'PICK');
+
+const sampleSources={homeForm:{played:3},awayForm:{played:2},
+  homeOverallHistory:{played:5},awayOverallHistory:{played:4},
+  sportmonksHistorical:{rawHome:{sample:9,home:{sample:4}},rawAway:{sample:8,away:{sample:3}}}};
+assert.deepEqual(selectConfidenceSamples({...sampleSources,sportmonksPrimary:true}),
+  {homePlayed:4,awayPlayed:3,homeOverallPlayed:9,awayOverallPlayed:8});
+assert.deepEqual(selectConfidenceSamples({...sampleSources,sportmonksPrimary:false}),
+  {homePlayed:3,awayPlayed:2,homeOverallPlayed:5,awayOverallPlayed:4});
+assert.deepEqual(selectConfidenceSamples({...sampleSources,sportmonksPrimary:true,
+  sportmonksHistorical:{rawHome:{sample:9,home:{sample:2}},rawAway:{sample:8,away:{sample:1}}}}),
+  {homePlayed:3,awayPlayed:2,homeOverallPlayed:9,awayOverallPlayed:8});
 
 const noOdds = buildPremiumIntelligence({
   marketEvidence:sufficientHomeEvidence,

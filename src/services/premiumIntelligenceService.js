@@ -269,6 +269,21 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   };
 }
 
+function selectConfidenceSamples({homeForm, awayForm, homeOverallHistory, awayOverallHistory,
+  sportmonksHistorical, sportmonksPrimary = false}) {
+  const count = value => Math.max(0, Number(value) || 0);
+  const sm = sportmonksPrimary ? sportmonksHistorical : null;
+  // Take the best verified sample per team, never add overlapping providers.
+  // Use raw venue counts: the SportMonks model may blend a small venue sample
+  // with overall form, which must not create extra observed venue matches.
+  return {
+    homePlayed:Math.max(count(homeForm?.played),count(sm?.rawHome?.home?.sample)),
+    awayPlayed:Math.max(count(awayForm?.played),count(sm?.rawAway?.away?.sample)),
+    homeOverallPlayed:Math.max(count(homeOverallHistory?.played),count(sm?.rawHome?.sample)),
+    awayOverallPlayed:Math.max(count(awayOverallHistory?.played),count(sm?.rawAway?.sample)),
+  };
+}
+
 function buildDataHealth({ homePlayed, awayPlayed, homeOverallPlayed = homePlayed, awayOverallPlayed = awayPlayed, hasOdds, hasStandings, injuriesAvailable, h2hCount }) {
   const overallHome = Math.max(0, Number(homeOverallPlayed) || 0);
   const overallAway = Math.max(0, Number(awayOverallPlayed) || 0);
@@ -414,4 +429,4 @@ function buildPremiumIntelligence({
   };
 }
 
-module.exports = { buildPremiumIntelligence, buildDataHealth, buildMarketBoard };
+module.exports = { buildPremiumIntelligence, buildDataHealth, buildMarketBoard, selectConfidenceSamples };
