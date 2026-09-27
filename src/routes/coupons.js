@@ -24,15 +24,11 @@ function settlePendingBackground(userId) {
 }
 
 const CORNER_KEYS = new Set(['cornersOver95','cornersUnder95','cornersOver85','cornersUnder85']);
-const CORNER_SETTLEMENT_LEAGUES = new Set(['premier league','la liga','bundesliga','serie a','ligue 1','turkish super lig']);
-function couponLeagueKey(v){return String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ü/g,'u').replace(/[^a-z0-9]+/g,' ').trim().replace(/^super lig$/,'turkish super lig')}
-function cornerCouponSupported(league){return CORNER_SETTLEMENT_LEAGUES.has(couponLeagueKey(league))}
 const ALLOWED_KEYS = new Set([
   'home','draw','away',
   'over15','over25','under25','over35','under35',
   'bttsYes','bttsNo',
   'homeScores','awayScores','homeOver15','homeOver25','homeOver35','awayOver15','awayOver25','awayOver35',
-  'cornersOver95','cornersUnder95','cornersOver85','cornersUnder85',
   'fhHome','fhDraw','fhAway','fhHomeScores','fhAwayScores','fhOver05',
   'shHome','shDraw','shAway','shHomeScores','shAwayScores','shOver05',
   'mostGoalsFirst','mostGoalsEqual','mostGoalsSecond'
@@ -414,6 +410,8 @@ router.post('/', async (req, res) => {
   const { legs, stakeCoins } = req.body;
   if(Array.isArray(legs)&&legs.length>3) return res.status(400).json({error:'Bir kuponda en fazla 3 maç seçilebilir.',code:'MAX_3_LEGS'});
   const rawLegs = Array.isArray(legs) ? legs.slice(0,3) : [];
+  if(rawLegs.some(leg=>CORNER_KEYS.has(leg?.selection?.key)))
+    return res.status(422).json({error:'Korner seçimleri kupondan kaldırıldı.',code:'CORNER_SELECTION_DISABLED'});
   const safeLegs = rawLegs.map(leg => {
     const s=leg?.selection||{};
     if(!leg?.fixtureId||!leg?.homeTeam||!leg?.awayTeam||!ALLOWED_KEYS.has(s.key)) return null;
@@ -424,7 +422,6 @@ router.post('/', async (req, res) => {
       canonicalFixtureKey:null,canonicalProvider:null,providerIds:{sportsdb:'',sportmonks:'',bsd:'',footballData:''}};
   }).filter(Boolean);
   if(!safeLegs.length) return res.status(400).json({error:'En az bir geçerli seçim gerekli.'});
-  if(safeLegs.some(x=>CORNER_KEYS.has(x.selection.key)&&!cornerCouponSupported(x.league))) return res.status(422).json({error:'Korner seçimi bu ligde kupona eklenemez; sonuç korner verisi desteklenmiyor.',code:'CORNER_SETTLEMENT_UNSUPPORTED'});
   if(new Set(safeLegs.map(x=>x.fixtureId)).size!==safeLegs.length) return res.status(400).json({error:'Her maçtan yalnızca bir seçim eklenebilir.'});
   if(safeLegs.some(x=>x.kickoff&&!Number.isNaN(x.kickoff.getTime())&&x.kickoff.getTime()<=Date.now())) return res.status(409).json({error:'Başlamış maç kupona eklenemez.'});
   try{
