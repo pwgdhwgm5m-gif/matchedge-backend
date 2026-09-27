@@ -8,6 +8,27 @@ const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
+const oddsFetches = new Map();
+
+function fixtureOddsWithoutBlocking(date) {
+  const key=`odds-events:${date}`;
+  const hit=cache.get(key);
+  if(hit!==undefined)return Promise.resolve(hit);
+  let pending=oddsFetches.get(key);
+  if(!pending){
+    // Odds events are a fallback. Warm them once per date while canonical
+    // providers serve the fixture page without waiting for every league.
+    pending=cache.getOrFetch(key,config.cache.ttlStatic,
+      ()=>oddsApi.getFixtureEventsByDate(date))
+      .catch(error=>({ok:false,error:error.message}))
+      .finally(()=>oddsFetches.delete(key));
+    oddsFetches.set(key,pending);
+  }
+  return new Promise(resolve=>{
+    const timer=setTimeout(()=>resolve({ok:false,error:'odds_warming'}),700);
+    pending.then(result=>{clearTimeout(timer);resolve(result)});
+  });
+}
 
 /** GET /api/matches?date=YYYY-MM-DD
  * Only the selected first divisions and UEFA competitions appear in Fixtures.
@@ -19,7 +40,7 @@ router.get('/', async (req,res)=>{
   const [legacy,live,oddsEvents,turkeySm,smDay,bsdDay,bsdLive]=await Promise.all([
     cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date)),
     cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),
-    cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date)),
+    fixtureOddsWithoutBlocking(date),
     cache.getOrFetch(`sportmonks:tr:600:${date}`,config.cache.ttlLive,()=>sportmonks.getLeagueFixturesByDate(date,600)),
     Promise.race([cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),new Promise(r=>setTimeout(()=>r({ok:false,error:'sportmonks_date_timeout'}),5000))]),
     cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date)),
