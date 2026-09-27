@@ -80,7 +80,8 @@ async function precomputeTodaysMatches() {
          !f.homeTeamId||!f.awayTeamId||!f.homeTeam||!f.awayTeam||
          !f.kickoff||new Date(f.kickoff)<=new Date()||f.statusShort!=='NS')continue;
       const competition=competitionRegistry.resolveCompetition({provider:'sportmonks',leagueId:f.leagueId});
-      if(!competition?.visibleInCompetitionFilter||String(competition.providerIds.sportmonks)!==String(f.leagueId))continue;
+      if(!competitionRegistry.isFixtureCompetitionAllowed(competition?.canonicalCompetitionKey)||
+         String(competition.providerIds.sportmonks)!==String(f.leagueId))continue;
       upcomingFixtures.push({canonicalProvider:'sportmonks',fixtureId:f.sportmonksId,
         home:f.homeTeamId,away:f.awayTeamId,homeTeamName:f.homeTeam,awayTeamName:f.awayTeam,
         leagueName:f.leagueName,tsdbLeagueId:competition.providerIds.sportsdb||null,
@@ -100,7 +101,7 @@ async function precomputeTodaysMatches() {
     for(const m of result.matches||[]){
       const competition=competitionRegistry.resolveCompetition({leagueName:m.league,provider:'bsd',leagueId:m.leagueId});
       const kickoff=new Date(m.date||'');
-      if(!competition?.visibleInCompetitionFilter||competition.providerIds?.sportmonks||
+      if(!competitionRegistry.isFixtureCompetitionAllowed(competition?.canonicalCompetitionKey)||competition.providerIds?.sportmonks||
          !m.fixtureId||!m.homeTeam||!m.awayTeam||!Number.isFinite(kickoff.getTime())||kickoff<=new Date()||
          m.homeScore!=null||m.awayScore!=null)continue;
       upcomingFixtures.push({canonicalProvider:'bsd',fixtureId:m.fixtureId,
@@ -122,7 +123,7 @@ async function precomputeTodaysMatches() {
       if(e.strStatus!=='NS')continue;
       const id=String(e.idLeague||'');
       const competition=competitionRegistry.resolveCompetition({provider:'sportsdb',leagueId:id});
-      if(!sportsDb.isWhitelistedLeague(id)||!competition?.visibleInCompetitionFilter||
+      if(!sportsDb.isWhitelistedLeague(id)||!competitionRegistry.isFixtureCompetitionAllowed(competition?.canonicalCompetitionKey)||
          !sportsDb.isLeagueIdentityConsistent(id,e.strLeague))continue;
       const kickoff=sportsDb.toUtcIso(e.strTimestamp||(e.dateEvent+'T'+(e.strTime||'00:00:00')));
       if(!kickoff||new Date(kickoff)<=new Date())continue;

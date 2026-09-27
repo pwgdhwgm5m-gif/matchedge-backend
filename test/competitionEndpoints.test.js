@@ -23,7 +23,7 @@ function responseCapture() {
   };
 }
 
-test('fixture endpoint deduplicates verified cross-provider cup rows', async () => {
+test('fixture endpoint deduplicates verified cross-provider league rows', async () => {
   const original = {
     getOrFetch: cache.getOrFetch,
     transformEvent: sportsDb.transformEvent,
@@ -31,14 +31,14 @@ test('fixture endpoint deduplicates verified cross-provider cup rows', async () 
     applyLiveOverlay: sportsDb.applyLiveOverlay
   };
   const tsdbFixture = {
-    fixtureId: 'tsdb-cup-1', leagueId: '4483', league: 'Copa del Rey',
-    homeTeam: 'Lebrijana', awayTeam: 'Ceuta 6 de Junio',
+    fixtureId: 'tsdb-mls-1', leagueId: '4346', league: 'American Major League Soccer',
+    homeTeam: 'Seattle Sounders', awayTeam: 'Real Salt Lake',
     kickoff: '2026-09-26T16:00:00Z'
   };
   const bsdFixture = {
-    fixtureId: 'bsd-cup-1', bsdEventId: 'bsd-cup-1', leagueId: '41',
-    league: 'Copa del Rey', leagueCountry: 'Spain',
-    homeTeam: 'UB Lebrijana', awayTeam: 'CD 6 de Junio',
+    fixtureId: 'bsd-mls-1', bsdEventId: 'bsd-mls-1', leagueId: '18',
+    league: 'MLS', leagueCountry: 'United States',
+    homeTeam: 'Seattle Sounders FC', awayTeam: 'Real Salt Lake',
     kickoff: '2026-09-26T16:00:00+00:00'
   };
 
@@ -61,11 +61,11 @@ test('fixture endpoint deduplicates verified cross-provider cup rows', async () 
     await routeHandler(matchesRouter)({ query: { date: '2026-09-26' } }, response);
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.matches.length, 1);
-    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'spain-copa-del-rey');
-    assert.equal(response.body.matches[0].displayName, 'Copa del Rey');
+    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'usa-mls');
+    assert.equal(response.body.matches[0].displayName, 'USA Major League Soccer');
     assert.equal(response.body.matches[0].canonicalProvider, 'bsd');
-    assert.equal(response.body.matches[0].providerIds.sportsdb, 'tsdb-cup-1');
-    assert.equal(response.body.matches[0].providerIds.bsd, 'bsd-cup-1');
+    assert.equal(response.body.matches[0].providerIds.sportsdb, 'tsdb-mls-1');
+    assert.equal(response.body.matches[0].providerIds.bsd, 'bsd-mls-1');
   } finally {
     cache.getOrFetch = original.getOrFetch;
     sportsDb.transformEvent = original.transformEvent;
@@ -132,7 +132,7 @@ test('fixture endpoint uses a verified live fallback when BSD has no Eerste Divi
   } finally {cache.getOrFetch=original.getOrFetch;sportsDb.transformLiveEvent=original.transformLiveEvent;}
 });
 
-test('fixture endpoint transforms a verified SportsDB event and rejects an ID/name mismatch', async () => {
+test('fixture endpoint omits verified domestic cups and an ID/name mismatch while keeping Korea first division', async () => {
   const originalGetOrFetch = cache.getOrFetch;
   const events = [
     {
@@ -155,6 +155,11 @@ test('fixture endpoint transforms a verified SportsDB event and rejects an ID/na
       strTime: '17:00:00',
       strHomeTeam: 'Wrong Home',
       strAwayTeam: 'Wrong Away'
+    },
+    {
+      idEvent: 'tsdb-korea-1',idLeague:'4689',strLeague:'South Korea K League 1',
+      dateEvent:'2026-09-26',strTime:'18:00:00',strStatus:'NS',
+      strHomeTeam:'Seoul',strAwayTeam:'Ulsan',intHomeScore:null,intAwayScore:null
     }
   ];
 
@@ -174,10 +179,9 @@ test('fixture endpoint transforms a verified SportsDB event and rejects an ID/na
     await routeHandler(matchesRouter)({ query: { date: '2026-09-26' } }, response);
     assert.equal(response.statusCode, 200);
     assert.equal(response.body.matches.length, 1);
-    assert.equal(response.body.matches[0].fixtureId, 'tsdb-belgian-cup-1');
-    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'belgium-cup');
+    assert.equal(response.body.matches[0].fixtureId, 'tsdb-korea-1');
+    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'south-korea-k-league-1');
     assert.equal(response.body.matches[0].mappingStatus, 'verified');
-    assert.equal(response.body.matches[0].fixtureCoverage, 'fixture-producing');
     assert.equal(response.body.matches[0].visibleInCompetitionFilter, true);
   } finally {
     cache.getOrFetch = originalGetOrFetch;

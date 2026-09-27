@@ -3,7 +3,6 @@ const router = express.Router();
 const cache = require('../utils/cache');
 const config = require('../config/config');
 const sportsDb = require('../services/sportsDbService');
-const cupFixtures = require('../services/cupFixtureService');
 const oddsApi = require('../services/oddsApiService');
 const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
@@ -11,17 +10,15 @@ const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
 
 /** GET /api/matches?date=YYYY-MM-DD
- * Fixture coverage stays broad. Provider ownership is applied as an overlay,
- * not as a destructive whitelist: SportMonks is authoritative for the six
- * subscribed leagues, BSD is preferred outside them, and the proven legacy
- * fixture feeds remain coverage fallbacks.
+ * Only the selected first divisions and UEFA competitions appear in Fixtures.
+ * Provider ownership remains SportMonks for the six subscribed leagues and
+ * BSD with verified fallbacks for the other selected competitions.
  */
 router.get('/', async (req,res)=>{
   const date=req.query.date||new Date().toISOString().split('T')[0];
-  const [legacy,live,supplemental,oddsEvents,turkeySm,smDay,bsdDay,bsdLive]=await Promise.all([
+  const [legacy,live,oddsEvents,turkeySm,smDay,bsdDay,bsdLive]=await Promise.all([
     cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date)),
     cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),
-    cache.getOrFetch(`cup-fixtures:${date}`,config.cache.ttlStatic,()=>cupFixtures.getSupplementalMatches(date)),
     cache.getOrFetch(`odds-events:${date}`,config.cache.ttlStatic,()=>oddsApi.getFixtureEventsByDate(date)),
     cache.getOrFetch(`sportmonks:tr:600:${date}`,config.cache.ttlLive,()=>sportmonks.getLeagueFixturesByDate(date,600)),
     Promise.race([cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),new Promise(r=>setTimeout(()=>r({ok:false,error:'sportmonks_date_timeout'}),5000))]),
@@ -52,7 +49,8 @@ router.get('/', async (req,res)=>{
         providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}
       };
     }
-    candidates.push(competitionRegistry.decorateMatch(row,kind));
+    const decorated=competitionRegistry.decorateMatch(row,kind);
+    if(competitionRegistry.isFixtureCompetitionAllowed(decorated))candidates.push(decorated);
   };
 
   // Proven broad coverage baseline.
@@ -70,8 +68,6 @@ router.get('/', async (req,res)=>{
     if(!m?.isLive||!Number.isFinite(kickoff.getTime())||kickoff.toISOString().slice(0,10)!==date)continue;
     if(sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))put(m,'sportsdb');
   }
-  const extra=Array.isArray(supplemental)?supplemental:(supplemental?.matches||[]);
-  for(const m of extra)put(m);
   for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
 
   // BSD owns scores/results across leagues. Retain SportMonks and SportsDB as
@@ -104,15 +100,11 @@ router.get('/', async (req,res)=>{
   }
   matches=competitionRegistry.dedupeCompetitionFixtures(matches.map(m=>
     competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource)
-  ),{preferBsd:true});
+  ),{preferBsd:true}).filter(competitionRegistry.isFixtureCompetitionAllowed);
   const providerIdentity=require('../services/providerIdentityCache');
   const identityWrites=await Promise.allSettled(matches.map(match=>providerIdentity.remember(match)));
   for(const write of identityWrites)if(write.status==='rejected')console.warn('[provider-identity/fixtures]',write.reason?.message);
-  // Keep the complete fixture backbone here. Some provider rows do not carry
-  // enough league metadata to resolve a registry key at this stage; filtering
-  // them here can erase the whole day. Fixtures/Home apply the central registry
-  // visibility after canonical metadata is available.
   if(!matches.length&&!legacy?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
-  res.json({date,matches,coveragePolicy:'broad-fallback-with-canonical-overlays'});
+  res.json({date,matches,coveragePolicy:'selected-leagues-and-uefa-with-canonical-overlays'});
 });
 module.exports=router;

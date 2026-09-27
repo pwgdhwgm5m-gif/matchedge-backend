@@ -4,6 +4,7 @@ const registry = require('../src/services/competitionRegistryService');
 const sourcePolicy = require('../src/services/sourcePolicyService');
 const config = require('../src/config/config');
 const sportsDb = require('../src/services/sportsDbService');
+const oddsApi = require('../src/services/oddsApiService');
 
 test('registry preserves the six existing SportMonks primary IDs', () => {
   assert.equal(registry.assertPrimaryMappingsUnchanged(), true);
@@ -88,6 +89,24 @@ test('BSD names resolve across the visible league registry before fixture filter
   assert.equal(eerste.eligibleForHomePriority, true);
   assert.equal(eerste.visibleInCompetitionFilter, true);
   assert.equal(registry.resolveCompetition({provider:'bsd', leagueId:'unknown', leagueName:'Eerste Divisie', leagueCountry:'Belgium'}), null);
+});
+
+test('fixture whitelist keeps first divisions and UEFA Nations League but excludes domestic cups',()=>{
+  for(const key of ['england-premier-league','netherlands-eerste-divisie','usa-mls',
+    'south-korea-k-league-1','mexico-liga-mx','uefa-champions-league',
+    'uefa-europa-league','uefa-conference-league','uefa-nations-league'])
+    assert.equal(registry.isFixtureCompetitionAllowed(key),true,key);
+  for(const key of ['spain-copa-del-rey','belgium-cup','portugal-taca-de-portugal',
+    'uefa-super-cup','fifa-club-world-cup','concacaf-nations-league','unmapped:unknown'])
+    assert.equal(registry.isFixtureCompetitionAllowed(key),false,key);
+});
+
+test('fixture provider requests skip cup sport keys before calling Odds API',()=>{
+  const keys=oddsApi.fixtureSportKeys([
+    'soccer_epl','soccer_korea_kleague1','soccer_uefa_nations_league',
+    'soccer_fa_cup','soccer_spain_copa_del_rey','soccer_england_efl_cup','unmapped-key'
+  ]);
+  assert.deepEqual(keys,['soccer_epl','soccer_korea_kleague1','soccer_uefa_nations_league']);
 });
 
 test('coverage metadata separates mapping, fixture, result, filter and home states', () => {

@@ -2,6 +2,7 @@ const config = require('../config/config');
 const { fetchT } = require('../utils/fetchWithTimeout');
 const cache = require('../utils/cache');
 const { teamNamesMatch, normalizeTeamName } = require('../utils/textNormalize');
+const competitionRegistry = require('./competitionRegistryService');
 
 let oddsCircuitOpenUntil=0;
 function oddsEnabled(){return Boolean(config.oddsApi.key)&&Date.now()>=oddsCircuitOpenUntil}
@@ -61,9 +62,15 @@ async function getEventExtendedOdds(sportKey,eventId){
  return result;
 }
 
+function fixtureSportKeys(keys=config.trackedLeagues||[]) {
+  return keys.filter(sportKey=>{
+    const competition=competitionRegistry.resolveCompetition({provider:'oddsApi',sportKey});
+    return competitionRegistry.isFixtureCompetitionAllowed(competition?.canonicalCompetitionKey);
+  });
+}
 async function getFixtureEventsByDate(dateStr) {
   if (!oddsEnabled()) return { ok:false,error:'odds_api_disabled_or_circuit_open',matches:[] };
-  const keys=config.trackedLeagues||[]; const matches=[];
+  const keys=fixtureSportKeys(); const matches=[];
   // Fallback only: sequential and stop immediately when the provider rate-limits/auth-fails.
   for (const sportKey of keys) {
     if(!oddsEnabled()) break;
@@ -338,6 +345,7 @@ module.exports = {
   getEventExtendedOdds,
   getEventsForLeague,
   getFixtureEventsByDate,
+  fixtureSportKeys,
   hasMatchesToday,
   recordOddsSnapshot,
   getOddsHistory,

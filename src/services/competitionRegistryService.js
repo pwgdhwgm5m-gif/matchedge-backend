@@ -374,6 +374,17 @@ const COMPETITIONS = Object.freeze([
 ]);
 
 const BY_KEY = new Map(COMPETITIONS.map(item => [item.canonicalCompetitionKey, item]));
+// Fixtures show the selected top divisions and the UEFA competitions the user
+// follows. Other registry entries stay resolvable for results and settlement.
+const FIXTURE_UEFA_KEYS = new Set([
+  'uefa-champions-league','uefa-europa-league','uefa-conference-league','uefa-nations-league'
+]);
+function isFixtureCompetitionAllowed(value) {
+  const competition=typeof value==='string' ? BY_KEY.get(value) :
+    BY_KEY.get(value?.canonicalCompetitionKey);
+  return Boolean(competition?.visibleInCompetitionFilter &&
+    (competition.type==='league'||FIXTURE_UEFA_KEYS.has(competition.canonicalCompetitionKey)));
+}
 const BY_ALIAS = new Map();
 const BY_PROVIDER_ID = new Map();
 const AMBIGUOUS_ALIAS = Symbol('ambiguous competition alias');
@@ -649,6 +660,7 @@ module.exports = {
   normalizeTeamIdentity,
   providerKind,
   resolveCompetition,
+  isFixtureCompetitionAllowed,
   decorateMatch,
   dedupeCompetitionFixtures,
   assertPrimaryMappingsUnchanged
