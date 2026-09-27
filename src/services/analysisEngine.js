@@ -12,6 +12,7 @@ const modelCalibration = require('./modelCalibrationService');
 const accuracy = require('./accuracyEngineService');
 const footballDataOdds = require('./footballDataUpcomingOddsService');
 const sportmonks = require('./sportmonksService');
+const sportmonksHistory = require('./sportmonksAnalysisHistoryService');
 const sourcePolicy = require('./sourcePolicyService');
 const bsd = require('./bsdService');
 const fiveDollarFootball = require('./fiveDollarFootballService');
@@ -19,6 +20,7 @@ const powerRating = require('./powerRatingService');
 const predictionLedger = require('./predictionLedgerService');
 const marketEvidenceService = require('./marketEvidenceService');
 const {verifiedHistory} = require('./analysisTeamHistoryService');
+const {normalizeTeamIdentity} = require('./competitionRegistryService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -70,6 +72,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const isMappedLeague = Boolean(effectiveTsdbLeagueId && sportsDb.isWhitelistedLeague(effectiveTsdbLeagueId));
   const useOwnSource = isSuperLig || isMappedLeague;
   const isInternationalCompetition = /nations league|world cup|euro|international/i.test(String(leagueName || ''));
+  // Resolve provider-native SportMonks teams before selecting historical form.
+  // BSD/SportsDB are per-team fallbacks, never a source of SportMonks IDs.
+  const smContext=useSportmonksPrimary ? await sportmonksHistory.load({homeTeamName,awayTeamName,
+    kickoff,leagueId:providerPolicy.sportmonksLeagueId}).catch(()=>null) : null;
 
   // API-Football (footballApiService) askida oldugu icin form verisi:
   // - Süper Lig -> TFF.org scraper
@@ -90,12 +96,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,sportsdbOptions('away'))
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
-  const homeFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `verified-form:v6:${effectiveTsdbLeagueId||'unknown'}:${homeTeamName}`
+  const homeFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `verified-form:v7:${effectiveTsdbLeagueId||'unknown'}:${String(kickoff||'').slice(0,10)}:${homeTeamName}`
     : isSuperLig ? `tff-form:${homeTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${homeTeamName}`
       : `form:${home}`;
-  const awayFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `verified-form:v6:${effectiveTsdbLeagueId||'unknown'}:${awayTeamName}`
+  const awayFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `verified-form:v7:${effectiveTsdbLeagueId||'unknown'}:${String(kickoff||'').slice(0,10)}:${awayTeamName}`
     : isSuperLig ? `tff-form:${awayTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${awayTeamName}`
@@ -138,8 +144,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       // API-Football is intentionally disabled: account/provider is blocked.
       // Missing injury data stays unavailable rather than spending calls or inventing values.
       Promise.resolve({ok:false,error:'api_football_disabled'}),
-      cache.getOrFetch(homeFormCacheKey, config.cache.ttlStatic, homeFormFetcher),
-      cache.getOrFetch(awayFormCacheKey, config.cache.ttlStatic, awayFormFetcher),
+      sportmonksHistory.preferredForm(smContext?.home,()=>cache.getOrFetch(homeFormCacheKey, config.cache.ttlStatic, homeFormFetcher)),
+      sportmonksHistory.preferredForm(smContext?.away,()=>cache.getOrFetch(awayFormCacheKey, config.cache.ttlStatic, awayFormFetcher)),
       cache.getOrFetch(standingsCacheKey, config.cache.ttlStatic, standingsFetcher),
     ]);
 
@@ -251,13 +257,22 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // (TFF/TheSportsDB) gelen normallestirilmis tablo icin dolduruluyor; eski
   // API-Football yolu (askida) icin bos birakiliyor.
   let standingsTable = [];
+  let homeStandingRow = null, awayStandingRow = null;
   if (standingsResult.status === 'fulfilled' && standingsResult.value.ok) {
     const sv = standingsResult.value;
     if (isSuperLig || isMappedLeague) {
       const table = sv.table || [];
       standingsTable = table;
-      const homeRow = motivation.findTeamStanding(table, homeTeamIdForStats);
-      const awayRow = motivation.findTeamStanding(table, awayTeamIdForStats);
+      const standingFor=(name,id,source)=>{
+        // The table uses TFF/SportsDB IDs, never a SportMonks or BSD ID.
+        const sameProvider=isSuperLig ? source==='tff' : String(source||'').startsWith('sportsdb');
+        if(sameProvider){const row=motivation.findTeamStanding(table,id);if(row)return row;}
+        const exact=table.filter(row=>normalizeTeamIdentity(row.teamName)===normalizeTeamIdentity(name));
+        return exact.length===1?exact[0]:null;
+      };
+      const homeRow=standingFor(homeTeamName,homeTeamIdForStats,homeHistorySource);
+      const awayRow=standingFor(awayTeamName,awayTeamIdForStats,awayHistorySource);
+      homeStandingRow=homeRow;awayStandingRow=awayRow;
       if (homeRow) {
         motivationHome = homeRow.description
           ? motivation.calculateMotivationFromDescription(homeRow.description)
@@ -326,8 +341,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   let awayLambda = +(awayLambdaBase * motivationAway.multiplier).toFixed(2);
 
   // Opponent-strength prior + robust early-season control.
-  const homeStanding = standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats));
-  const awayStanding = standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats));
+  const homeStanding = homeStandingRow;
+  const awayStanding = awayStandingRow;
   const tableSize = standingsTable.length || 20;
   const rankStrength = row => row?.rank ? Math.max(-1,Math.min(1,(tableSize+1-2*Number(row.rank))/Math.max(1,tableSize-1))) : 0;
   const strengthGap=Math.max(-1,Math.min(1,rankStrength(homeStanding)-rankStrength(awayStanding)));
@@ -391,23 +406,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // with a useful sample are allowed to nudge expected goals; bounds prevent
   // sparse/noisy provider data from dominating the established model.
   let sportmonksHistorical = null;
-  let sportmonksFixtureId = null;
+  let sportmonksFixtureId = smContext?.fixture?.sportmonksId || null;
   if (useSportmonksPrimary) {
   try {
-    const fixtureIndex = await Promise.race([
-      cache.getOrFetch(`sportmonks:fixture-match:${providerPolicy.sportmonksLeagueId||'all'}:${String(kickoff||'no-date').slice(0,10)}:${homeTeamName}:${awayTeamName}`, 300,
-        () => sportmonks.getFixtureForMatch(homeTeamName, awayTeamName, kickoff, providerPolicy.sportmonksLeagueId)),
-      new Promise(resolve => setTimeout(() => resolve({ok:false}), 2500))
-    ]);
-    const smMatch = fixtureIndex.ok ? fixtureIndex.fixture : null;
-    sportmonksFixtureId = smMatch?.sportmonksId || null;
+    const smMatch = smContext?.fixture;
     if (smMatch?.homeTeamId && smMatch?.awayTeamId) {
-      const [hh, ah] = await Promise.all([
-        Promise.race([cache.getOrFetch(`sportmonks:history:${smMatch.homeTeamId}`,1800,()=>sportmonks.getTeamFixtureHistory(smMatch.homeTeamId)),new Promise(r=>setTimeout(()=>r({ok:false}),2500))]),
-        Promise.race([cache.getOrFetch(`sportmonks:history:${smMatch.awayTeamId}`,1800,()=>sportmonks.getTeamFixtureHistory(smMatch.awayTeamId)),new Promise(r=>setTimeout(()=>r({ok:false}),2500))])
-      ]);
-      const sh = hh.ok ? sportmonks.aggregateTeamHistory(hh.fixtures, smMatch.homeTeamId) : null;
-      const sa = ah.ok ? sportmonks.aggregateTeamHistory(ah.fixtures, smMatch.awayTeamId) : null;
+      const sh = smContext.home ? sportmonks.aggregateTeamHistory(smContext.home.fixtures, smMatch.homeTeamId) : null;
+      const sa = smContext.away ? sportmonks.aggregateTeamHistory(smContext.away.fixtures, smMatch.awayTeamId) : null;
       if ((sh?.sample || 0) >= 5 && (sa?.sample || 0) >= 5) {
         // Venue-specific history is materially more predictive for this fixture.
         // Require >=3 same-venue matches; otherwise blend the small venue sample
@@ -876,7 +881,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   ].some(Number.isFinite));
   const smCornerRankingUsed=Number.isFinite(smMarketEvidence?.cornerQuality);
   const sportmonksConsumedInputs=useSportmonksPrimary?{
-    form:{available:{home:Number(sportmonksHistorical?.rawHome?.sample||0)>0,away:Number(sportmonksHistorical?.rawAway?.sample||0)>0},consumedByExpectedGoals:smChanceUsed,source:'SportMonks completed team history'},
+    form:{available:{home:Boolean(smContext?.home),away:Boolean(smContext?.away)},
+      consumedByExpectedGoals:homeHistorySource==='sportmonks'||awayHistorySource==='sportmonks',
+      source:'SportMonks completed team history'},
     shots:{available:{home:Number.isFinite(smRawHomeAverages.shots),away:Number.isFinite(smRawAwayAverages.shots)},consumedByExpectedGoals:smChanceUsed&&smShotsAvailable,consumedByMarketRanking:smThreatRankingUsed&&smShotsAvailable},
     shotsInsideBox:{available:{home:Number.isFinite(smRawHomeAverages.shotsInsideBox),away:Number.isFinite(smRawAwayAverages.shotsInsideBox)},consumedByExpectedGoals:smChanceUsed&&smInsideBoxAvailable,consumedByMarketRanking:smThreatRankingUsed&&smInsideBoxAvailable},
     shotsOnTarget:{available:{home:Number.isFinite(smRawHomeAverages.shotsOnTarget),away:Number.isFinite(smRawAwayAverages.shotsOnTarget)},consumedByExpectedGoals:smChanceUsed&&smSotAvailable,consumedByMarketRanking:smThreatRankingUsed&&smSotAvailable},
@@ -886,7 +893,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   }:null;
   qualityDimensions.sourceHealth.providers={
     ...(qualityDimensions.sourceHealth.providers||{}),
-    sportmonks:{requested:useSportmonksPrimary,historyAvailable:Boolean(sportmonksHistorical),fixtureId:sportmonksFixtureId||null},
+    sportmonks:{requested:useSportmonksPrimary,historyAvailable:Boolean(smContext?.home||smContext?.away),
+      homeHistoryAvailable:Boolean(smContext?.home),awayHistoryAvailable:Boolean(smContext?.away),fixtureId:sportmonksFixtureId||null},
   };
   qualityDimensions.metricCoverage.sportmonksCurrentFixture={
     availableFields:0,
@@ -980,12 +988,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     modelDiagnostics: {
       lambdas: { homeBase: homeLambdaBase, awayBase: awayLambdaBase, finalHome: homeLambda, finalAway: awayLambda },
       form: { home: homeForm, away: awayForm },
-      standings: { homeRank: standingsTable.find(x=>String(x.teamId)===String(homeTeamIdForStats))?.rank ?? null, awayRank: standingsTable.find(x=>String(x.teamId)===String(awayTeamIdForStats))?.rank ?? null },
+      standings: { homeRank: homeStandingRow?.rank ?? null, awayRank: awayStandingRow?.rank ?? null },
       multipliers: { homeAdvantage: homeAdvantageMultiplier, homeMotivation: motivationHome.multiplier, awayMotivation: motivationAway.multiplier, homeFatigue, awayFatigue, homeStreak:homeStreakMult, awayStreak:awayStreakMult },
       sportmonks: smMarketEvidence,
       xgProvenance,
       consumedInputs: {
         sportmonks: sportmonksConsumedInputs,
+        sportmonksFixtureId: sportmonksFixtureId || null,
         providerXg: {
           ...xgProvenance,
           consumedByExpectedGoals: xgProvenance.usedByModel,
@@ -1014,7 +1023,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       probabilityPipeline:['venue-recent-form','opponent-strength','independent-evidence-ensemble','mismatch-preservation','dixon-coles','market-calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
-    dataSource: useBsdPrimary ? 'bsd' : (isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable')),
+    dataSource: useSportmonksPrimary
+      ? (homeHistorySource==='sportmonks' && awayHistorySource==='sportmonks' ? 'sportmonks' : 'sportmonks-fallback')
+      : useBsdPrimary ? 'bsd' : (isSuperLig ? 'tff' : (isMappedLeague ? 'thesportsdb' : 'unavailable')),
   };
 }
 

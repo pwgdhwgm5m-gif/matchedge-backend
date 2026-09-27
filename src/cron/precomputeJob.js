@@ -5,6 +5,7 @@ const footballApi = require('../services/footballApiService');
 const oddsApi = require('../services/oddsApiService');
 const sportsDb = require('../services/sportsDbService');
 const bsd = require('../services/bsdService');
+const sportmonks = require('../services/sportmonksService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
 const Prediction = require('../models/PredictionSnapshot');
@@ -44,7 +45,9 @@ function dedupePrecomputeFixtures(fixtures){
     const previous=selected.get(key);
     const nativeIds={...(fixture.providerIds||{}),[fixture.canonicalProvider]:String(fixture.fixtureId)};
     const nativeTeams=fixture.canonicalProvider==='sportsdb' ?
-      {sportsdb:{home:fixture.home==null?null:String(fixture.home),away:fixture.away==null?null:String(fixture.away)}} : {};
+      {sportsdb:{home:fixture.home==null?null:String(fixture.home),away:fixture.away==null?null:String(fixture.away)}} :
+      fixture.canonicalProvider==='sportmonks' ?
+      {sportmonks:{home:String(fixture.home),away:String(fixture.away)}} : {};
     const preferNew=!previous||(fixture.canonicalProvider==='bsd'&&!competition?.providerIds?.sportmonks);
     const chosen=preferNew?fixture:previous;
     selected.set(key,{...chosen,
@@ -63,6 +66,29 @@ async function precomputeTodaysMatches() {
   console.log(`[precompute] Onumuzdeki ${DAYS_AHEAD} gun taraniyor (BSD, sonra SportsDB)...`);
 
   const upcomingFixtures = [];
+
+  // The subscribed six leagues enter precompute with their SportMonks event
+  // and team IDs. The shared fixture-day lookup covers all six leagues.
+  for(let i=0;i<DAYS_AHEAD;i++){
+    const date=new Date();date.setDate(date.getDate()+i);
+    const day=formatDate(date);
+    const sm=await cache.getOrFetch(`precompute:sportmonks-day:${day}`,300,
+      () => sportmonks.getFixturesByDate(day)).catch(()=>({ok:false}));
+    if(!sm.ok)continue;
+    for(const f of sm.fixtures||[]){
+      if(!sourcePolicy.resolve({leagueName:f.leagueName})||!f.sportmonksId||
+         !f.homeTeamId||!f.awayTeamId||!f.homeTeam||!f.awayTeam||
+         !f.kickoff||new Date(f.kickoff)<=new Date()||f.statusShort!=='NS')continue;
+      const competition=competitionRegistry.resolveCompetition({provider:'sportmonks',leagueId:f.leagueId});
+      if(!competition?.visibleInCompetitionFilter||String(competition.providerIds.sportmonks)!==String(f.leagueId))continue;
+      upcomingFixtures.push({canonicalProvider:'sportmonks',fixtureId:f.sportmonksId,
+        home:f.homeTeamId,away:f.awayTeamId,homeTeamName:f.homeTeam,awayTeamName:f.awayTeam,
+        leagueName:f.leagueName,tsdbLeagueId:competition.providerIds.sportsdb||null,
+        league:sportsDb.getFotmobIdForTsdbLeague(competition.providerIds.sportsdb)||null,
+        season:new Date().getFullYear(),sportKey:sourcePolicy.oddsSportKeyForCompetition(competition.canonicalCompetitionKey)||null,
+        kickoff:new Date(f.kickoff).toISOString()});
+    }
+  }
 
   // Discover BSD fixtures first. TheSportsDB fills only matches BSD omitted.
   for(let i=0;i<DAYS_AHEAD;i++){

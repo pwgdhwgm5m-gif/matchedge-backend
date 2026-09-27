@@ -58,6 +58,20 @@ test('precompute retains both event IDs when BSD wins the fixture',()=>{
   assert.equal(rematch.length,2);
 });
 
+test('six-league precompute retains SportMonks as the fixture and keeps provider-native team IDs',()=>{
+  const base={homeTeamName:'Manchester City',awayTeamName:'Arsenal',leagueName:'Premier League',
+    kickoff:'2026-09-27T16:00:00Z'};
+  const rows=dedupePrecomputeFixtures([
+    {...base,fixtureId:'sm:fixture',canonicalProvider:'sportmonks',home:'sm:h',away:'sm:a'},
+    {...base,fixtureId:'db:fixture',canonicalProvider:'sportsdb',home:'db:h',away:'db:a'},
+  ]);
+  assert.equal(rows.length,1);
+  assert.equal(rows[0].canonicalProvider,'sportmonks');
+  assert.deepEqual(rows[0].providerIds,{sportmonks:'sm:fixture',sportsdb:'db:fixture'});
+  assert.deepEqual(rows[0].providerTeamIds.sportmonks,{home:'sm:h',away:'sm:a'});
+  assert.deepEqual(rows[0].providerTeamIds.sportsdb,{home:'db:h',away:'db:a'});
+});
+
 test('SportsDB uses a cached league season for a missing team schedule without crossing team IDs',async()=>{
   const originalFetch=global.fetch,paths=[];
   global.fetch=async url=>{

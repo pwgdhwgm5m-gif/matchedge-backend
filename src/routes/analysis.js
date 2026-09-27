@@ -385,13 +385,15 @@ router.get('/:fixtureId', async (req, res) => {
         const teamIds={...providerTeamIds};
         for(const side of ['home','away']){
           const source=String(history[side+'Source']||'');
-          const p=source.startsWith('sportsdb')?'sportsdb':source==='bsd'?'bsd':null;
+          const p=source==='sportmonks'?'sportmonks':source.startsWith('sportsdb')?'sportsdb':source==='bsd'?'bsd':null;
           const id=history[side+'TeamId'];
           if(p&&id!=null)teamIds[p]={...(teamIds[p]||{}),[side]:String(id)};
         }
         const ids={...providerIds};
         if(verified)ids[verified.provider]=String(verified.id);
         if(sm?.sportmonksId)ids.sportmonks=String(sm.sportmonksId);
+        const modelSportmonksId=result.modelDiagnostics?.consumedInputs?.sportmonksFixtureId;
+        if(modelSportmonksId)ids.sportmonks=String(modelSportmonksId);
         if(Object.keys(ids).length)await providerIdentity.remember({fixtureId,homeTeam:homeTeamName,
           awayTeam:awayTeamName,kickoff,canonicalCompetitionKey:registeredCompetition?.canonicalCompetitionKey,
           canonicalProvider:verified?.provider||requestedProvider,providerIds:ids,providerTeamIds:teamIds});
