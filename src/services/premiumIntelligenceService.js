@@ -269,22 +269,32 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
   };
 }
 
-function buildDataHealth({ homePlayed, awayPlayed, hasOdds, hasStandings, injuriesAvailable, h2hCount }) {
-  const homeSample = clamp(homePlayed / 5, 0, 1);
-  const awaySample = clamp(awayPlayed / 5, 0, 1);
-  const score = Math.round(
-    homeSample * 25 +
-    awaySample * 25 +
-    (hasOdds ? 20 : 0) +
+function buildDataHealth({ homePlayed, awayPlayed, homeOverallPlayed = homePlayed, awayOverallPlayed = awayPlayed, hasOdds, hasStandings, injuriesAvailable, h2hCount }) {
+  const overallHome = Math.max(0, Number(homeOverallPlayed) || 0);
+  const overallAway = Math.max(0, Number(awayOverallPlayed) || 0);
+  const venueHome = Math.max(0, Number(homePlayed) || 0);
+  const venueAway = Math.max(0, Number(awayPlayed) || 0);
+  const raw = Math.round(
+    clamp(overallHome / 8, 0, 1) * 20 +
+    clamp(overallAway / 8, 0, 1) * 20 +
+    clamp(venueHome / 5, 0, 1) * 10 +
+    clamp(venueAway / 5, 0, 1) * 10 +
+    (hasOdds ? 15 : 0) +
     (hasStandings ? 10 : 0) +
     (injuriesAvailable ? 10 : 0) +
-    (h2hCount > 0 ? 10 : 0)
+    (h2hCount > 0 ? 5 : 0)
   );
+  // Supporting sources cannot compensate for a missing team history.
+  const weakest = Math.min(overallHome, overallAway);
+  const cap = weakest === 0 ? 35 : weakest < 5 ? 54 : weakest < 8 ? 74 :
+    Math.min(venueHome, venueAway) < 5 ? 79 : 100;
+  const score = Math.min(raw, cap);
 
   return {
     score,
     level: score >= 80 ? 'high' : score >= 55 ? 'medium' : 'low',
-    sample: { home: homePlayed, away: awayPlayed, target: 5 },
+    sample: { home: venueHome, away: venueAway, target: 5,
+      overallHome, overallAway, overallTarget: 8 },
     checks: {
       odds: hasOdds,
       standings: hasStandings,
@@ -301,6 +311,8 @@ function buildPremiumIntelligence({
   matchOdds,
   homePlayed = 0,
   awayPlayed = 0,
+  homeOverallPlayed = homePlayed,
+  awayOverallPlayed = awayPlayed,
   hasStandings = false,
   injuriesAvailable = false,
   h2hCount = 0,
@@ -313,6 +325,8 @@ function buildPremiumIntelligence({
   const dataHealth = buildDataHealth({
     homePlayed,
     awayPlayed,
+    homeOverallPlayed,
+    awayOverallPlayed,
     hasOdds,
     hasStandings,
     injuriesAvailable,
@@ -351,9 +365,10 @@ function buildPremiumIntelligence({
     fairOdds: modelChoices[0].modelProbability > 0 ? +(100 / modelChoices[0].modelProbability).toFixed(2) : null,
     positive: false,
   } : null);
-  const minSample = Math.min(homePlayed, awayPlayed);
+  const minOverallSample = Math.min(homeOverallPlayed, awayOverallPlayed);
+  const minVenueSample = Math.min(homePlayed, awayPlayed);
   const blockers = [];
-  if (homePlayed < 5 || awayPlayed < 5) blockers.push('SMALL_SAMPLE');
+  if (minOverallSample < 8 || minVenueSample < 5) blockers.push('SMALL_SAMPLE');
   const selectionEvidence = bestEdge ? marketEvidence?.[bestEdge.outcome] : null;
   const evidenceReady = marketEvidenceService.hasStrongEvidence(selectionEvidence);
   if (!evidenceReady) blockers.push('INSUFFICIENT_MARKET_EVIDENCE');
@@ -365,7 +380,7 @@ function buildPremiumIntelligence({
   // evidence into a customer-facing pick. Keep the probabilities available for
   // diagnostics, but require a minimum completed sample and data-health floor
   // before publishing a selection.
-  const decisionReady = hasModel && minSample >= 8 && evidenceReady && dataHealth.score >= 55;
+  const decisionReady = hasModel && minOverallSample >= 8 && minVenueSample >= 5 && evidenceReady && dataHealth.score >= 55;
   let status = decisionReady ? 'PICK' : 'UNAVAILABLE';
   if (decisionReady && hasOdds && bestEdge?.edgePoints >= 3) status = 'VALUE';
 
@@ -390,6 +405,7 @@ function buildPremiumIntelligence({
       edgeUsesModelOnly: true,
       minimumValueEdgePoints: 3,
       minimumFullSample: 8,
+      minimumVenueSample: 5,
       minimumMarketEvidenceLevel: 'SUFFICIENT',
       minimumEffectiveSample: 8,
       minimumDataHealth: 55,

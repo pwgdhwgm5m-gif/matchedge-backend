@@ -803,6 +803,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     matchOdds,
     homePlayed: homeForm.played,
     awayPlayed: awayForm.played,
+    homeOverallPlayed: homeOverallHistory.played,
+    awayOverallPlayed: awayOverallHistory.played,
     hasStandings: standingsTable.length > 0,
     injuriesAvailable: injuriesResult.status === 'fulfilled' && injuriesResult.value.ok === true,
     h2hCount: h2hFixturesRaw.length,

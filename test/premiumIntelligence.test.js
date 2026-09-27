@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { buildPremiumIntelligence, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
+const { buildPremiumIntelligence, buildDataHealth, buildMarketBoard } = require('../src/services/premiumIntelligenceService');
 const { calculateHalfMarkets, calculateMarketProbabilities, estimateCornerMetrics } = require('../src/services/poissonService');
 const { calculateMatchDominance } = require('../src/services/liveXgService');
 
@@ -56,6 +56,26 @@ const earlySeason = buildPremiumIntelligence({
 assert.equal(earlySeason.status, 'UNAVAILABLE');
 assert.equal(earlySeason.selection, null);
 assert.ok(earlySeason.blockers.includes('SMALL_SAMPLE'));
+
+const dutchHealth = buildDataHealth({homeOverallPlayed:8,awayOverallPlayed:7,
+  homePlayed:5,awayPlayed:2,hasOdds:false,hasStandings:true,injuriesAvailable:false,h2hCount:0});
+assert.equal(dutchHealth.score,62);
+assert.equal(dutchHealth.level,'medium');
+assert.equal(dutchHealth.sample.overallAway,7);
+const dutchDecision=buildPremiumIntelligence({
+  modelProbabilities:{homeWinProbability:38.5,drawProbability:29.6,awayWinProbability:31.9},
+  marketEvidence:sufficientHomeEvidence,
+  homeOverallPlayed:8,awayOverallPlayed:7,homePlayed:5,awayPlayed:2,hasStandings:true,
+});
+assert.equal(dutchDecision.status,'UNAVAILABLE');
+assert.equal(dutchDecision.dataHealth.score,62);
+assert.ok(dutchDecision.blockers.includes('SMALL_SAMPLE'));
+assert.equal(buildDataHealth({homeOverallPlayed:0,awayOverallPlayed:8,homePlayed:0,awayPlayed:5,
+  hasOdds:true,hasStandings:true,injuriesAvailable:true,h2hCount:3}).score<=35,true);
+const fiveVenue=buildPremiumIntelligence({modelProbabilities:{homeWinProbability:45,drawProbability:30,awayWinProbability:25},
+  marketEvidence:sufficientHomeEvidence,homeOverallPlayed:8,awayOverallPlayed:8,
+  homePlayed:5,awayPlayed:5,hasStandings:true});
+assert.equal(fiveVenue.status,'PICK');
 
 const noOdds = buildPremiumIntelligence({
   marketEvidence:sufficientHomeEvidence,
