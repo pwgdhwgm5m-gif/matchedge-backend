@@ -215,7 +215,7 @@ async function resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff){
   }
   return null;
 }
-async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null){
+async function resolveFinalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null){
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
   if(canonicalProvider==='sportmonks'){
@@ -237,6 +237,33 @@ async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds
   return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)
     || await resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff)
     || {source:null,match:null};
+}
+// A full-time result is not enough for first/second-half markets. Enrich
+// only those selections, using provider-native IDs and verified final scores.
+async function canonicalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null,selectionKeys=[]){
+  const resolved=await resolveFinalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds,league,kickoff,canonicalProvider);
+  const match=resolved.match;
+  const needsHalf=selectionKeys.some(key=>/^(fh|sh|mostGoals)/.test(key));
+  const validHalf=m=>m?.halftimeHome!=null&&m?.halftimeAway!=null&&
+    [m.halftimeHome,m.halftimeAway].every(v=>v!==''&&Number.isInteger(Number(v))&&Number(v)>=0)&&
+    Number(m.halftimeHome)<=Number(m.homeScore)&&Number(m.halftimeAway)<=Number(m.awayScore);
+  if(!match||!needsHalf||validHalf(match))return resolved;
+  const merge=other=>{
+    if(!other||!verifiedFixtureMatch(other,homeTeam,awayTeam,kickoff)||!finalMatch(other)||!validHalf(other)||
+      Number(other.homeScore)!==Number(match.homeScore)||Number(other.awayScore)!==Number(match.awayScore))return null;
+    return {...resolved,match:{...match,halftimeHome:Number(other.halftimeHome),halftimeAway:Number(other.halftimeAway)}};
+  };
+  // A BSD pool hit contains a BSD ID; never send the coupon's unknown ID.
+  if(resolved.source==='bsd-results-pool'||resolved.source==='bsd'){
+    const id=match.bsdEventId||match.fixtureId;
+    if(id){
+      const detail=await bsdService.getEventById(String(id)).catch(()=>null);
+      const enriched=detail?.available&&merge(detail.match);
+      if(enriched)return enriched;
+    }
+  }
+  const fallback=await resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff);
+  return merge(fallback?.match)||resolved;
 }
 function bsdCornerTotal(payload){
   const root=payload?.data?.data||payload?.data||payload;
@@ -275,7 +302,7 @@ async function settlePending(userId) {
     if(!coupon.legs?.length){
       if(!coupon.fixtureId || !coupon.matchDate || !(coupon.selections||[]).length) continue;
       if(coupon.kickoff&&new Date(coupon.kickoff).getTime()>Date.now())continue;
-      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam,{},coupon.league||'',coupon.kickoff||null,null);
+      const resolved=await canonicalResult(coupon.matchDate,coupon.fixtureId,coupon.homeTeam,coupon.awayTeam,{},coupon.league||'',coupon.kickoff||null,null,(coupon.selections||[]).filter(s=>s.result==='pending').map(s=>s.key));
       const match=resolved.match;
       if(!match)continue;
       let corners=null;
@@ -313,7 +340,7 @@ async function settlePending(userId) {
       if(leg.selection.result!=='pending') continue;
       if(!leg.matchDate) continue;
       if(leg.kickoff&&new Date(leg.kickoff).getTime()>Date.now())continue;
-      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null,leg.canonicalProvider||null);
+      const resolved=await canonicalResult(leg.matchDate,leg.fixtureId,leg.homeTeam,leg.awayTeam,leg.providerIds||{},leg.league||'',leg.kickoff||null,leg.canonicalProvider||null,[leg.selection.key]);
       const match=resolved.match;
       const storedFinal=trustedFinalScore(leg.finalScore,leg.resultSource);
       if(!match && storedFinal){
@@ -531,6 +558,8 @@ router.delete('/:id', async (req, res) => {
 
 router.settleAllPendingCoupons = settleAllPendingCoupons;
 router.cleanupFinishedCoupons = cleanupFinishedCoupons;
+router.canonicalResult = canonicalResult;
+router.settlePending = settlePending;
 router.settleSelection = settleSelection;
 router.settleSelectionWithAvailableData = settleSelectionWithAvailableData;
 router.applyCanonicalProbabilities = applyCanonicalProbabilities;
