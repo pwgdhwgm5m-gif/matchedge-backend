@@ -884,14 +884,21 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? deVigBinary(bsdConsensus?.totals?.over25,bsdConsensus?.totals?.under25) : null;
   const bsdBttsMarket=bsdConsensus?.fresh
     ? deVigBinary(bsdConsensus?.btts?.yes,bsdConsensus?.btts?.no) : null;
-  if(bsdOver25Market){
+  // The executable market feed is a valid calibration signal too. Prefer the
+  // existing BSD consensus anchor when present; otherwise use the complete
+  // two-way 5Dollar market and remove the bookmaker margin before blending.
+  const fiveDollarOver25Market=deVigBinary(fiveDollarOdds?.totals25?.over25,fiveDollarOdds?.totals25?.under25);
+  const fiveDollarBttsMarket=deVigBinary(fiveDollarOdds?.btts?.yes,fiveDollarOdds?.btts?.no);
+  const over25Market=bsdOver25Market||fiveDollarOver25Market;
+  const bttsMarket=bsdBttsMarket||fiveDollarBttsMarket;
+  if(over25Market){
     marketProbabilities.over25GoalsPercent=blendBinary(
-      marketProbabilities.over25GoalsPercent,bsdOver25Market,v2ModelWeight);
+      marketProbabilities.over25GoalsPercent,over25Market,v2ModelWeight);
     marketProbabilities.under25GoalsPercent=+(100-marketProbabilities.over25GoalsPercent).toFixed(1);
   }
-  if(bsdBttsMarket){
+  if(bttsMarket){
     marketProbabilities.bttsPercent=blendBinary(
-      marketProbabilities.bttsPercent,bsdBttsMarket,v2ModelWeight);
+      marketProbabilities.bttsPercent,bttsMarket,v2ModelWeight);
     marketProbabilities.bttsNoPercent=+(100-marketProbabilities.bttsPercent).toFixed(1);
   }
 
@@ -1066,7 +1073,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const modelHealth = await predictionLedger.calibrationHealth({cached:true}).catch(()=>null);
 
   const marketBoard = premiumIntelligence.buildMarketBoard({
-    modelProbabilities: matchProbabilities,
+    modelProbabilities: blendedMatchProbabilities,
     goalMarkets: marketProbabilities,
     cornerMetrics,
     advancedStats: { home: homeAdvanced, away: awayAdvanced, leagueBaseline: leagueBase },
