@@ -90,14 +90,14 @@ async function applyCanonicalProbabilities(legs){
     const baseQuery={status:'pending',canonicalFixtureKey:{$ne:null}};
     let snapshots=await Prediction.find({...baseQuery,fixtureId:String(leg.fixtureId)})
       .sort({capturedAt:-1}).limit(20)
-      .select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
+      .select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot executableOddsSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
     // A fixture can arrive through different providers with different numeric
     // IDs. If the frontend ID has no direct snapshot, recover by the verified
     // team pair and kickoff window instead of rejecting a valid selection.
     if(!snapshots.length&&Number.isFinite(kickoffTime)){
       snapshots=await Prediction.find({...baseQuery,kickoff:{$gte:new Date(kickoffTime-6*60*60*1000),$lte:new Date(kickoffTime+6*60*60*1000)}})
         .sort({capturedAt:-1}).limit(50)
-        .select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
+        .select('canonicalFixtureKey publicationStatus publishedSelections marketBoardSnapshot executableOddsSnapshot canonicalProvider providerIds homeTeam awayTeam league kickoff').lean();
     }
     const identitySnapshots=snapshots.filter(x=>teamPairMatch(x,leg.homeTeam,leg.awayTeam)&&kickoffMatch(x,leg.kickoff));
     if(!identitySnapshots.length)return {ok:false,error:'Maç sağlayıcı kimliği kesin olarak doğrulanamadı.',code:'AMBIGUOUS_FIXTURE_ID'};
@@ -129,7 +129,12 @@ async function applyCanonicalProbabilities(legs){
     leg.matchDate=kickoff.toISOString().slice(0,10);
     leg.selection.market=String(canonical.market).slice(0,30);
     leg.selection.label=String(canonical.label).slice(0,50);
+    const executable=snapshot.executableOddsSnapshot?.[String(leg.selection.key)]||null;
+    const realOdds=Number(executable?.odds);
+    if(!(realOdds>1))return {ok:false,error:'Bu seçim için güncel market oranı bulunmuyor.',code:'EXECUTABLE_ODDS_UNAVAILABLE'};
     leg.selection.probability=Number(probability.toFixed(2));
+    leg.selection.odds=Number(realOdds.toFixed(2));
+    leg.selection.oddsCapturedAt=executable.capturedAt?new Date(executable.capturedAt):new Date();
     leg.canonicalFixtureKey=String(snapshot.canonicalFixtureKey);
     leg.canonicalProvider=canonicalProvider;
     leg.providerIds={sportmonks:'',bsd:'',sportsdb:'',footballData:'',[canonicalProvider]:canonicalId};
@@ -440,7 +445,7 @@ router.post('/', async (req, res) => {
     const date=leg.kickoff?new Date(leg.kickoff):null;
     return {fixtureId:String(leg.fixtureId),homeTeam:String(leg.homeTeam).slice(0,80),awayTeam:String(leg.awayTeam).slice(0,80),
       league:String(leg.league||'').slice(0,80),kickoff:date,matchDate:date&&!Number.isNaN(date.getTime())?date.toISOString().slice(0,10):null,
-       selection:{key:s.key,market:String(s.market||'').slice(0,30),label:String(s.label||'').slice(0,50),probability:null},
+       selection:{key:s.key,market:String(s.market||'').slice(0,30),label:String(s.label||'').slice(0,50),probability:null,odds:null,oddsCapturedAt:null},
       canonicalFixtureKey:null,canonicalProvider:null,providerIds:{sportsdb:'',sportmonks:'',bsd:'',footballData:''}};
   }).filter(Boolean);
   if(!safeLegs.length) return res.status(400).json({error:'En az bir geçerli seçim gerekli.'});
