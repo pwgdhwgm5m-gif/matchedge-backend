@@ -34,9 +34,12 @@ async function capture(a, fixture) {
       !canonicalFixtureKey || !Number.isFinite(kickoff.getTime()) || kickoff <= new Date()) return false;
   const values = probabilities(a);
   if (Object.values(values).some(v => v === null)) return false;
+  const executableOddsSnapshot=Object.fromEntries((a.marketBoard?.allMarkets||[])
+    .filter(x=>Number(x.verifiedOdds)>1&&x.oddsFresh===true)
+    .map(x=>[x.key,{odds:Number(x.verifiedOdds),capturedAt:new Date(),marketImpliedProbability:x.marketImpliedProbability??null}]));
   const result = await Prediction.updateOne(
     { canonicalFixtureKey, modelVersion: VERSION },
-    { $setOnInsert: {
+    { $set: { executableOddsSnapshot }, $setOnInsert: {
       fixtureId: String(fixture.fixtureId), canonicalFixtureKey, modelVersion: VERSION, calibrationVersion:a.calibrationVersion||null, selectionVersion:SELECTION_VERSION, kickoff,
       league: fixture.league || '', homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
       homeTeamId: fixture.homeTeamId || fixture.homeId || null, awayTeamId: fixture.awayTeamId || fixture.awayId || null,
