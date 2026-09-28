@@ -12,7 +12,7 @@ function available(){return enabled()&&Date.now()>=blockedUntil}
 function headers(){return {Authorization:`Bearer ${config.fiveDollarFootball.key}`}}
 function backoff(status,retryAfter){if(status===429)blockedUntil=Math.max(blockedUntil,Date.now()+Math.max(60000,Number(retryAfter||0)*1000||RATE_BACKOFF_MS));else if(status===401||status===403)blockedUntil=Math.max(blockedUntil,Date.now()+AUTH_BACKOFF_MS)}
 function priceFreshness(value){const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;if(!raw)return {fresh:false,updatedAt:null};const ms=typeof raw==='number'?(raw>1e12?raw:raw*1000):Date.parse(raw);if(!Number.isFinite(ms))return {fresh:false,updatedAt:null};return {fresh:Date.now()-ms<=15*60*1000,updatedAt:new Date(ms).toISOString()}}
-function stage(v){return v&&(v.inplay||v.closing||v.opening||v)}
+function stage(v,{allowInplay=false}={}){return v&&((allowInplay&&v.inplay)||v.closing||v.opening||v)}
 function marketStages(root){
  const one=root?.['1x2']||root?.match_result||root?.moneyline||{};
  const ladder=root?.goal_line_fixed||root?.goalline_fixed||root?.totals||root?.total_goals||{};
@@ -27,19 +27,19 @@ function marketStages(root){
   inplay:{h2h:triplet(one.inplay),totals:(()=>{const p=pair(total.inplay);return p?{over25:p.a,under25:p.b}:null})(),btts:binary(btts.inplay,['yes','Yes','both','btts_yes'],['no','No','not_both','btts_no'])}
  };
 }
-function pair(v,a=['over','over_odds','over25','over_2.5'],b=['under','under_odds','under25','under_2.5']){const p=stage(v)||{};const pick=keys=>keys.map(k=>num(p[k])).find(Boolean)||null;const x=pick(a),y=pick(b);return x&&y?{a:x,b:y}:null}
+function pair(v,a=['over','over_odds','over25','over_2.5'],b=['under','under_odds','under25','under_2.5'],options={}){const p=stage(v,options)||{};const pick=keys=>keys.map(k=>num(p[k])).find(Boolean)||null;const x=pick(a),y=pick(b);return x&&y?{a:x,b:y}:null}
 function oddsRoot(f){const o=f?.odds||{};if(Array.isArray(o.bookmakers)){const book=o.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||o.bookmakers[0];return book?.odds||book?.markets||{}}if(Array.isArray(f?.bookmakers)){const book=f.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||f.bookmakers[0];return book?.odds||book?.markets||{}}return o}
-function normalizeMarkets(root){
- const one=stage(root?.['1x2']||root?.match_result||root?.moneyline)||{};
+function normalizeMarkets(root,options={}){
+ const one=stage(root?.['1x2']||root?.match_result||root?.moneyline,options)||{};
  const h=num(one.home),d=num(one.draw),a=num(one.away);
  const h2h=h&&d&&a?{home:h,draw:d,away:a}:null;
  const ladder=root?.goal_line_fixed||root?.goalline_fixed||root?.totals||root?.total_goals;
  const rows=Array.isArray(ladder)?ladder:Array.isArray(ladder?.lines)?ladder.lines:Object.entries(ladder||{}).map(([k,v])=>typeof v==='object'?{_key:k,...v}:v);
  let row=rows.find(x=>Number(x?.line??x?.handicap??x?.total??x?._key)===2.5);
  if(!row&&ladder&&!Array.isArray(ladder))row=ladder['2.5']||ladder['2_5']||ladder.over_2_5;
- let t=pair(row);
- if(!t){const main=stage(root?.goal_line||root?.goalline);if(Number(main?.line)===2.5)t=pair(main)}
- const bp=stage(root?.btts||root?.both_teams_to_score||root?.bothTeamsToScore||root?.both_teams_score)||{};
+ let t=pair(row,undefined,undefined,options);
+ if(!t){const main=stage(root?.goal_line||root?.goalline,options);if(Number(main?.line)===2.5)t=pair(main)}
+ const bp=stage(root?.btts||root?.both_teams_to_score||root?.bothTeamsToScore||root?.both_teams_score,options)||{};
  const yes=num(bp.yes??bp.Yes??bp.both??bp.btts_yes),no=num(bp.no??bp.No??bp.not_both??bp.btts_no);
  return {h2h,totals:t?{over25:t.a,under25:t.b}:null,btts:yes&&no?{yes,no}:null};
 }
@@ -62,7 +62,7 @@ async function request(path,params={},timeout=9000){
 }
 function normalizeStats(v){const s=v?.statistics||v?.stats||v||{},side=x=>({home:Number.isFinite(Number(x?.home))?Number(x.home):null,away:Number.isFinite(Number(x?.away))?Number(x.away):null});return {attacks:side(s.attacks),dangerousAttacks:side(s.dangerous_attacks||s.dangerousAttacks),shotsOnTarget:side(s.shots_on_target||s.shotsOnTarget),shotsOffTarget:side(s.shots_off_target||s.shotsOffTarget),possession:side(s.possession),firstHalf:s.first_half?normalizeStats(s.first_half):null}}
 function normalizeEvents(v){return (v?.events||v||[]).map(e=>({type:e.type||null,minute:e.minute??null,team:e.team||null,count:e.count??null,period:e.period||null,score:e.score||null,playerIn:e.player_in||null,playerOut:e.player_out||null}));}
-async function getLiveIntelligence(){const key='five-dollar-live-intel-v1',cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;const r=await request('/fixtures',{status:'live',include:'odds,events,stats',per_page:50});if(!r)return {available:false,fixtures:[]};const fixtures=(r.data?.data||[]).map(f=>({...f,normalizedStats:normalizeStats(f.statistics),normalizedEvents:normalizeEvents(f.events),normalizedMarkets:normalizeMarkets(oddsRoot(f)),marketStages:marketStages(oddsRoot(f))}));const data={available:true,fixtures,fetchedAt:Date.now()};memory.set(key,{data,expires:Date.now()+60*1000});return data;}
+async function getLiveIntelligence(){const key='five-dollar-live-intel-v1',cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;const r=await request('/fixtures',{status:'live',include:'odds,events,stats',per_page:50});if(!r)return {available:false,fixtures:[]};const fixtures=(r.data?.data||[]).map(f=>({...f,normalizedStats:normalizeStats(f.statistics),normalizedEvents:normalizeEvents(f.events),normalizedMarkets:normalizeMarkets(oddsRoot(f),{allowInplay:true}),marketStages:marketStages(oddsRoot(f))}));const data={available:true,fixtures,fetchedAt:Date.now()};memory.set(key,{data,expires:Date.now()+60*1000});return data;}
 async function getHistoricalLeagueFixtures(leagueId,{startTime,endTime,page=1,includeOdds=true}={}){if(!leagueId)return null;const params={status:'finished',order:'asc',page,per_page:includeOdds?50:100};if(startTime)params.start_time=startTime;if(endTime)params.end_time=endTime;if(includeOdds)params.include='odds';const r=await request(`/leagues/${leagueId}/fixtures`,params,12000);return r?.data||null;}
 async function getFullOdds(fixtureId){
  const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
