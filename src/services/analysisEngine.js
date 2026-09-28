@@ -20,7 +20,7 @@ const powerRating = require('./powerRatingService');
 const predictionLedger = require('./predictionLedgerService');
 const marketEvidenceService = require('./marketEvidenceService');
 const {verifiedHistory} = require('./analysisTeamHistoryService');
-const {normalizeTeamIdentity} = require('./competitionRegistryService');
+const {normalizeTeamIdentity, resolveCompetition} = require('./competitionRegistryService');
 
 const LEAGUE_AVG_HOME_GOALS = 1.45;
 const LEAGUE_AVG_AWAY_GOALS = 1.15;
@@ -117,20 +117,39 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // ligler -> TheSportsDB lookuptable.php, digerleri -> eski API-Football
   // yolu (kota dolu oldugu icin muhtemelen bos doner, notr deger uretir).
   const currentSeason = sportsDb.getCurrentSeasonString();
+  const registeredCompetition=resolveCompetition({leagueName:leagueName||league});
+  const bsdLeagueId=providerIds.bsd||registeredCompetition?.providerIds?.bsd||null;
+  const sportsdbStandingsFallback=()=>isMappedLeague
+    ? sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId,currentSeason)
+    : Promise.resolve({ok:true,available:false,table:[]});
+  const bsdThenSportsdbStandings=async()=>{
+    if(bsdLeagueId){
+      const primary=await bsd.getLeagueStandingsFormatted(bsdLeagueId).catch(e=>({ok:false,available:false,error:e.message}));
+      if(primary?.available)return primary;
+    }
+    return sportsdbStandingsFallback();
+  };
+  // Canonical standings policy matches the rest of analysis:
+  // six SportMonks leagues keep their existing primary path for now; every
+  // other mapped competition (including UEFA) must try BSD before SportsDB.
   const standingsFetcher = isSuperLig
     ? () => tffScraper.getStandings().then(table => ({
         ok: true,
         available: table.length > 0,
         table: table.map(r => ({ teamId: r.kulupID, teamName: r.name, rank: r.rank, points: r.points, description: null })),
       }))
-    : isMappedLeague
-      ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
-      : () => Promise.resolve({ ok:false, error:'legacy_api_disabled' });
+    : useBsdPrimary || bsdLeagueId
+      ? bsdThenSportsdbStandings
+      : isMappedLeague
+        ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
+        : () => Promise.resolve({ ok:false, error:'standings_unavailable' });
   const standingsCacheKey = isSuperLig
     ? 'tff-standings'
-    : isMappedLeague
-      ? `tsdb-standings:v2:${effectiveTsdbLeagueId}:${currentSeason}`
-      : `standings:${league}:${season}`;
+    : bsdLeagueId
+      ? `bsd-standings:v1:${bsdLeagueId}:${currentSeason}`
+      : isMappedLeague
+        ? `tsdb-standings:v2:${effectiveTsdbLeagueId}:${currentSeason}`
+        : `standings:${league}:${season}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
