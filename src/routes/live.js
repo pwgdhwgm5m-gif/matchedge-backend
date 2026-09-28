@@ -369,7 +369,8 @@ router.get('/:fixtureId', async (req, res) => {
     redCardsAway: redAway,
     minute: match.minute,
     homeScore: match.homeScore,
-    awayScore: match.awayScore
+    awayScore: match.awayScore,
+    recentEvents: fiveMatch?.normalizedEvents || []
   });
   const matchDominance = liveXg.calculateMatchDominance(homeRawStats, awayRawStats, {
     possessionHome: possessionObserved?.home,
