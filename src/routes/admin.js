@@ -38,7 +38,7 @@ router.get('/users', async (req, res) => {
       .sort({ createdAt: -1 })
       .lean();
     const recentLogins = await LoginEvent.find({})
-      .select('userId loginAt country city district countryCode timezone userAgent')
+      .select('userId loginAt lastSeenAt logoutAt ipAddress country city district region countryCode timezone userAgent')
       .populate('userId', 'username email')
       .sort({ loginAt: -1 })
       .limit(200)
