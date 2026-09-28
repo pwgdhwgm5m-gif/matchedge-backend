@@ -41,8 +41,10 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
     { key: 'awayOver15', market: 'DEP TAKIM GOLÜ', label: 'Dep 1.5 Üst', probability: Number(goalMarkets?.teamGoals?.away?.['1.5']?.over || 0) },
     { key: 'awayOver25', market: 'DEP TAKIM GOLÜ', label: 'Dep 2.5 Üst', probability: Number(goalMarkets?.teamGoals?.away?.['2.5']?.over || 0) },
     { key: 'awayOver35', market: 'DEP TAKIM GOLÜ', label: 'Dep 3.5 Üst', probability: Number(goalMarkets?.teamGoals?.away?.['3.5']?.over || 0) },
-    { key: 'cornersOver95', market: 'KORNER', label: '9.5 Üst Korner', probability: Number(cornerMetrics?.over95Percent || 0) },
-    { key: 'cornersUnder95', market: 'KORNER', label: '9.5 Alt Korner', probability: Number(cornerMetrics?.under95Percent ?? (100 - Number(cornerMetrics?.over95Percent || 0))) },
+    ...(cornerMetrics?.marketAvailable && Number.isFinite(Number(cornerMetrics?.marketLine)) ? [
+      { key: 'cornersMarketOver', market: 'KORNER', label: Number(cornerMetrics.marketLine)+' Üst Korner', probability: Number(cornerMetrics.marketOverPercent || 0), marketLine:Number(cornerMetrics.marketLine), marketOdds:Number(cornerMetrics.marketOverOdds), marketSource:cornerMetrics.marketSource },
+      { key: 'cornersMarketUnder', market: 'KORNER', label: Number(cornerMetrics.marketLine)+' Alt Korner', probability: Number(cornerMetrics.marketUnderPercent || 0), marketLine:Number(cornerMetrics.marketLine), marketOdds:Number(cornerMetrics.marketUnderOdds), marketSource:cornerMetrics.marketSource }
+    ] : []),
     { key: 'fhHome', market: 'İLK YARI', label: 'Ev Sahibi', probability: Number(halfMarkets?.firstHalf?.home || 0) },
     { key: 'fhDraw', market: 'İLK YARI', label: 'Beraberlik', probability: Number(halfMarkets?.firstHalf?.draw || 0) },
     { key: 'fhAway', market: 'İLK YARI', label: 'Deplasman', probability: Number(halfMarkets?.firstHalf?.away || 0) },
