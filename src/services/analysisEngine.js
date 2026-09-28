@@ -778,6 +778,35 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const v2ModelWeight = marketImpliedProbabilities ? Math.max(lowEvidenceMarketBlend ? .18 : .32, Math.min(lowEvidenceMarketBlend ? .42 : .72, earnedModelWeight - divergencePenalty)) : 1;
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
 
+  // Apply the same market-reality discipline to the two binary coupon markets.
+  // BSD consensus is an anchor, not an executable quote: remove overround first,
+  // then blend it with the calibrated model using the same evidence-driven weight.
+  const deVigBinary=(yesOdds,noOdds)=>{
+    const y=Number(yesOdds),n=Number(noOdds);
+    if(!(y>1&&n>1)) return null;
+    const sum=1/y+1/n;
+    return {yes:+((1/y)/sum*100).toFixed(1),no:+((1/n)/sum*100).toFixed(1)};
+  };
+  const blendBinary=(modelYes,market,modelWeight)=>{
+    const p=Number(modelYes);
+    if(!Number.isFinite(p)||!market) return p;
+    return +(p*modelWeight+market.yes*(1-modelWeight)).toFixed(1);
+  };
+  const bsdOver25Market=bsdConsensus?.fresh
+    ? deVigBinary(bsdConsensus?.totals?.over25,bsdConsensus?.totals?.under25) : null;
+  const bsdBttsMarket=bsdConsensus?.fresh
+    ? deVigBinary(bsdConsensus?.btts?.yes,bsdConsensus?.btts?.no) : null;
+  if(bsdOver25Market){
+    marketProbabilities.over25GoalsPercent=blendBinary(
+      marketProbabilities.over25GoalsPercent,bsdOver25Market,v2ModelWeight);
+    marketProbabilities.under25GoalsPercent=+(100-marketProbabilities.over25GoalsPercent).toFixed(1);
+  }
+  if(bsdBttsMarket){
+    marketProbabilities.bttsPercent=blendBinary(
+      marketProbabilities.bttsPercent,bsdBttsMarket,v2ModelWeight);
+    marketProbabilities.bttsNoPercent=+(100-marketProbabilities.bttsPercent).toFixed(1);
+  }
+
   const homeFirstHalf = isSuperLig
     ? { firstHalfScoringRate: null }
     : stats.calculateFirstHalfTendency(homeFixtures, homeTeamIdForStats);
