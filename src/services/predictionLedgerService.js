@@ -237,6 +237,9 @@ async function sportmonksBacktest() {
   })) };
 }
 
+function publishedProbabilityRows(predictions){
+ return (predictions||[]).map(p=>({...p,probabilities:(p.ensembleProbabilities&&Object.values(p.ensembleProbabilities).some(Number.isFinite))?p.ensembleProbabilities:p.probabilities}));
+}
 function metricRows(predictions){
  const groups=new Map(), bins=new Map();
  for(const p of predictions) for(const [market,probability] of Object.entries(p.probabilities||{})){
@@ -250,7 +253,7 @@ function metricRows(predictions){
  return [...groups.entries()].map(([key,g])=>{const bs=[...bins.values()].filter(b=>b.key===key),ece=bs.reduce((s,b)=>s+(b.n/g.count)*Math.abs(b.p/b.n-b.a/b.n),0);return {league:g.league,market:g.market,count:g.count,brier:+(g.brier/g.count).toFixed(4),logLoss:+(g.ll/g.count).toFixed(4),ece:+ece.toFixed(4),predictedPercent:+(100*g.pred/g.count).toFixed(1),actualPercent:+(100*g.actual/g.count).toFixed(1)};});
 }
 async function walkForwardAudit(){
- const predictions=await Prediction.find({status:'settled'}).sort({kickoff:1}).select('modelVersion league probabilities rawProbabilities actual kickoff').lean();
+ const predictions=publishedProbabilityRows(await Prediction.find({status:'settled'}).sort({kickoff:1}).select('modelVersion league probabilities ensembleProbabilities rawProbabilities actual kickoff').lean());
  const byVersion={};
  for(const p of predictions){if(!byVersion[p.modelVersion])byVersion[p.modelVersion]=[];byVersion[p.modelVersion].push(p);}
  const versions=Object.entries(byVersion).map(([version,rows])=>({version,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),metrics:metricRows(rows)}));
@@ -341,14 +344,14 @@ async function selectionPerformance(){
 }
 async function calibrationHealth(options={}){
  if(options.cached&&healthCache.value&&Date.now()-healthCache.at<15*60*1000)return healthCache.value;
- const rows=await Prediction.find({status:'settled',modelVersion:VERSION}).sort({kickoff:1}).select('league probabilities actual kickoff calibrationVersion selectionVersion').lean();
+ const rows=publishedProbabilityRows(await Prediction.find({status:'settled',modelVersion:VERSION}).sort({kickoff:1}).select('league probabilities ensembleProbabilities actual kickoff calibrationVersion selectionVersion').lean());
  const buckets=probabilityBuckets(rows),drift=driftFlags(rows);
  const bucketAlerts=buckets.filter(b=>b.n>=20&&Math.abs(b.gapPercent)>=8).map(b=>({league:b.league,market:b.market,range:[b.from,b.to],count:b.n,gapPercent:b.gapPercent,wilson95:b.wilson95,calibratedInside95:b.calibratedInside95,severity:b.n>=50&&!b.calibratedInside95&&Math.abs(b.gapPercent)>=12?'high':'watch'}));
  const value={modelVersion:VERSION,snapshots:rows.length,oneXTwo:multiclass1x2Metrics(rows),buckets,drift,bucketAlerts,healthy:drift.every(x=>x.severity!=='high')&&bucketAlerts.every(x=>x.severity!=='high'),readiness:rows.length<30?'collecting':rows.length<100?'early-signal':'decision-ready'};
  healthCache={at:Date.now(),value};return value;
 }
 async function pairedAudit(){
- const rows=await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities comparisonProbabilities actual kickoff').lean();
+ const rows=publishedProbabilityRows(await Prediction.find({status:'settled',comparisonProbabilities:{$ne:null}}).sort({kickoff:1}).select('league probabilities ensembleProbabilities comparisonProbabilities actual kickoff').lean());
  const current=metricRows(rows);
  const baseline=metricRows(rows.map(p=>({...p,probabilities:p.comparisonProbabilities})));
  const key=r=>r.league+'::'+r.market,base=new Map(baseline.map(r=>[key(r),r]));
@@ -382,10 +385,11 @@ async function performance() {
     Prediction.countDocuments({}),
     Prediction.countDocuments({ status: 'settled' }),
     Prediction.countDocuments({ status: 'pending' }),
-    Prediction.find({ status: 'settled' }).select('league probabilities actual kickoff').lean()
+    Prediction.find({ status: 'settled' }).select('league probabilities ensembleProbabilities actual kickoff').lean()
   ]);
+  const publishedPredictions=publishedProbabilityRows(predictions);
   const groups = new Map();
-  for (const p of predictions) for (const [market, probability] of Object.entries(p.probabilities || {})) {
+  for (const p of publishedPredictions) for (const [market, probability] of Object.entries(p.probabilities || {})) {
     const actual = p.actual?.[market];
     if (!Number.isFinite(probability) || ![0,1].includes(actual)) continue;
     for (const key of ['all:'+market, (p.league || 'Unknown')+':'+market]) {
@@ -431,7 +435,7 @@ async function performance() {
       weightedAccuracyPercent: weightedAccuracy,
       marketAccuracyPercent: marketAccuracy
     },
-    snapshots:predictions.length,
+    snapshots:publishedPredictions.length,
     scoring:['accuracy','brier','logLoss','calibrationGap'],
     rows
   };
