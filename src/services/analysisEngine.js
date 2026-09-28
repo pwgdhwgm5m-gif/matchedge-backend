@@ -65,7 +65,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const leagueIdNum = league ? parseInt(league, 10) : null;
   const mappedTsdbLeagueId = leagueIdNum ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null;
   const directTsdbLeagueId = tsdbLeagueId ? String(tsdbLeagueId) : null;
-  const effectiveTsdbLeagueId = directTsdbLeagueId || (mappedTsdbLeagueId ? String(mappedTsdbLeagueId) : null);
+  // Some frontend fixture feeds expose their own competition id in the
+  // tsdbLeagueId query field (e.g. Nations League arrives as 64). Never let
+  // an unrecognised id override the canonical registry's SportsDB id.
+  const canonicalCompetitionForIds=resolveCompetition({leagueName:leagueName||league});
+  const registryTsdbLeagueId=canonicalCompetitionForIds?.providerIds?.sportsdb ? String(canonicalCompetitionForIds.providerIds.sportsdb) : null;
+  const verifiedDirectTsdbLeagueId=directTsdbLeagueId && sportsDb.isWhitelistedLeague(directTsdbLeagueId) ? directTsdbLeagueId : null;
+  const effectiveTsdbLeagueId = registryTsdbLeagueId || verifiedDirectTsdbLeagueId || (mappedTsdbLeagueId ? String(mappedTsdbLeagueId) : null);
   const sportsdbFixtureId=providerIds.sportsdb||null;
   const sportsdbOptions=side=>({fixtureId:sportsdbFixtureId,fixtureSide:side,kickoff,
     verifiedTeamId:providerTeamIds.sportsdb?.[side]||null});
