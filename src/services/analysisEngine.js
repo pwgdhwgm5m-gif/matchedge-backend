@@ -867,10 +867,19 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // have a meaningful voice. 50% is the maximum default market share; strong
   // model evidence can earn more model weight. Divergence shifts weight toward
   // the market instead of allowing a stale/weak model to ignore a strong price.
-  const v2ModelWeight = marketImpliedProbabilities
+  const heuristicModelWeight = marketImpliedProbabilities
     ? Math.max(lowEvidenceMarketBlend ? .35 : .50,
         Math.min(lowEvidenceMarketBlend ? .60 : .80, earnedModelWeight - divergencePenalty))
     : 1;
+  // Learned weights are evidence-gated. League-specific active weights win;
+  // otherwise an active global weight may be used; otherwise keep heuristic.
+  let learnedWeights=null;try{learnedWeights=await predictionLedger.learnedMarketWeights()}catch(e){console.warn('[ensemble-weights]',e.message)}
+  const leagueScope=learnedWeights?.scopes?.['league:'+String(leagueName||league||'Unknown')]||null;
+  const globalScope=learnedWeights?.scopes?.global||null;
+  const activeWeight=(market)=>{const local=leagueScope?.[market],global=globalScope?.[market],x=local?.active?local:(global?.active?global:null);if(!x)return null;return Number(x.sharedModelWeight??x.modelWeight)};
+  const learned1x2Weight=activeWeight('oneXTwo');
+  const v2ModelWeight=Number.isFinite(learned1x2Weight)?learned1x2Weight:heuristicModelWeight;
+  const weightSource=Number.isFinite(learned1x2Weight)?(leagueScope?.oneXTwo?.active?'learned-league':'learned-global'):'evidence-heuristic';
   let blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
   // 1X2 user-facing guardrail. Apply it to the complete 3-way vector, then
   // renormalize, so a weak model cannot remain implausibly far from the same
@@ -900,6 +909,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     source: fiveDollarOdds?.matchOdds ? '5dollarfootball-market' : (bsdAnchorOdds ? 'bsd-consensus' : null),
     modelWeight:+v2ModelWeight.toFixed(3),
     marketWeight:+(1-v2ModelWeight).toFixed(3),
+    weightSource,
     divergence:divergence||null,
     oneXTwo:{executableOdds:fiveDollarOdds?.matchOdds||null,deVig:marketImpliedProbabilities||null},
     stages:fiveDollarOdds?.marketStages||null,
@@ -945,12 +955,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const bttsMarket=fiveDollarBttsMarket||bsdBttsMarket;
   if(over25Market){
     marketProbabilities.over25GoalsPercent=blendBinary(
-      marketProbabilities.over25GoalsPercent,over25Market,v2ModelWeight);
+      marketProbabilities.over25GoalsPercent,over25Market,(activeWeight('over25')??heuristicModelWeight));
     marketProbabilities.under25GoalsPercent=+(100-marketProbabilities.over25GoalsPercent).toFixed(1);
   }
   if(bttsMarket){
     marketProbabilities.bttsPercent=blendBinary(
-      marketProbabilities.bttsPercent,bttsMarket,v2ModelWeight);
+      marketProbabilities.bttsPercent,bttsMarket,(activeWeight('btts')??heuristicModelWeight));
     // Final user-facing BTTS must remain coherent with the two team-scoring
     // marginals. Frechet bounds are a hard probability constraint, not a heuristic.
     const hs=Number(marketProbabilities?.scoring?.home), as=Number(marketProbabilities?.scoring?.away);
@@ -1255,7 +1265,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       powerComponents,
       modelAgreement:{ score:+agreementScore.toFixed(1), disagreement:+disagreement.toFixed(2), dixonColes:dcVector.map(x=>+x.toFixed(1)), elo:eloVector.map(x=>+x.toFixed(1)), standings:tableVector.map(x=>+x.toFixed(1)) },
       analysisStrength:{ score:analysisStrength, sampleStrength:+sampleStrength.toFixed(3), venueStrength:+venueStrength.toFixed(3), sourceCoverage:+sourceCoverage.toFixed(3), evidenceFamilies, playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample },
-      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), marketAvailable:Boolean(marketImpliedProbabilities), marketAnchorSource:bsdAnchorOdds?'bsd-consensus':(primaryMatchOdds?'the-odds-api':(fiveDollarOdds?.matchOdds?'5dollarfootball-bet365':(footballDataMatchOdds?'football-data.co.uk':null))), executableOddsSource:primaryMatchOdds?'the-odds-api':(fiveDollarOdds?.matchOdds?'5dollarfootball-bet365':(footballDataMatchOdds?'football-data.co.uk':null)), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
+      ensemble:{ modelWeight:+v2ModelWeight.toFixed(3), marketWeight:+(1-v2ModelWeight).toFixed(3), weightSource, binaryWeights:{over25:activeWeight('over25')??heuristicModelWeight,btts:activeWeight('btts')??heuristicModelWeight}, marketAvailable:Boolean(marketImpliedProbabilities), marketAnchorSource:bsdAnchorOdds?'bsd-consensus':(primaryMatchOdds?'the-odds-api':(fiveDollarOdds?.matchOdds?'5dollarfootball-bet365':(footballDataMatchOdds?'football-data.co.uk':null))), executableOddsSource:primaryMatchOdds?'the-odds-api':(fiveDollarOdds?.matchOdds?'5dollarfootball-bet365':(footballDataMatchOdds?'football-data.co.uk':null)), deVigMethod:marketImpliedProbabilities?.method||'normalized-overround', divergence, proportional:proportionalMarket, shin:shinMarket },
       probabilityPipeline:['venue-recent-form','opponent-strength','independent-evidence-ensemble','mismatch-preservation','dixon-coles','market-calibration','evidence-shrinkage','market-ensemble'],
       probabilities: { raw:rawMatchProbabilities, calibrated:calibratedMatchProbabilities, confidenceAdjusted:matchProbabilities, marketBlended:blendedMatchProbabilities }
     },
