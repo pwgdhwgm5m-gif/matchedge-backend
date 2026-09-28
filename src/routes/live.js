@@ -10,6 +10,7 @@ const sportmonks = require('../services/sportmonksService');
 const competitionRegistry = require('../services/competitionRegistryService');
 const { acceptsLiveFixture, providerKey } = require('../services/liveFixtureIdentity');
 const providerIdentity = require('../services/providerIdentityCache');
+const fiveDollar = require('../services/fiveDollarFootballService');
 
 const quickBound = (promise, fallback, ms = 2500) => Promise.race([
   promise,
@@ -237,6 +238,15 @@ router.get('/:fixtureId', async (req, res) => {
   ]);
 
   const stats = statsResult.available ? statsResult.stats : {};
+  // Parallel 5Dollar intelligence layer: never changes canonical fixture ownership.
+  // One cached compound live request supplies stats/events/odds for every live match.
+  const fiveLive = await bounded(fiveDollar.getLiveIntelligence(), {available:false,fixtures:[]}, 9500);
+  const fiveMatch = fiveLive.available ? (fiveLive.fixtures||[]).find(f=>{
+    const hn=String(f.teams?.home?.name||'').toLowerCase(),an=String(f.teams?.away?.name||'').toLowerCase();
+    const mh=String(match.homeTeam||'').toLowerCase(),ma=String(match.awayTeam||'').toLowerCase();
+    return hn&&an&&mh&&ma&&(hn===mh||hn.includes(mh)||mh.includes(hn))&&(an===ma||an.includes(ma)||ma.includes(an));
+  }) : null;
+  const fiveStats=fiveMatch?.normalizedStats||null;
   const smLiveDetail = await bounded(cache.getOrFetch('sportmonks:inplay', 30, () => sportmonks.getInplay()), {ok:false,error:'sportmonks_timeout'}, 2800);
   const smCandidate = smLiveDetail.ok ? sportmonks.findMatch(smLiveDetail.fixtures, match.homeTeam, match.awayTeam) : null;
   const smMatch = smCandidate && acceptsLiveFixture({homeTeam:smCandidate.homeTeam,awayTeam:smCandidate.awayTeam,
@@ -278,21 +288,21 @@ router.get('/:fixtureId', async (req, res) => {
   // henuz yoksa (mac yeni basladiysa) tum degerler 0 olur ve asagidaki
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
-    shotsOnTarget: statFirst(smStats.shotsOnTargetHome,bsdNum(bsdHome,['shots_on_target','shotsOnTarget','shots.on_target'])) ?? (stats.shotsOnTarget?.home ?? null),
+    shotsOnTarget: statFirst(smStats.shotsOnTargetHome,bsdNum(bsdHome,['shots_on_target','shotsOnTarget','shots.on_target'])) ?? fiveStats?.shotsOnTarget?.home ?? (stats.shotsOnTarget?.home ?? null),
     shotsOffTarget: statFirst(smStats.shotsOffTargetHome,bsdNum(bsdHome,['shots_off_target','shotsOffTarget','shots.off_target'])) ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : null),
     corners: statFirst(smStats.cornersHome,bsdNum(bsdHome,['corners','corner_kicks'])) ?? (stats.corners?.home ?? null),
-    dangerousAttacks: statFirst(smStats.dangerousAttacksHome,bsdNum(bsdHome,['dangerous_attacks','dangerousAttacks'])),
-    attacks: statFirst(smStats.attacksHome,bsdNum(bsdHome,['attacks','total_attacks'])),
+    dangerousAttacks: statFirst(smStats.dangerousAttacksHome,bsdNum(bsdHome,['dangerous_attacks','dangerousAttacks'])) ?? fiveStats?.dangerousAttacks?.home,
+    attacks: statFirst(smStats.attacksHome,bsdNum(bsdHome,['attacks','total_attacks'])) ?? fiveStats?.attacks?.home,
     blockedShots: statFirst(smStats.blockedShotsHome,bsdNum(bsdHome,['blocked_shots','blockedShots'])),
     shotsInsideBox: statFirst(smStats.shotsInsideBoxHome,bsdNum(bsdHome,['shots_inside_box','shotsInsideBox'])),
     bigChances: statFirst(smStats.bigChancesHome,bsdNum(bsdHome,['big_chances','bigChances'])),
   };
   const awayRawStats = {
-    shotsOnTarget: statFirst(smStats.shotsOnTargetAway,bsdNum(bsdAway,['shots_on_target','shotsOnTarget','shots.on_target'])) ?? (stats.shotsOnTarget?.away ?? null),
+    shotsOnTarget: statFirst(smStats.shotsOnTargetAway,bsdNum(bsdAway,['shots_on_target','shotsOnTarget','shots.on_target'])) ?? fiveStats?.shotsOnTarget?.away ?? (stats.shotsOnTarget?.away ?? null),
     shotsOffTarget: statFirst(smStats.shotsOffTargetAway,bsdNum(bsdAway,['shots_off_target','shotsOffTarget','shots.off_target'])) ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : null),
     corners: statFirst(smStats.cornersAway,bsdNum(bsdAway,['corners','corner_kicks'])) ?? (stats.corners?.away ?? null),
-    dangerousAttacks: statFirst(smStats.dangerousAttacksAway,bsdNum(bsdAway,['dangerous_attacks','dangerousAttacks'])),
-    attacks: statFirst(smStats.attacksAway,bsdNum(bsdAway,['attacks','total_attacks'])),
+    dangerousAttacks: statFirst(smStats.dangerousAttacksAway,bsdNum(bsdAway,['dangerous_attacks','dangerousAttacks'])) ?? fiveStats?.dangerousAttacks?.away,
+    attacks: statFirst(smStats.attacksAway,bsdNum(bsdAway,['attacks','total_attacks'])) ?? fiveStats?.attacks?.away,
     blockedShots: statFirst(smStats.blockedShotsAway,bsdNum(bsdAway,['blocked_shots','blockedShots'])),
     shotsInsideBox: statFirst(smStats.shotsInsideBoxAway,bsdNum(bsdAway,['shots_inside_box','shotsInsideBox'])),
     bigChances: statFirst(smStats.bigChancesAway,bsdNum(bsdAway,['big_chances','bigChances'])),
@@ -427,6 +437,7 @@ router.get('/:fixtureId', async (req, res) => {
     highlightVideo: highlightsResult.available ? highlightsResult.videoUrl : null,
     // Stable live-card prediction payload. The frontend must never have to
     // dereference pre-match fields that are absent from /api/live/:fixtureId.
+    fiveDollarIntelligence: fiveMatch ? {available:true,fixtureId:String(fiveMatch.id),statistics:fiveStats,events:fiveMatch.normalizedEvents||[],marketStages:fiveMatch.marketStages||null,capturedAt:new Date(fiveLive.fetchedAt).toISOString()} : {available:false},
     livePrediction: (() => {
       const minute = Number(match.minute || 0);
       const homeSignal = goalProximity?.available ? goalProximity.home : (momentum?.available ? momentum.home : null);
