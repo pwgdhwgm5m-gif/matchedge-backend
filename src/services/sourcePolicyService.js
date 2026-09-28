@@ -52,27 +52,39 @@ function isBsdCoreLeague({leagueName,country}={}){
     'turkish-super-lig':['turkey','turkiye']};
   return !c||(countries[core.key]||[]).some(x=>c===norm(x));
 }
+function fieldRouting(ctx={}){
+ const core=resolve(ctx);
+ return Object.freeze({
+  fixture:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb','5dollarfootball'],
+  result:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb','5dollarfootball'],
+  xg:core?['sportmonks','bsd-measured','live-estimate']:['bsd-measured','live-estimate'],
+  livePressure:core?['sportmonks','5dollarfootball','bsd','thesportsdb']:['5dollarfootball','bsd','thesportsdb'],
+  shots:core?['sportmonks','5dollarfootball','bsd','thesportsdb']:['5dollarfootball','bsd','thesportsdb'],
+  possession:core?['sportmonks','5dollarfootball','bsd','thesportsdb']:['5dollarfootball','bsd','thesportsdb'],
+  timeline:core?['sportmonks','5dollarfootball','bsd','thesportsdb']:['bsd','5dollarfootball','thesportsdb'],
+  lineups:core?['sportmonks','thesportsdb']:['thesportsdb'],
+  playerXg:core?['sportmonks']:[],
+  cornersCards:core?['sportmonks','5dollarfootball','bsd']:['5dollarfootball','bsd','thesportsdb'],
+  executableOdds:['5dollarfootball'],
+  marketMovement:['5dollarfootball'],
+  historicalOdds:['5dollarfootball','socceredge-ledger'],
+  h2h:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb'],
+  form:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb']
+ });
+}
 function policy(ctx={}){
-  const core=resolve(ctx);
+  const core=resolve(ctx),fields=fieldRouting(ctx);
   return core ? {
     tier:'sportmonks-primary', sportmonks:true, sportmonksLeagueId:core.sportmonksId,
-    primary:'sportmonks', secondary:'bsd',
-    fieldFallbacks:{
-      xg:['sportmonks','bsd-measured','thesportsdb'],
-      shotmap:['sportmonks','bsd'],
-      momentum:['sportmonks','bsd'],
-      matchStats:['sportmonks','bsd','thesportsdb'],
-      lineups:['sportmonks','bsd'],
-      h2h:['sportmonks','bsd','thesportsdb'],
-      predictions:['socceredge','bsd-comparison'],
-      corners:['sportmonks-history','bsd','local-model']
-    },
-    marketAnchorPrimary:'bsd-consensus', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
-    rule:'SportMonks remains first for subscribed league data. For fields SportMonks does not supply, use BSD before legacy fallbacks. BSD consensus is the preferred broad market anchor; The Odds API remains the executable bookmaker-price source for Value/EV because free BSD consensus is not a bettable bookmaker quote. Deduplicate correlated evidence before blending.'
+    primary:'sportmonks', secondary:'bsd', fieldFallbacks:fields,
+    marketAnchorPrimary:'5dollarfootball', oddsPrimary:'5dollarfootball', oddsSecondary:'bsd-consensus', supplemental:['bsd','5dollarfootball','thesportsdb','football-data'],
+    rule:'Canonical fixtures remain SportMonks-first in the six subscribed leagues. Routing is field-specific: SportMonks owns premium football intelligence/xG, 5Dollar owns executable odds and market movement and supplements live pressure, BSD owns broad non-core coverage/results, SportsDB is fallback. Correlated evidence is deduplicated before blending.'
   } : {
     tier:'non-sportmonks', sportmonks:false, sportmonksLeagueId:null,
-    primary:'bsd', secondary:'thesportsdb', marketAnchorPrimary:'bsd-consensus', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
-    rule:'Outside the six subscribed leagues do not query SportMonks. Use BSD first, then TheSportsDB/Football-Data fallbacks. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated.'
+    primary:'bsd', secondary:'thesportsdb', fieldFallbacks:fields,
+    marketAnchorPrimary:'5dollarfootball', oddsPrimary:'5dollarfootball', oddsSecondary:'bsd-consensus', supplemental:['5dollarfootball','bsd','thesportsdb','football-data'],
+    rule:'Outside the six subscribed leagues BSD remains canonical fixture/result owner. 5Dollar is first for executable odds/market movement and first supplemental source for live pressure/shots/possession; SportsDB remains coverage fallback.'
   };
 }
-module.exports={SPORTMONKS_PRIMARY,PROVIDER_CHAIN,providerChain,ODDS_KEYS_BY_COMPETITION,oddsSportKeyForCompetition,resolve,isBsdCoreLeague,policy};
+
+module.exports={SPORTMONKS_PRIMARY,PROVIDER_CHAIN,providerChain,ODDS_KEYS_BY_COMPETITION,oddsSportKeyForCompetition,resolve,isBsdCoreLeague,fieldRouting,policy};
