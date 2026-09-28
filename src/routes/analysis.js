@@ -165,7 +165,18 @@ router.get('/:fixtureId/prematch-snapshot',async(req,res)=>{try{
   if(row.prematchAnalysisArchive)return res.json({...row.prematchAnalysisArchive,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,kickoff:row.kickoff,capturedAt:row.capturedAt,available:true,prematchSource:'durable-prematch-archive'});
   const p=row.probabilities||{},raw=row.rawProbabilities||{},board=row.marketBoardSnapshot||{};
   const first=(...v)=>v.find(x=>x!==undefined&&x!==null);
-  const all=Array.isArray(board)?board:(Array.isArray(board.allMarkets)?board.allMarkets:[]);
+  let all=Array.isArray(board)?board:(Array.isArray(board.allMarkets)?board.allMarkets:[]);
+  // Older immutable pre-match snapshots kept analysis probabilities but not
+  // executable prices in marketBoardSnapshot. Merge the separately frozen
+  // executable odds snapshot so live/finished match screens can still display
+  // the real pre-kickoff price without recomputing or inventing an odd.
+  const frozenOdds=row.executableOddsSnapshot||{};
+  all=all.map(m=>{
+    const px=frozenOdds?.[m.key];
+    return px&&Number(px.odds)>1
+      ? {...m,verifiedOdds:Number(px.odds),oddsFresh:true,marketImpliedProbability:px.marketImpliedProbability??m.marketImpliedProbability??null}
+      : m;
+  });
   const market=keys=>{const x=all.find(m=>keys.includes(m.key)||keys.includes(m.market));return x&&x.probability};
   res.json({available:true,fixtureId,homeTeam:row.homeTeam,awayTeam:row.awayTeam,league:row.league,capturedAt:row.capturedAt,kickoff:row.kickoff,prematchSource:'prediction-snapshot',
     matchProbabilities:{homeWinProbability:first(p.homeWinProbability,p.home,p.homeWin,raw.homeWinProbability,raw.home),drawProbability:first(p.drawProbability,p.draw,raw.drawProbability,raw.draw),awayWinProbability:first(p.awayWinProbability,p.away,p.awayWin,raw.awayWinProbability,raw.away)},
