@@ -3,7 +3,9 @@ const config=require('../config/config');
 const {teamNamesMatch}=require('../utils/textNormalize');
 
 const memory=new Map(),DAY_TTL_MS=10*60*1000,MISS_TTL_MS=30*60*1000,RATE_BACKOFF_MS=60*60*1000,AUTH_BACKOFF_MS=15*60*1000;
-let blockedUntil=0;
+let blockedUntil=0,requestChain=Promise.resolve(),lastRequestAt=0;
+const MIN_REQUEST_GAP_MS=6500;
+function rateLimited(fn){const run=async()=>{const wait=Math.max(0,MIN_REQUEST_GAP_MS-(Date.now()-lastRequestAt));if(wait)await new Promise(r=>setTimeout(r,wait));lastRequestAt=Date.now();return fn()};const p=requestChain.then(run,run);requestChain=p.catch(()=>{});return p}
 const num=v=>{const n=Number(v);return n>1?n:null};
 function enabled(){return Boolean(config.fiveDollarFootball?.key)}
 function available(){return enabled()&&Date.now()>=blockedUntil}
@@ -53,10 +55,19 @@ async function getDay(start){
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar]',e.response?.status===429?'rate limit backoff':e.response?.status===401||e.response?.status===403?'auth/plan unavailable':'request failed');return null}
 }
 
+async function request(path,params={},timeout=9000){
+ if(!available())return null;
+ try{return await rateLimited(()=>axios.get(`${config.fiveDollarFootball.baseUrl}${path}`,{headers:headers(),params,timeout}))}
+ catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/request]',path,e.response?.status||'request failed');return null}
+}
+function normalizeStats(v){const s=v?.statistics||v?.stats||v||{},side=x=>({home:Number.isFinite(Number(x?.home))?Number(x.home):null,away:Number.isFinite(Number(x?.away))?Number(x.away):null});return {attacks:side(s.attacks),dangerousAttacks:side(s.dangerous_attacks||s.dangerousAttacks),shotsOnTarget:side(s.shots_on_target||s.shotsOnTarget),shotsOffTarget:side(s.shots_off_target||s.shotsOffTarget),possession:side(s.possession),firstHalf:s.first_half?normalizeStats(s.first_half):null}}
+function normalizeEvents(v){return (v?.events||v||[]).map(e=>({type:e.type||null,minute:e.minute??null,team:e.team||null,count:e.count??null,period:e.period||null,score:e.score||null,playerIn:e.player_in||null,playerOut:e.player_out||null}));}
+async function getLiveIntelligence(){const key='five-dollar-live-intel-v1',cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;const r=await request('/fixtures',{status:'live',include:'odds,events,stats',per_page:50});if(!r)return {available:false,fixtures:[]};const fixtures=(r.data?.data||[]).map(f=>({...f,normalizedStats:normalizeStats(f.statistics),normalizedEvents:normalizeEvents(f.events),normalizedMarkets:normalizeMarkets(oddsRoot(f)),marketStages:marketStages(oddsRoot(f))}));const data={available:true,fixtures,fetchedAt:Date.now()};memory.set(key,{data,expires:Date.now()+60*1000});return data;}
+async function getHistoricalLeagueFixtures(leagueId,{startTime,endTime,page=1,includeOdds=true}={}){if(!leagueId)return null;const params={status:'finished',order:'asc',page,per_page:includeOdds?50:100};if(startTime)params.start_time=startTime;if(endTime)params.end_time=endTime;if(includeOdds)params.include='odds';const r=await request(`/leagues/${leagueId}/fixtures`,params,12000);return r?.data||null;}
 async function getFullOdds(fixtureId){
  const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
  try{
-  const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixtureId}/odds`,{headers:headers(),params:{bookmakers:'bet365'},timeout:7000});
+  const r=await request(`/fixtures/${fixtureId}/odds`,{bookmakers:'bet365'},7000);if(!r)return null;
   const books=r.data?.data?.bookmakers||[];const book=books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0];
   const data=book?.odds||null;memory.set(key,{data,expires:Date.now()+DAY_TTL_MS});return data;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return null}
@@ -76,4 +87,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
+module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
