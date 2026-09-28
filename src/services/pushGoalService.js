@@ -191,14 +191,33 @@ async function checkGoals() {
       } else markGoalSent(eventKey);
     }
     };
-    const outcomes=await runGoalSources([
-      {fetch:()=>bsd.getLiveFootballEvents(bsdTtl),transform:result=>bsd.extractList(result.data).map(bsd.eventToResultMatch).filter(Boolean)},
-      {fetch:()=>sportsDb.getLiveScores(),transform:result=>(result.data?.livescore||[])
-        .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
-        .map(e=>({...sportsDb.transformLiveEvent(e),source:'sportsdb'}))},
-      ...(checkSportmonks ? [{fetch:()=>cache.getOrFetch('push:sportmonks:inplay',10,()=>sportmonks.getInplay(4000)),
-        transform:result=>sportmonksGoalMatches(result.fixtures)}] : [])
-    ],processMatches);
+    // Canonical goal-source policy: subscribed six leagues prefer SportMonks,
+    // all other matches prefer BSD; SportsDB is fallback only. We still start
+    // the two primary feeds together because one BSD day/live snapshot covers
+    // every non-core tracked match. SportsDB is queried only when neither
+    // primary source produced a usable tracked live observation this cycle.
+    let primaryUsable=false;
+    const markPrimary=transform=>result=>{
+      const matches=transform(result);
+      if(matches.some(m=>usersForTrackedMatch(tracked,m,String(m.fixtureId),false).size &&
+          m.homeScore!=null && m.awayScore!=null)) primaryUsable=true;
+      return matches;
+    };
+    const primarySources=[
+      ...(checkSportmonks ? [{fetch:()=>cache.getOrFetch('push:sportmonks:inplay',5,()=>sportmonks.getInplay(4000)),
+        transform:markPrimary(result=>sportmonksGoalMatches(result.fixtures))}] : []),
+      {fetch:()=>bsd.getLiveFootballEvents(Math.min(bsdTtl,5)),
+        transform:markPrimary(result=>bsd.extractList(result.data).map(bsd.eventToResultMatch).filter(Boolean))}
+    ];
+    const outcomes=await runGoalSources(primarySources,processMatches);
+    if(!primaryUsable){
+      const fallback=await runGoalSources([
+        {fetch:()=>sportsDb.getLiveScores(),transform:result=>(result.data?.livescore||[])
+          .filter(e=>String(e.strSport||'').toLowerCase()==='soccer')
+          .map(e=>({...sportsDb.transformLiveEvent(e),source:'sportsdb'}))}
+      ],processMatches);
+      outcomes.push(...fallback);
+    }
     for(const outcome of outcomes)if(outcome.status==='rejected')console.warn('[push/source]',outcome.reason?.message||outcome.reason);
   } catch (e) { console.warn('[push/goals]', e.message); }
   finally { running = false; }
