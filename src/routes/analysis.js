@@ -247,10 +247,18 @@ router.get('/:fixtureId', async (req, res) => {
     const providerIds={...(known?.providerIds||{})};
     if(verified)providerIds[verified.provider]=verified.id;
     const providerTeamIds=known?.providerTeamIds||{};
-    const analysisPromise = computeFullAnalysis({
-      fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId:effectiveTsdbLeagueId, leagueName, season, sportKey, kickoff,
-      providerIds,providerTeamIds,
-    });
+    const analysisWorkKey='analysis-work:v2:'+[
+      fixtureId||'', homeTeamName||'', awayTeamName||'', leagueName||'', String(kickoff||'').slice(0,16)
+    ].join(':');
+    const analysisPromise = diagnosticFreshAllowed
+      ? computeFullAnalysis({
+          fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId:effectiveTsdbLeagueId, leagueName, season, sportKey, kickoff,
+          providerIds,providerTeamIds,
+        })
+      : cache.getOrFetch(analysisWorkKey, 120, () => computeFullAnalysis({
+          fixtureId, home, away, homeTeamName, awayTeamName, league, tsdbLeagueId:effectiveTsdbLeagueId, leagueName, season, sportKey, kickoff,
+          providerIds,providerTeamIds,
+        }));
     const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('analysis_timeout')), 22000));
     let result = await Promise.race([analysisPromise, timeoutPromise]);
     // SportMonks is queried only for the six subscribed core leagues.
