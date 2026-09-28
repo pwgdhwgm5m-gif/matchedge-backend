@@ -25,6 +25,7 @@ const predictionSchema = new mongoose.Schema({
   bttsDirection: { type: mongoose.Schema.Types.Mixed, default: null },
   probabilities: { type: mongoose.Schema.Types.Mixed, required: true },
   rawProbabilities: { type: mongoose.Schema.Types.Mixed, default: null },
+  ensembleProbabilities: { type: mongoose.Schema.Types.Mixed, default: null },
   comparisonProbabilities: { type: mongoose.Schema.Types.Mixed, default: null },
   sportmonksEvidence: { type: mongoose.Schema.Types.Mixed, default: null },
   marketBoardSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
