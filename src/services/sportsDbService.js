@@ -10,6 +10,7 @@ const cache = require('../utils/cache');
 const config = require('../config/config');
 const { acceptsLiveFixture, providerKey } = require('./liveFixtureIdentity');
 const competitionRegistry = require('./competitionRegistryService');
+const providerQuota = require('./providerQuotaService');
 
 const BASE_URL = 'https://www.thesportsdb.com/api/v1/json';
 const V2_BASE_URL = 'https://www.thesportsdb.com/api/v2/json';
@@ -180,12 +181,15 @@ function isLeagueIdentityConsistent(leagueId, leagueName) {
 }
 
 async function fetchT(url, timeoutMs) {
+  if(!providerQuota.canCall('thesportsdb')) return {ok:false,error:'quota_guard_thesportsdb'};
+  providerQuota.record('thesportsdb');
   const ms = timeoutMs || 10000;
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, ms);
   try {
     const res = await fetch(url, { signal: controller.signal });
     if (!res.ok) {
+      if(res.status===429) providerQuota.rateLimited('thesportsdb',60000);
       return { ok: false, error: 'http_' + res.status };
     }
     const json = await res.json();
