@@ -8,6 +8,7 @@ const sportsDb = require('../services/sportsDbService');
 const footballDataOrg = require('../services/footballDataOrgService');
 const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
+const fiveDollar = require('../services/fiveDollarFootballService');
 const fixtureIdentity = require('../services/fixtureIdentityService');
 const { ensureWallet, COUPON_STAKE, ALLOWED_STAKES, calculatePayout } = require('../services/gamificationService');
 const { notifyCouponSettlement } = require('../services/pushGoalService');
@@ -147,7 +148,7 @@ function teamPairMatch(m,home,away){const h=normTeam(home),a=normTeam(away),mh=n
 function finalMatch(m){const s=String(m?.statusShort||m?.status||'').toUpperCase();return !!m&&(m.isFinished===true||['FT','AET','PEN','AWARDED'].includes(s))&&m.homeScore!=null&&m.awayScore!=null}
 function kickoffMatch(m,kickoff,tolerance=6*60*60*1000){const a=new Date(m?.kickoff||m?.date||0).getTime(),b=new Date(kickoff||0).getTime();return Number.isFinite(a)&&Number.isFinite(b)&&Math.abs(a-b)<=tolerance}
 function verifiedFixtureMatch(m,home,away,kickoff){return teamPairMatch(m,home,away)&&kickoffMatch(m,kickoff)}
-const TRUSTED_FINAL_SCORE_SOURCES=new Set(['bsd-results-pool','bsd','sportsdb-direct-fallback','sportsdb-results-fallback','sportmonks','football-data.org']);
+const TRUSTED_FINAL_SCORE_SOURCES=new Set(['bsd-results-pool','bsd','5dollarfootball-score','sportsdb-direct-fallback','sportsdb-results-fallback','sportmonks','football-data.org']);
 function trustedFinalScore(score,source){
   const home=Number(score?.home),away=Number(score?.away);
   if(!TRUSTED_FINAL_SCORE_SOURCES.has(String(source||''))||!Number.isFinite(home)||!Number.isFinite(away))return null;
@@ -201,6 +202,18 @@ async function resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff){
   const match=response.ok&&response.data?.data?sportmonks.transformFixture(response.data.data):null;
   return match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match)?{source:'sportmonks',match}:null;
 }
+async function resolveFiveDollarFinal(matchDate,homeTeam,awayTeam,kickoff){
+  const raw=String(matchDate||kickoff||'').slice(0,10);if(!/^\d{4}-\d{2}-\d{2}$/.test(raw))return null;
+  const day=new Date(raw+'T12:00:00Z');
+  for(const offset of [0,-1,1]){
+    const date=new Date(day.getTime()+offset*86400000).toISOString().slice(0,10);
+    const feed=await fiveDollar.getScoreboardDay(date).catch(()=>({available:false,matches:[]}));
+    if(!feed?.available)continue;
+    const hit=(feed.matches||[]).find(m=>verifiedFixtureMatch(m,homeTeam,awayTeam,kickoff)&&finalMatch(m));
+    if(hit)return {source:'5dollarfootball-score',match:hit,date};
+  }
+  return null;
+}
 async function resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff){
   const rawDate=String(matchDate||kickoff||'').slice(0,10);
   const base=new Date((/^\d{4}-\d{2}-\d{2}/.test(rawDate)?rawDate:new Date().toISOString().slice(0,10))+'T12:00:00Z');
@@ -216,12 +229,18 @@ async function resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff){
 async function resolveFinalResult(matchDate,fixtureId,homeTeam,awayTeam,providerIds={},league='',kickoff=null,canonicalProvider=null){
   const mapped=await fixtureIdentity.lookup({date:matchDate,home:homeTeam,away:awayTeam}).catch(()=>null);
   const mappedIds=Object.fromEntries((mapped?.providers||[]).map(p=>[p.provider,p.id]));
+  // Settlement follows the product's canonical result hierarchy. 5Dollar is
+  // a verified score fallback between BSD and SportsDB, never a blind ID match.
   if(canonicalProvider==='sportmonks'){
     const exact=await resolveSportmonksFinal(providerIds,homeTeam,awayTeam,kickoff);
     if(exact)return exact;
   }
-  // Try the stored SportsDB id and the legacy fixture id directly before
-  // scanning dates. Team and kickoff checks still gate every candidate.
+  const bsd=await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff);
+  if(bsd)return bsd;
+  const five=await resolveFiveDollarFinal(matchDate,homeTeam,awayTeam,kickoff);
+  if(five)return five;
+  // SportsDB remains the final fallback and every candidate is gated by team,
+  // kickoff and finished-status verification.
   const sportsDbIds=[providerIds?.sportsdb,fixtureId].filter(Boolean).map(String);
   for(const id of [...new Set(sportsDbIds)]){
     const raw=await sportsDb.getEventById(id).catch(()=>({ok:false}));
@@ -229,12 +248,7 @@ async function resolveFinalResult(matchDate,fixtureId,homeTeam,awayTeam,provider
     const match=event?sportsDb.transformEvent(event):null;
     if(match&&verifiedFixtureMatch(match,homeTeam,awayTeam,kickoff)&&finalMatch(match))return {source:'sportsdb-direct-fallback',match};
   }
-  // A provider-specific result may lag after FT. Every canonical provider,
-  // including old/unknown provider namespaces, falls back only through
-  // independently verified team + kickoff matches.
-  return await resolveBsdFinal(matchDate,fixtureId,homeTeam,awayTeam,providerIds,mappedIds,kickoff)
-    || await resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff)
-    || {source:null,match:null};
+  return await resolveSportsDbByMatchDate(matchDate,homeTeam,awayTeam,kickoff)||{source:null,match:null};
 }
 // A full-time result is not enough for first/second-half markets. Enrich
 // only those selections, using provider-native IDs and verified final scores.
