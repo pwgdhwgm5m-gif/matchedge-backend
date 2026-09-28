@@ -709,6 +709,23 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? {available:true,eventId:bsdBundle.eventId,source:'bsd',markets:bsdBundle.prediction.markets||null,recommendations:bsdBundle.prediction.recommendations||null,model:bsdBundle.prediction.model||null}
     : {available:false,error:bsdBundle?.error||'prediction_unavailable'};
   const bsdConsensus = bsdBundle?.consensusOdds || null;
+  // Corner display follows BSD's actual bookmaker consensus line. Do not
+  // manufacture a fixed 9.5 market when BSD has no two-way corner price.
+  const bsdCornerMarket = bsdConsensus?.fresh ? bsdConsensus?.corners?.mainLine : null;
+  if (bsdCornerMarket) {
+    cornerMetrics = {
+      ...cornerMetrics,
+      marketLine:Number(bsdCornerMarket.line),
+      marketOverOdds:Number(bsdCornerMarket.over),
+      marketUnderOdds:Number(bsdCornerMarket.under),
+      marketOverPercent:Number(bsdCornerMarket.overDeVigPercent),
+      marketUnderPercent:Number(bsdCornerMarket.underDeVigPercent),
+      marketSource:'bsd-consensus',
+      marketAvailable:true
+    };
+  } else {
+    cornerMetrics = {...cornerMetrics,marketAvailable:false,marketSource:null};
+  }
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
