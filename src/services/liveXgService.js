@@ -64,6 +64,9 @@ const GOAL_PROXIMITY_WEIGHTS = {
 };
 
 function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg, context = {}) {
+  // Recency-sensitive event pressure from the compound 5Dollar timeline is a
+  // bounded supplement, never a replacement for observed shots/xG.
+  const eventPressure=(context.recentEvents||[]).reduce((acc,e)=>{const m=Number(e.minute);if(Number.isFinite(context.minute)&&Number.isFinite(m)&&context.minute-m>10)return acc;const t=String(e.type||'').toLowerCase();const w=/goal|penalty/.test(t)?2.5:/corner/.test(t)?0.6:/red/.test(t)?-1.5:/yellow/.test(t)?-0.15:0;const side=String(e.team||'').toLowerCase();if(/home/.test(side))acc.home+=w;else if(/away/.test(side))acc.away+=w;return acc},{home:0,away:0});
   const score = (stats, liveXg) =>
     (stats.shotsOnTarget || 0) * GOAL_PROXIMITY_WEIGHTS.shotsOnTarget +
     (stats.dangerousAttacks || 0) * GOAL_PROXIMITY_WEIGHTS.dangerousAttacks +
@@ -73,8 +76,8 @@ function calculateGoalProximity(homeStats, awayStats, homeLiveXg, awayLiveXg, co
     (stats.bigChances || 0) * GOAL_PROXIMITY_WEIGHTS.bigChances +
     (liveXg || 0) * GOAL_PROXIMITY_WEIGHTS.liveXg;
 
-  let homeScore = score(homeStats, homeLiveXg);
-  let awayScore = score(awayStats, awayLiveXg);
+  let homeScore = score(homeStats, homeLiveXg) + Math.max(-2,Math.min(4,eventPressure.home));
+  let awayScore = score(awayStats, awayLiveXg) + Math.max(-2,Math.min(4,eventPressure.away));
 
   // Small bounded context adjustments. Possession only counts when both values
   // are actually observed; red cards are explicit match-state penalties.
