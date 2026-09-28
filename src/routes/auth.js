@@ -8,7 +8,7 @@ const {
 const { sendVerificationEmail, sendPasswordResetEmail } = require('../services/emailService');
 const { requireAuth } = require('../middleware/authMiddleware');
 const config = require('../config/config');
-const { recordLoginEvent, setLocationConsent, clientIp, resolveApproximateLocation } = require('../services/loginAuditService');
+const { recordLoginEvent, setLocationConsent, clientIp, resolveApproximateLocation, touchSession, closeSession } = require('../services/loginAuditService');
 
 const VERIFICATION_VALID_HOURS = 24;
 const RESET_VALID_MINUTES = 60;
@@ -139,6 +139,9 @@ router.get('/locale', async (req,res)=>{
     return res.json({countryCode:cc,language:cc==='TR'?'tr':'en'});
   }catch(_){return res.json({countryCode:'',language:'en'});}
 });
+
+router.post('/session/heartbeat', requireAuth, async (req,res)=>{try{await touchSession({userId:req.user.userId});res.json({ok:true})}catch(e){res.status(500).json({error:'Session heartbeat failed.'})}});
+router.post('/logout', requireAuth, async (req,res)=>{try{await closeSession({userId:req.user.userId});res.json({ok:true})}catch(e){res.status(500).json({error:'Logout audit failed.'})}});
 
 router.get('/me', requireAuth, async (req, res) => {
   const user = await User.findById(req.user.userId);
