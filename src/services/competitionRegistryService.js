@@ -537,7 +537,10 @@ function normalizeTeamIdentity(value) {
     '6dejunio': 'ceuta6dejunio',
     sportinghortaleza: 'sportingdehortaleza',
     tavernes: 'tavernesdelavalldigna',
-    sanjosedesoria: 'sanjose'
+    sanjosedesoria: 'sanjose',
+    // National-team providers/locales use both Turkey and Türkiye.
+    // They are the same fixture identity and must never create duplicate cards.
+    turkiye: 'turkey'
   };
   return aliases[key] || key;
 }
