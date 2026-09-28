@@ -38,6 +38,13 @@ function bttsPair(odds){
   const p=stage(odds?.btts);
   return p&&Number(p.yes)>1&&Number(p.no)>1?{yes:Number(p.yes),no:Number(p.no)}:null;
 }
+function priceFreshness(value){
+  const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;
+  if(!raw)return {fresh:false,updatedAt:null};
+  const ms=typeof raw==='number'?(raw>1e12?raw:raw*1000):Date.parse(raw);
+  if(!Number.isFinite(ms))return {fresh:false,updatedAt:null};
+  return {fresh:Date.now()-ms<=15*60*1000,updatedAt:new Date(ms).toISOString()};
+}
 function oddsBlock(f){
   if(!f)return {};
   if(f.odds?.['1x2']||f.odds?.goal_line||f.odds?.goalline||f.odds?.btts)return f.odds;
@@ -94,4 +101,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
   if(!fixture){rememberMiss(missKey);return null;}
   return normalizeFixture(fixture,homeName,awayName,day.fetchedAt);
 }
-module.exports={enabled,available,getMatchOdds};
+module.exports={enabled,available,getMatchOdds,priceFreshness};
