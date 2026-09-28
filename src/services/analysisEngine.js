@@ -900,13 +900,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? deVigBinary(bsdConsensus?.totals?.over25,bsdConsensus?.totals?.under25) : null;
   const bsdBttsMarket=bsdConsensus?.fresh
     ? deVigBinary(bsdConsensus?.btts?.yes,bsdConsensus?.btts?.no) : null;
-  // The executable market feed is a valid calibration signal too. Prefer the
-  // existing BSD consensus anchor when present; otherwise use the complete
-  // two-way 5Dollar market and remove the bookmaker margin before blending.
+  // Use the same executable 5Dollar market that the user sees as the primary
+  // calibration anchor. BSD consensus is fallback only. This keeps displayed
+  // odds and the probability engine on one market snapshot.
   const fiveDollarOver25Market=deVigBinary(fiveDollarOdds?.totals25?.over25,fiveDollarOdds?.totals25?.under25);
   const fiveDollarBttsMarket=deVigBinary(fiveDollarOdds?.btts?.yes,fiveDollarOdds?.btts?.no);
-  const over25Market=bsdOver25Market||fiveDollarOver25Market;
-  const bttsMarket=bsdBttsMarket||fiveDollarBttsMarket;
+  const over25Market=fiveDollarOver25Market||bsdOver25Market;
+  const bttsMarket=fiveDollarBttsMarket||bsdBttsMarket;
   if(over25Market){
     marketProbabilities.over25GoalsPercent=blendBinary(
       marketProbabilities.over25GoalsPercent,over25Market,v2ModelWeight);
@@ -915,6 +915,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   if(bttsMarket){
     marketProbabilities.bttsPercent=blendBinary(
       marketProbabilities.bttsPercent,bttsMarket,v2ModelWeight);
+    // Final user-facing BTTS must remain coherent with the two team-scoring
+    // marginals. Frechet bounds are a hard probability constraint, not a heuristic.
+    const hs=Number(marketProbabilities?.scoring?.home), as=Number(marketProbabilities?.scoring?.away);
+    if(Number.isFinite(hs)&&Number.isFinite(as)){
+      const lower=Math.max(0,hs+as-100), upper=Math.min(hs,as);
+      marketProbabilities.bttsPercent=+Math.max(lower,Math.min(upper,marketProbabilities.bttsPercent)).toFixed(1);
+    }
     marketProbabilities.bttsNoPercent=+(100-marketProbabilities.bttsPercent).toFixed(1);
   }
 
