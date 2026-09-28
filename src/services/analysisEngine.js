@@ -853,8 +853,17 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // Large unexplained disagreement lowers model weight rather than being advertised as automatic value.
   const divergencePenalty = divergence?.material ? Math.min(.18,Math.abs(divergence.largestGap)/100*.45) : 0;
   const lowEvidenceMarketBlend = dataHealthScore < 50 || playedSample < 5;
-  const earnedModelWeight = lowEvidenceMarketBlend ? (.18 + .22 * evidenceStrength) : (.34 + .36 * evidenceStrength);
-  const v2ModelWeight = marketImpliedProbabilities ? Math.max(lowEvidenceMarketBlend ? .18 : .32, Math.min(lowEvidenceMarketBlend ? .42 : .72, earnedModelWeight - divergencePenalty)) : 1;
+  // Market is an anchor, never the dominant voice when we have a usable model.
+  // Start at 50/50, let evidence earn model weight, and only allow market dominance
+  // for genuinely weak/sparse evidence. Historical calibration will later learn
+  // these weights per league + market from settled Brier/LogLoss.
+  const earnedModelWeight = lowEvidenceMarketBlend
+    ? (.35 + .25 * evidenceStrength)
+    : (.50 + .30 * evidenceStrength);
+  const v2ModelWeight = marketImpliedProbabilities
+    ? Math.max(lowEvidenceMarketBlend ? .35 : .50,
+        Math.min(lowEvidenceMarketBlend ? .60 : .80, earnedModelWeight - divergencePenalty))
+    : 1;
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
 
   // Apply the same market-reality discipline to the two binary coupon markets.
