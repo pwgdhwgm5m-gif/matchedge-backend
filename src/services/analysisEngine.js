@@ -881,8 +881,35 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     metricAvailability,
     marketEvidence,
   });
-  qualityDimensions.dataQualityScoreBasis = 'historical-sample-coverage';
-  const historicalSampleCoverageScore=qualityDimensions.historicalSampleCoverage.score;
+  // UI data quality must represent the data actually available for THIS fixture,
+  // not just whether both teams have >=8 historical matches.
+  // Weight independent dimensions and cap the score when important inputs are missing.
+  const historyScore=Number(qualityDimensions.historicalSampleCoverage?.score||0);
+  const metricScore=Number(qualityDimensions.metricCoverage?.score||0);
+  const sourceScore=Number.isFinite(Number(qualityDimensions.sourceHealth?.score))
+    ? Number(qualityDimensions.sourceHealth.score) : 0;
+  const marketScore=metricAvailability.marketOdds ? 100 : 0;
+  const freshnessScore=Number.isFinite(Number(qualityDimensions.dataFreshness?.score))
+    ? Number(qualityDimensions.dataFreshness.score) : null;
+  let compositeDataQuality=Math.round(
+    historyScore*.35 + metricScore*.35 + sourceScore*.20 + marketScore*.10
+  );
+  // 100 is reserved for genuinely complete coverage, not merely a full history sample.
+  const criticalComplete =
+    historyScore===100 && metricScore===100 && sourceScore===100 &&
+    metricAvailability.marketOdds && metricAvailability.standings &&
+    metricAvailability.providerCorners && metricAvailability.providerXg;
+  if(!criticalComplete) compositeDataQuality=Math.min(compositeDataQuality,94);
+  if(!metricAvailability.marketOdds) compositeDataQuality=Math.min(compositeDataQuality,89);
+  if(!metricAvailability.standings) compositeDataQuality=Math.min(compositeDataQuality,84);
+  qualityDimensions.composite={
+    score:compositeDataQuality,
+    weights:{historicalSampleCoverage:.35,metricCoverage:.35,sourceHealth:.20,marketOdds:.10},
+    criticalComplete,
+    freshnessScore
+  };
+  qualityDimensions.dataQualityScoreBasis = 'composite-fixture-coverage';
+  const historicalSampleCoverageScore=compositeDataQuality;
   const bttsDirection = marketEvidenceService.bttsDirection(marketProbabilities.bttsPercent);
   const smRawHomeAverages=sportmonksHistorical?.rawHome?.averages||{};
   const smRawAwayAverages=sportmonksHistorical?.rawAway?.averages||{};
