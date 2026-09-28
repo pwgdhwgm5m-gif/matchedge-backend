@@ -31,6 +31,7 @@ const predictionSchema = new mongoose.Schema({
   strongestPick: { type: mongoose.Schema.Types.Mixed, default: null },
   topPicksSnapshot: { type: [mongoose.Schema.Types.Mixed], default: [] },
   executableOddsSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
+  marketIntelligenceSnapshot: { type: mongoose.Schema.Types.Mixed, default: null },
   prematchAnalysisArchive: { type: mongoose.Schema.Types.Mixed, default: null },
   v4Validation: { type: [mongoose.Schema.Types.Mixed], default: [] },
   closingLineSnapshot: { type: [mongoose.Schema.Types.Mixed], default: [] },
