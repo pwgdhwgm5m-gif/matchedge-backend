@@ -66,7 +66,7 @@ module.exports = {
   },
 
   fiveDollarFootball: {
-    key: process.env.FIVE_DOLLAR_FOOTBALL_API_KEY || '',
+    key: process.env.FIVEDOLLARFOOTBALL_API_KEY || process.env.FIVE_DOLLAR_FOOTBALL_API_KEY || '',
     baseUrl: 'https://api.5dollarfootballapi.com/v1',
   },
 
