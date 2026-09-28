@@ -122,6 +122,8 @@ router.get('/five-dollar-history-audit', async (req,res)=>{
  }catch(error){console.error('[five-dollar-history-audit]',error);res.status(500).json({error:'5Dollar historical audit unavailable.'});}
 });
 
+router.get('/learned-market-weights', async (req,res)=>{try{res.json(await require('../services/predictionLedgerService').learnedMarketWeights())}catch(e){console.error('[learned-market-weights]',e);res.status(500).json({error:'learned weight audit unavailable'})}});
+
 router.get('/commercial-model-audit', async (req,res)=>{
   try{
     const [performance,selections,walkForward,paired]=await Promise.all([
