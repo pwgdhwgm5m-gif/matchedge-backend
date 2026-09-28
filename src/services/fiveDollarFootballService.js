@@ -10,7 +10,7 @@ function available(){return enabled()&&Date.now()>=blockedUntil}
 function headers(){return {Authorization:`Bearer ${config.fiveDollarFootball.key}`}}
 function backoff(status,retryAfter){if(status===429)blockedUntil=Math.max(blockedUntil,Date.now()+Math.max(60000,Number(retryAfter||0)*1000||RATE_BACKOFF_MS));else if(status===401||status===403)blockedUntil=Math.max(blockedUntil,Date.now()+AUTH_BACKOFF_MS)}
 function priceFreshness(value){const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;if(!raw)return {fresh:false,updatedAt:null};const ms=typeof raw==='number'?(raw>1e12?raw:raw*1000):Date.parse(raw);if(!Number.isFinite(ms))return {fresh:false,updatedAt:null};return {fresh:Date.now()-ms<=15*60*1000,updatedAt:new Date(ms).toISOString()}}
-function stage(v){return v&&(v.current||v.latest||v.closing||v.opening||v)}
+function stage(v){return v&&(v.inplay||v.closing||v.opening||v)}
 function pair(v,a=['over','over_odds','over25','over_2.5'],b=['under','under_odds','under25','under_2.5']){const p=stage(v)||{};const pick=keys=>keys.map(k=>num(p[k])).find(Boolean)||null;const x=pick(a),y=pick(b);return x&&y?{a:x,b:y}:null}
 function oddsRoot(f){const o=f?.odds||{};if(Array.isArray(o.bookmakers)){const book=o.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||o.bookmakers[0];return book?.odds||book?.markets||{}}if(Array.isArray(f?.bookmakers)){const book=f.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||f.bookmakers[0];return book?.odds||book?.markets||{}}return o}
 function normalizeMarkets(root){
@@ -38,11 +38,28 @@ async function getDay(start){
  const now=Date.now(),row={data,expires:now+DAY_TTL_MS,fetchedAt:now,rate:{limit:lastHeaders['x-ratelimit-limit']||null,remaining:lastHeaders['x-ratelimit-remaining']||null,reset:lastHeaders['x-ratelimit-reset']||null}};memory.set(key,row);return row;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar]',e.response?.status===429?'rate limit backoff':e.response?.status===401||e.response?.status===403?'auth/plan unavailable':'request failed');return null}
 }
+
+async function getFullOdds(fixtureId){
+ const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
+ try{
+  const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixtureId}/odds`,{headers:headers(),params:{bookmakers:'bet365'},timeout:7000});
+  const books=r.data?.data?.bookmakers||[];const book=books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0];
+  const data=book?.odds||null;memory.set(key,{data,expires:Date.now()+DAY_TTL_MS});return data;
+ }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return null}
+}
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
  const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
  const day=await getDay(start);if(!day)return null;const target=d.getTime();
  const f=day.data.find(x=>{if(!teamNamesMatch(x.teams?.home?.name,homeName)||!teamNamesMatch(x.teams?.away?.name,awayName))return false;const k=Number(x.kickoff_ts)*1000||Date.parse(x.kickoff_utc||x.start_time||'');return !Number.isFinite(k)||Math.abs(k-target)<=4*60*60*1000});
- if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}return normalizeFixture(f,homeName,awayName,day.fetchedAt);
+ if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}
+ // The list include is intentionally compact. The documented single-fixture
+ // odds endpoint is the authoritative payload for BTTS and goal_line_fixed.
+ let normalized=normalizeFixture(f,homeName,awayName,day.fetchedAt);
+ if(!normalized?.totals25||!normalized?.btts){
+   const full=await getFullOdds(f.id);
+   if(full)normalized=normalizeFixture({...f,odds:full},homeName,awayName,Date.now());
+ }
+ return normalized;
 }
-module.exports={enabled,available,getMatchOdds,priceFreshness,normalizeMarkets,normalizeFixture};
+module.exports={enabled,available,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture};
