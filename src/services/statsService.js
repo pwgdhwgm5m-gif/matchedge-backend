@@ -221,17 +221,28 @@ function calculateH2HFirstHalfTendency(h2hFixtures, homeTeamId, awayTeamId, deca
  */
 function combineFirstHalfProximity(homeOwnRate, awayOwnRate, h2h) {
   const h2hSampleSize = h2h?.total || 0;
-  const h2hWeight = h2hSampleSize >= 3 ? 0.3 : 0;
-  const ownWeight = 1 - h2hWeight;
+  const homeOwn = Number(homeOwnRate);
+  const awayOwn = Number(awayOwnRate);
+  const hasOwnRates = Number.isFinite(homeOwn) && Number.isFinite(awayOwn);
+  const hasH2h = h2hSampleSize >= 3 && Number.isFinite(Number(h2h?.homeRate)) && Number.isFinite(Number(h2h?.awayRate));
 
-  const homeScore = (homeOwnRate ?? 50) * ownWeight + (h2h?.homeRate ?? 50) * h2hWeight;
-  const awayScore = (awayOwnRate ?? 50) * ownWeight + (h2h?.awayRate ?? 50) * h2hWeight;
-  const total = homeScore + awayScore || 1;
+  // Never manufacture a 50/50 prediction when historical HT data is missing.
+  if (!hasOwnRates && !hasH2h) {
+    return { home: null, away: null, h2hSampleSize, dataAvailable: false };
+  }
 
+  const h2hWeight = hasH2h ? (hasOwnRates ? 0.3 : 1) : 0;
+  const ownWeight = hasOwnRates ? 1 - h2hWeight : 0;
+  const homeScore = (hasOwnRates ? homeOwn * ownWeight : 0) + (hasH2h ? Number(h2h.homeRate) * h2hWeight : 0);
+  const awayScore = (hasOwnRates ? awayOwn * ownWeight : 0) + (hasH2h ? Number(h2h.awayRate) * h2hWeight : 0);
+  const total = homeScore + awayScore;
+
+  if (!(total > 0)) return { home: null, away: null, h2hSampleSize, dataAvailable: false };
   return {
     home: +((homeScore / total) * 100).toFixed(1),
     away: +((awayScore / total) * 100).toFixed(1),
     h2hSampleSize,
+    dataAvailable: true,
   };
 }
 
