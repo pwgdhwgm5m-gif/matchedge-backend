@@ -51,7 +51,7 @@ async function sendToUsers(userIds, payload) {
   const subs = await PushSubscription.find({ userId: { $in: userIds } }).lean();
   const outcomes=await Promise.allSettled(subs.map(async s => {
     try {
-      await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, JSON.stringify(payload), { TTL: 120 });
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: s.keys }, JSON.stringify(payload), {\n        TTL: 120,\n        urgency: payload?.type === 'goal' ? 'high' : 'normal',\n        topic: payload?.type === 'goal' && payload?.fixtureId ? `goal-${String(payload.fixtureId).slice(-24)}` : undefined,\n      });
       return true;
     } catch (e) {
       if (e.statusCode === 404 || e.statusCode === 410) await PushSubscription.deleteOne({ _id: s._id });
