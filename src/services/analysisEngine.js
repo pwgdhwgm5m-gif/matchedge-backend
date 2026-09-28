@@ -773,16 +773,19 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   } else {
     cornerMetrics = {...cornerMetrics,marketAvailable:false,marketSource:null};
   }
-  // Public/card consumers must never receive legacy fixed-line corner
-  // probabilities as displayable markets. Historical corner projections remain
-  // internal evidence only. The only exposed Over/Under line is BSD marketLine.
+  // Corners are analysis-only: expose coherent model lines only when backed
+  // by real provider corner history. They are deliberately excluded from slips.
+  const realCornerEvidence=cornerMetrics.provenance==='REAL_PROVIDER_CORNERS' &&
+    Number(cornerMetrics.sample||0)>=5 && Number.isFinite(Number(cornerMetrics.expectedTotal));
+  const cornerLineProjection=realCornerEvidence ? {
+    over85Percent:Number.isFinite(Number(cornerMetrics.over85Percent))?Number(cornerMetrics.over85Percent):null,
+    over95Percent:Number.isFinite(Number(cornerMetrics.over95Percent))?Number(cornerMetrics.over95Percent):null,
+    over105Percent:Number.isFinite(Number(cornerMetrics.over105Percent))?Number(cornerMetrics.over105Percent):null
+  } : null;
   cornerMetrics = {
     ...cornerMetrics,
-    over85Percent:null,
-    over95Percent:null,
-    under95Percent:null,
-    rawOver85Percent:null,
-    rawOver95Percent:null,
+    analysisOnly:true,
+    limitedData:!realCornerEvidence,
     displayMarket: bsdCornerMarket ? {
       line:Number(bsdCornerMarket.line),
       overPercent:Number(bsdCornerMarket.overDeVigPercent),
@@ -790,20 +793,17 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       overOdds:Number(bsdCornerMarket.over),
       underOdds:Number(bsdCornerMarket.under),
       source:'bsd-consensus',
-      type:'market'
-    } : (
-      cornerMetrics.provenance==='REAL_PROVIDER_CORNERS' &&
-      Number.isFinite(Number(cornerMetrics.expectedTotal))
-        ? {
-            expectedTotal:Number(cornerMetrics.expectedTotal),
-            expectedHome:Number.isFinite(Number(cornerMetrics.expectedHome))?Number(cornerMetrics.expectedHome):null,
-            expectedAway:Number.isFinite(Number(cornerMetrics.expectedAway))?Number(cornerMetrics.expectedAway):null,
-            sample:Number(cornerMetrics.sample||0),
-            source:cornerMetrics.source,
-            type:'projection'
-          }
-        : null
-    )
+      type:'market',
+      projection:cornerLineProjection
+    } : (realCornerEvidence ? {
+      expectedTotal:Number(cornerMetrics.expectedTotal),
+      expectedHome:Number.isFinite(Number(cornerMetrics.expectedHome))?Number(cornerMetrics.expectedHome):null,
+      expectedAway:Number.isFinite(Number(cornerMetrics.expectedAway))?Number(cornerMetrics.expectedAway):null,
+      sample:Number(cornerMetrics.sample||0),
+      lines:cornerLineProjection,
+      source:cornerMetrics.source,
+      type:'projection'
+    } : {type:'limited-data',source:cornerMetrics.source,sample:Number(cornerMetrics.sample||0)})
   };
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
