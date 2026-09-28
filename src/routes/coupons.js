@@ -25,7 +25,7 @@ function settlePendingBackground(userId) {
 
 const CORNER_KEYS = new Set(['cornersOver95','cornersUnder95','cornersOver85','cornersUnder85']);
 // New slips use only markets settled from a verified full-time score.
-const ALLOWED_KEYS = new Set(['home','draw','away','over25','bttsYes']);
+const ALLOWED_KEYS = new Set(['home','draw','away','over25','under25','bttsYes','bttsNo']);
 
 function settleSelection(key, home, away, corners, halftimeHome, halftimeAway) {
   const total = home + away;
@@ -433,7 +433,7 @@ router.post('/', async (req, res) => {
   if(rawLegs.some(leg=>CORNER_KEYS.has(leg?.selection?.key)))
     return res.status(422).json({error:'Korner seçimleri kupondan kaldırıldı.',code:'CORNER_SELECTION_DISABLED'});
   if(rawLegs.some(leg=>!ALLOWED_KEYS.has(leg?.selection?.key)))
-    return res.status(422).json({error:'Kuponda yalnızca maç sonucu, 2.5 Üst ve KG Var seçimleri kullanılabilir.',code:'SELECTION_DISABLED'});
+    return res.status(422).json({error:'Kuponda yalnızca maç sonucu, 2.5 Alt/Üst ve KG Var/Yok seçimleri kullanılabilir.',code:'SELECTION_DISABLED'});
   const safeLegs = rawLegs.map(leg => {
     const s=leg?.selection||{};
     if(!leg?.fixtureId||!leg?.homeTeam||!leg?.awayTeam||!ALLOWED_KEYS.has(s.key)) return null;
