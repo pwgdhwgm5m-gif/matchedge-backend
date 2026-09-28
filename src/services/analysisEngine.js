@@ -845,7 +845,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? await footballDataOdds.getMatchOdds(homeTeamName, awayTeamName)
     : null;
   const matchOdds = primaryMatchOdds || fiveDollarOdds?.matchOdds || footballDataMatchOdds;
-  const marketAnchorOdds = bsdAnchorOdds || matchOdds;
+  // The executable 5Dollar quote is the same market evidence shown to the user.
+  // Prefer it for ensemble calibration so a displayed 1.20 cannot be blended
+  // against an unrelated BSD consensus anchor. BSD remains fallback only.
+  const marketAnchorOdds = fiveDollarOdds?.matchOdds || bsdAnchorOdds || matchOdds;
   const proportionalMarket = oddsApi.normalizeImpliedProbabilities(marketAnchorOdds);
   const shinMarket = oddsApi.shinImpliedProbabilities(marketAnchorOdds);
   const marketImpliedProbabilities = shinMarket || proportionalMarket;
@@ -860,6 +863,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const earnedModelWeight = lowEvidenceMarketBlend
     ? (.35 + .25 * evidenceStrength)
     : (.50 + .30 * evidenceStrength);
+  // Until the prospective learner has enough settled samples, the market must
+  // have a meaningful voice. 50% is the maximum default market share; strong
+  // model evidence can earn more model weight. Divergence shifts weight toward
+  // the market instead of allowing a stale/weak model to ignore a strong price.
   const v2ModelWeight = marketImpliedProbabilities
     ? Math.max(lowEvidenceMarketBlend ? .35 : .50,
         Math.min(lowEvidenceMarketBlend ? .60 : .80, earnedModelWeight - divergencePenalty))
