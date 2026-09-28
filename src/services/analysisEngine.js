@@ -638,45 +638,64 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const smHome = sportmonksHistorical?.home;
   const smAway = sportmonksHistorical?.away;
   const ha = smHome?.averages || {}, aa = smAway?.averages || {};
-  const smCornerReady = Number.isFinite(ha.corners) && Number.isFinite(aa.corners) && smHome.sample >= 5 && smAway.sample >= 5;
+  const smSample=Math.min(Number(smHome?.sample||0),Number(smAway?.sample||0));
+  const smCornerReady = Number.isFinite(ha.corners) && Number.isFinite(aa.corners) && smSample >= 3;
   const cornerPressure = a => {
     const parts = [];
     if (Number.isFinite(a.shots)) parts.push([a.shots / 13, .25]);
     if (Number.isFinite(a.blockedShots)) parts.push([a.blockedShots / 3.5, .30]);
     if (Number.isFinite(a.dangerousAttacks)) parts.push([a.dangerousAttacks / 45, .30]);
     if (Number.isFinite(a.shotsInsideBox)) parts.push([a.shotsInsideBox / 7, .15]);
-    const w = parts.reduce((s,p)=>s+p[1],0);
-    return w ? parts.reduce((s,p)=>s+p[0]*p[1],0)/w : 1;
+    const w = parts.reduce((sum,p)=>sum+p[1],0);
+    return w ? parts.reduce((sum,p)=>sum+p[0]*p[1],0)/w : 1;
   };
   let smExpectedHome = null, smExpectedAway = null;
   if (smCornerReady) {
     const baseHome = Number.isFinite(aa.cornersAgainst) ? (ha.corners + aa.cornersAgainst) / 2 : ha.corners;
     const baseAway = Number.isFinite(ha.cornersAgainst) ? (aa.corners + ha.cornersAgainst) / 2 : aa.corners;
-    // Pressure is only a bounded supporting adjustment; observed corner for/against
-    // remains the primary signal.
     smExpectedHome = +(baseHome * Math.max(.90, Math.min(1.10, cornerPressure(ha)))).toFixed(2);
     smExpectedAway = +(baseAway * Math.max(.90, Math.min(1.10, cornerPressure(aa)))).toFixed(2);
   }
-  let cornerMetrics = smCornerReady
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(smExpectedHome, smExpectedAway), { sample: Math.min(smHome.sample,smAway.sample), source:'sportmonks-history-pressure', provenance:'REAL_PROVIDER_CORNERS', expectedHome:smExpectedHome, expectedAway:smExpectedAway, lowEvidence:Math.min(smHome.sample,smAway.sample)<8 })
-    : cornerProjection
-    ? Object.assign(poisson.estimateCornerMetricsFromExpected(cornerProjection.homeExpected, cornerProjection.awayExpected), { sample: cornerProjection.sample, source:'historical-corners', provenance:'REAL_PROVIDER_CORNERS', lowEvidence:Number(cornerProjection.sample||0)<8 })
-    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { sample:0, source: 'league-prior-bounded-tempo', provenance:'LEAGUE_PRIOR', lowEvidence:true });
 
-  // Corner percentages need their own evidence shrinkage. A Poisson projection
-  // from a league prior is not match-specific evidence and must not look like a
-  // confident 65-70% call. Real historical samples progressively earn back the
-  // model probability; sparse/fallback projections stay close to 50/50.
+  // Multi-provider corner pool. SportMonks and SportsDB history may contain the
+  // same fixture, so samples are NEVER added together: effectiveSample=max().
+  // This prevents duplicate provider rows from manufacturing confidence while
+  // still allowing either real source to rescue a sparse corner card.
+  const tsdbCornerReady=Boolean(cornerProjection&&Number(cornerProjection.sample||0)>=3);
+  const weighted=(a,aw,b,bw)=>{
+    const parts=[[a,aw],[b,bw]].filter(([v,w])=>Number.isFinite(Number(v))&&Number(w)>0);
+    const total=parts.reduce((n,[,w])=>n+w,0);
+    return total?parts.reduce((n,[v,w])=>n+Number(v)*w,0)/total:null;
+  };
+  const smWeight=smCornerReady?Math.min(smSample,8):0;
+  const tsdbWeight=tsdbCornerReady?Math.min(Number(cornerProjection.sample||0),8):0;
+  const pooledHome=weighted(smExpectedHome,smWeight,cornerProjection?.homeExpected,tsdbWeight);
+  const pooledAway=weighted(smExpectedAway,smWeight,cornerProjection?.awayExpected,tsdbWeight);
+  const effectiveCornerSample=Math.max(smWeight,tsdbWeight);
+  const pooledReady=Number.isFinite(pooledHome)&&Number.isFinite(pooledAway)&&effectiveCornerSample>=3;
+  const poolSources=[smCornerReady?'sportmonks':null,tsdbCornerReady?'sportsdb':null].filter(Boolean);
+
+  let cornerMetrics = pooledReady
+    ? Object.assign(poisson.estimateCornerMetricsFromExpected(pooledHome, pooledAway), {
+        sample:effectiveCornerSample, source:poolSources.length>1?'multi-provider-corner-pool':(smCornerReady?'sportmonks-history-pressure':'historical-corners'),
+        sources:poolSources, provenance:'REAL_PROVIDER_CORNERS', expectedHome:+pooledHome.toFixed(2), expectedAway:+pooledAway.toFixed(2),
+        lowEvidence:effectiveCornerSample<6, dedupePolicy:'effective-sample-max-not-sum'
+      })
+    : Object.assign(poisson.estimateCornerMetrics(homeLambda, awayLambda), { sample:0, source:'league-prior-bounded-tempo', sources:[], provenance:'LEAGUE_PRIOR', lowEvidence:true });
+
+  // Sparse real history is shrunk strongly toward 50%; more observed matches
+  // progressively earn back the model probability.
   {
     const n=Math.max(0,Number(cornerMetrics.sample||0));
-    const realHistory=cornerMetrics.source==='sportmonks-history-pressure'||cornerMetrics.source==='historical-corners';
-    const cornerEvidence=realHistory ? Math.max(.18,Math.min(1,n/16)) : .12;
+    const realHistory=cornerMetrics.provenance==='REAL_PROVIDER_CORNERS';
+    const cornerEvidence=realHistory ? Math.max(.15,Math.min(1,n/12)) : .10;
     const shrinkCorner=p=>Number.isFinite(Number(p))?+(50+cornerEvidence*(Number(p)-50)).toFixed(1):p;
     const over85=shrinkCorner(cornerMetrics.over85Percent);
     const over95=shrinkCorner(cornerMetrics.over95Percent);
+    const over105=shrinkCorner(cornerMetrics.over105Percent);
     cornerMetrics={...cornerMetrics,
-      rawOver85Percent:cornerMetrics.over85Percent,rawOver95Percent:cornerMetrics.over95Percent,
-      over85Percent:over85,over95Percent:over95,
+      rawOver85Percent:cornerMetrics.over85Percent,rawOver95Percent:cornerMetrics.over95Percent,rawOver105Percent:cornerMetrics.over105Percent,
+      over85Percent:over85,over95Percent:over95,over105Percent:over105,
       under95Percent:Number.isFinite(over95)?+(100-over95).toFixed(1):cornerMetrics.under95Percent,
       evidenceReliability:+cornerEvidence.toFixed(3)
     };
@@ -776,7 +795,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // Corners are analysis-only: expose coherent model lines only when backed
   // by real provider corner history. They are deliberately excluded from slips.
   const realCornerEvidence=cornerMetrics.provenance==='REAL_PROVIDER_CORNERS' &&
-    Number(cornerMetrics.sample||0)>=5 && Number.isFinite(Number(cornerMetrics.expectedTotal));
+    Number(cornerMetrics.sample||0)>=3 && Number.isFinite(Number(cornerMetrics.expectedTotal));
   const cornerLineProjection=realCornerEvidence ? {
     over85Percent:Number.isFinite(Number(cornerMetrics.over85Percent))?Number(cornerMetrics.over85Percent):null,
     over95Percent:Number.isFinite(Number(cornerMetrics.over95Percent))?Number(cornerMetrics.over95Percent):null,
