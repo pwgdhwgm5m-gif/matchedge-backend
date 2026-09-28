@@ -894,7 +894,19 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const blendBinary=(modelYes,market,modelWeight)=>{
     const p=Number(modelYes);
     if(!Number.isFinite(p)||!market) return p;
-    return +(p*modelWeight+market.yes*(1-modelWeight)).toFixed(1);
+    const marketYes=Number(market.yes);
+    let blended=p*modelWeight+marketYes*(1-modelWeight);
+    // Guardrail for user-facing betting probabilities: a weak/medium evidence
+    // model must not remain dramatically detached from a complete de-vig market.
+    // Strong evidence may preserve a genuine SoccerEdge disagreement.
+    const gap=Math.abs(blended-marketYes);
+    const evidence=Number(evidenceStrength||0);
+    const health=Number(dataHealthScore||0);
+    const strong=evidence>=.72 && health>=72 && playedSample>=8;
+    const medium=evidence>=.55 && health>=58 && playedSample>=5;
+    const allowedGap=strong?12:(medium?8:5);
+    if(gap>allowedGap) blended=marketYes+Math.sign(blended-marketYes)*allowedGap;
+    return +Math.max(2,Math.min(98,blended)).toFixed(1);
   };
   const bsdOver25Market=bsdConsensus?.fresh
     ? deVigBinary(bsdConsensus?.totals?.over25,bsdConsensus?.totals?.under25) : null;
