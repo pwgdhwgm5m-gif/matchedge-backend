@@ -742,8 +742,21 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       underPercent:Number(bsdCornerMarket.underDeVigPercent),
       overOdds:Number(bsdCornerMarket.over),
       underOdds:Number(bsdCornerMarket.under),
-      source:'bsd-consensus'
-    } : null
+      source:'bsd-consensus',
+      type:'market'
+    } : (
+      cornerMetrics.provenance==='REAL_PROVIDER_CORNERS' &&
+      Number.isFinite(Number(cornerMetrics.expectedTotal))
+        ? {
+            expectedTotal:Number(cornerMetrics.expectedTotal),
+            expectedHome:Number.isFinite(Number(cornerMetrics.expectedHome))?Number(cornerMetrics.expectedHome):null,
+            expectedAway:Number.isFinite(Number(cornerMetrics.expectedAway))?Number(cornerMetrics.expectedAway):null,
+            sample:Number(cornerMetrics.sample||0),
+            source:cornerMetrics.source,
+            type:'projection'
+          }
+        : null
+    )
   };
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
