@@ -119,9 +119,20 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const currentSeason = sportsDb.getCurrentSeasonString();
   const registeredCompetition=resolveCompetition({leagueName:leagueName||league});
   const bsdLeagueId=providerIds.bsd||registeredCompetition?.providerIds?.bsd||null;
-  const sportsdbStandingsFallback=()=>isMappedLeague
-    ? sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId,currentSeason)
-    : Promise.resolve({ok:true,available:false,table:[]});
+  const sportsdbStandingsFallback=async()=>{
+    if(!isMappedLeague)return {ok:true,available:false,table:[]};
+    // Domestic leagues use the normal football-season string. Tournament
+    // providers sometimes store the Nations League under a calendar year
+    // instead, so try provider-compatible season labels without fabricating data.
+    const seasons=isInternationalCompetition
+      ? [...new Set([currentSeason,String(new Date(kickoff||Date.now()).getUTCFullYear()),String(new Date(kickoff||Date.now()).getUTCFullYear()-1)])]
+      : [currentSeason];
+    for(const seasonLabel of seasons){
+      const r=await sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId,seasonLabel).catch(()=>({ok:true,available:false,table:[]}));
+      if(r?.available)return {...r,source:'sportsdb',season:seasonLabel};
+    }
+    return {ok:true,available:false,table:[],source:'sportsdb'};
+  };
   const bsdThenSportsdbStandings=async()=>{
     if(bsdLeagueId){
       const primary=await bsd.getLeagueStandingsFormatted(bsdLeagueId).catch(e=>({ok:false,available:false,error:e.message}));
@@ -146,7 +157,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const standingsCacheKey = isSuperLig
     ? 'tff-standings'
     : bsdLeagueId
-      ? `bsd-standings:v1:${bsdLeagueId}:${currentSeason}`
+      ? `bsd-standings:v2:${bsdLeagueId}:${effectiveTsdbLeagueId||'none'}:${currentSeason}`
       : isMappedLeague
         ? `tsdb-standings:v2:${effectiveTsdbLeagueId}:${currentSeason}`
         : `standings:${league}:${season}`;
