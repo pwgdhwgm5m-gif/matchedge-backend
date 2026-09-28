@@ -122,6 +122,36 @@ async function getLeagueRegistry(){
   return {ok:true,map};
 }
 
+async function getLeagueStandingsFormatted(leagueId) {
+  if (!leagueId) return {ok:true,available:false,table:[],groups:[],error:'bsd_league_id_missing'};
+  const season=await fetchBsdCached('/leagues/'+encodeURIComponent(leagueId)+'/season/',30*60,8000);
+  if(!season.ok)return {ok:false,available:false,table:[],groups:[],error:season.error||'bsd_season_unavailable'};
+  const seasonId=pickField(season.data,['id','season_id','season.id']);
+  if(!seasonId)return {ok:true,available:false,table:[],groups:[],error:'bsd_season_id_missing'};
+  const result=await fetchBsdCached('/leagues/'+encodeURIComponent(leagueId)+'/standings/?season_id='+encodeURIComponent(seasonId),10*60,8000);
+  if(!result.ok)return {ok:false,available:false,table:[],groups:[],error:result.error||'bsd_standings_unavailable'};
+  const normalizeRow=r=>({
+    teamId:pickField(r,['team_id','team.id']),
+    teamName:String(pickField(r,['team_name','team.name','name'])||''),
+    rank:Number(pickField(r,['position','rank'])||0)||null,
+    played:Number(pickField(r,['played','matches','mp'])||0),
+    won:Number(pickField(r,['won','wins','w'])||0),
+    drawn:Number(pickField(r,['drawn','draws','d'])||0),
+    lost:Number(pickField(r,['lost','losses','l'])||0),
+    goalsFor:Number(pickField(r,['goals_for','gf'])||0),
+    goalsAgainst:Number(pickField(r,['goals_against','ga'])||0),
+    goalDifference:Number(pickField(r,['goal_difference','gd'])||0),
+    points:Number(pickField(r,['pts','points'])||0),
+    description:pickField(r,['zone.label','description'])||null
+  });
+  const flat=Array.isArray(result.data?.standings)?result.data.standings.map(normalizeRow):[];
+  const groups=Array.isArray(result.data?.groups)?result.data.groups.map((g,i)=>({
+    name:String(g.name||g.group||g.label||('Group '+(i+1))),
+    table:(g.standings||g.table||g.rows||[]).map(normalizeRow)
+  })).filter(g=>g.table.length):[];
+  return {ok:true,available:flat.length>0||groups.length>0,source:'bsd',seasonId,table:flat,groups};
+}
+
 function extractList(data) {
   if (Array.isArray(data)) return data;
   if (!data) return [];
@@ -763,4 +793,4 @@ async function diagnostic(dateStr) {
   return {apiBase:BASE_URL,hasKey:!!API_KEY,date:dateStr,tests,resultSummary:{ok:fa.ok,error:fa.error||null,count:fa.matches?.length||0,faCupExplicit:!!fa.faCupExplicit,faCup:fa.matches?.filter(m=>/fa cup/i.test(m.league||'')).slice(0,20)||[]}};
 }
 
-module.exports = { fetchBsdAll, getLeagueRegistry, getLiveFootballEvents, getLiveResultMatches, getEventId, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getStatsByEventId, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
+module.exports = { fetchBsdAll, getLeagueRegistry, getLeagueStandingsFormatted, getLiveFootballEvents, getLiveResultMatches, getEventId, extractList, eventStatusText, eventToResultMatch, getRealXgForMatch, resolveBsdEventId, getEventXg, getHalftimeScoreForMatch, getTeamFixturesForAnalysis, getPredictionForMatch, getConsensusOddsForMatch, getStatsForMatch, getStatsByEventId, getFixtureDataBundle, normalizeConsensusOdds, getEventById, getFinalResultForMatch, getFinalResultByEventId, attachHalftimeScores, getResultMatchesForDate, getRawFinalMatchesForDate, diagnostic };
