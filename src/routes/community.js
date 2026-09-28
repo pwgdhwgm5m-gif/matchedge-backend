@@ -142,6 +142,13 @@ router.get('/users/search',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean();const users=await User.find({username:{$regex:'^'+safeQ,$options:'i'},_id:{$ne:req.user.userId}}).limit(20).lean();
  res.json({users:users.map(u=>({...publicUser(u),relationship:relation(me,u)}))});
 });
+router.get('/following',async(req,res)=>{
+ const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
+ const ids=me.following||[];if(!ids.length)return res.json({following:[]});
+ const users=await User.find({_id:{$in:ids}}).lean();
+ const byId=new Map(users.map(u=>[String(u._id),u]));
+ res.json({following:ids.map(id=>byId.get(String(id))).filter(Boolean).map(u=>({...publicUser(u),relationship:relation(me,u),isFollowing:true}))});
+});
 router.get('/friends',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
  const [friends,incoming,outgoing]=await Promise.all([User.find({_id:{$in:me.friends||[]}}).lean(),User.find({_id:{$in:me.incomingFriendRequests||[]}}).lean(),User.find({_id:{$in:me.outgoingFriendRequests||[]}}).lean()]);
