@@ -871,7 +871,31 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? Math.max(lowEvidenceMarketBlend ? .35 : .50,
         Math.min(lowEvidenceMarketBlend ? .60 : .80, earnedModelWeight - divergencePenalty))
     : 1;
-  const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
+  let blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
+  // 1X2 user-facing guardrail. Apply it to the complete 3-way vector, then
+  // renormalize, so a weak model cannot remain implausibly far from the same
+  // executable market displayed beside it while H/D/A always sum to 100.
+  if(marketImpliedProbabilities){
+    const evidence=Number(evidenceStrength||0), health=Number(dataHealthScore||0);
+    const strong=evidence>=.72 && health>=72 && playedSample>=8;
+    const medium=evidence>=.55 && health>=58 && playedSample>=5;
+    const allowedGap=strong?12:(medium?8:5);
+    const vals=[
+      ['homeWinProbability','home'],['drawProbability','draw'],['awayWinProbability','away']
+    ].map(([mk,pk])=>{
+      const market=Number(marketImpliedProbabilities[pk]), current=Number(blendedMatchProbabilities[mk]);
+      const bounded=market+Math.max(-allowedGap,Math.min(allowedGap,current-market));
+      return [mk,Math.max(.1,bounded)];
+    });
+    const total=vals.reduce((n,x)=>n+x[1],0)||100;
+    blendedMatchProbabilities={...blendedMatchProbabilities,
+      ...Object.fromEntries(vals.map(([k,v])=>[k,+((v/total)*100).toFixed(1)])),
+      coherenceGuardrail:{allowedGap,evidenceStrength:+evidence.toFixed(3),dataHealthScore:health}
+    };
+    // absorb rounding residue in draw so the public 1X2 vector is exactly 100.0
+    const residue=+(100-blendedMatchProbabilities.homeWinProbability-blendedMatchProbabilities.drawProbability-blendedMatchProbabilities.awayWinProbability).toFixed(1);
+    blendedMatchProbabilities.drawProbability=+(blendedMatchProbabilities.drawProbability+residue).toFixed(1);
+  }
   const marketIntelligence = {
     source: fiveDollarOdds?.matchOdds ? '5dollarfootball-market' : (bsdAnchorOdds ? 'bsd-consensus' : null),
     modelWeight:+v2ModelWeight.toFixed(3),
