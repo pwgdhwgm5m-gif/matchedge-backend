@@ -87,14 +87,22 @@ function normalizeScoreFixture(f){
  let ht=extractScorePair(score.halftime||score.half_time||score.ht||f?.halftime);
  if(ht.home==null||ht.away==null){
    const events=normalizeEvents(f?.events);
-   const firstHalf=events.filter(e=>String(e.period||'').toLowerCase().includes('1')||Number(e.minute)<=45);
-   let h=0,a=0,seen=false;
-   for(const e of firstHalf){
-     if(!/goal/i.test(String(e.type||'')))continue;
-     const pair=extractScorePair(e.score);
-     if(pair.home!=null&&pair.away!=null){h=pair.home;a=pair.away;seen=true}
+   // 5Dollar exposes the authoritative HT score as a period_score event with
+   // period=first_half. Prefer it over reconstructing goals by minute.
+   const period=events.find(e=>String(e.type||'').toLowerCase()==='period_score'&&
+     ['first_half','1st_half','firsthalf','1h'].includes(String(e.period||'').toLowerCase()));
+   const periodScore=extractScorePair(period?.score);
+   if(periodScore.home!=null&&periodScore.away!=null) ht=periodScore;
+   else {
+     const firstHalf=events.filter(e=>Number.isFinite(Number(e.minute))&&Number(e.minute)<=45);
+     let h=0,a=0,seen=false;
+     for(const e of firstHalf){
+       if(!/goal/i.test(String(e.type||'')))continue;
+       if(String(e.team||'').toLowerCase()==='home'){h++;seen=true}
+       else if(String(e.team||'').toLowerCase()==='away'){a++;seen=true}
+     }
+     if(seen)ht={home:h,away:a};
    }
-   if(seen)ht={home:h,away:a};
  }
  const kickoffTs=Number(f?.kickoff_ts);
  return {
