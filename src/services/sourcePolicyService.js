@@ -28,6 +28,14 @@ function oddsSportKeyForCompetition(canonicalCompetitionKey){
   return ODDS_KEYS_BY_COMPETITION[String(canonicalCompetitionKey||'').trim()]||null;
 }
 
+const PROVIDER_CHAIN = Object.freeze({
+  subscribed: Object.freeze(['sportmonks','bsd','thesportsdb']),
+  other: Object.freeze(['bsd','thesportsdb'])
+});
+function providerChain(ctx={}){
+  return resolve(ctx) ? [...PROVIDER_CHAIN.subscribed] : [...PROVIDER_CHAIN.other];
+}
+
 const norm=v=>String(v||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 function resolve({leagueName,sportKey}={}){
   const n=norm(leagueName), sk=String(sportKey||'').trim();
@@ -67,4 +75,4 @@ function policy(ctx={}){
     rule:'Outside the six subscribed leagues do not query SportMonks. Use BSD first, then TheSportsDB/Football-Data fallbacks. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated.'
   };
 }
-module.exports={SPORTMONKS_PRIMARY,ODDS_KEYS_BY_COMPETITION,oddsSportKeyForCompetition,resolve,isBsdCoreLeague,policy};
+module.exports={SPORTMONKS_PRIMARY,PROVIDER_CHAIN,providerChain,ODDS_KEYS_BY_COMPETITION,oddsSportKeyForCompetition,resolve,isBsdCoreLeague,policy};
