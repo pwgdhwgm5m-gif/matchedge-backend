@@ -247,18 +247,17 @@ function calculateDataQualityScore(successfulSources, totalSources, dataAgeMinut
  */
 function estimateCornerMetricsFromExpected(homeExpected, awayExpected) {
   const expectedTotal = Math.max(0.5, Number(homeExpected || 0) + Number(awayExpected || 0));
-  let cumulative85 = 0, cumulative95 = 0;
-  for (let k = 0; k <= 9; k++) {
-    const p = poissonProbability(expectedTotal, k);
-    if (k <= 8) cumulative85 += p;
-    cumulative95 += p;
-  }
-  const over85Percent = +((1 - cumulative85) * 100).toFixed(1);
-  const over95Percent = +((1 - cumulative95) * 100).toFixed(1);
+  const overLinePercent = line => {
+    const max=Math.floor(Number(line));
+    let cumulative=0;
+    for(let k=0;k<=max;k++) cumulative+=poissonProbability(expectedTotal,k);
+    return Math.max(0,Math.min(100,+((1-cumulative)*100).toFixed(1)));
+  };
+  const over85Percent=overLinePercent(8.5),over95Percent=overLinePercent(9.5),over105Percent=overLinePercent(10.5);
   const homeShare = expectedTotal ? Number(homeExpected || 0) / expectedTotal : 0.5;
-  return { expectedTotal:+expectedTotal.toFixed(1), minExpected:Math.max(0,Math.floor(expectedTotal-2)),
-    over95Percent:Math.max(0,Math.min(100,over95Percent)), under95Percent:Math.max(0,Math.min(100,+(100-over95Percent).toFixed(1))),
-    over85Percent:Math.max(0,Math.min(100,over85Percent)), homeShare:+(homeShare*100).toFixed(1), awayShare:+((1-homeShare)*100).toFixed(1), source:'historical-corners' };
+  return { expectedTotal:+expectedTotal.toFixed(1), expectedHome:+Number(homeExpected||0).toFixed(1), expectedAway:+Number(awayExpected||0).toFixed(1), minExpected:Math.max(0,Math.floor(expectedTotal-2)),
+    over95Percent, under95Percent:Math.max(0,Math.min(100,+(100-over95Percent).toFixed(1))),
+    over85Percent, over105Percent, homeShare:+(homeShare*100).toFixed(1), awayShare:+((1-homeShare)*100).toFixed(1), source:'historical-corners' };
 }
 
 function estimateCornerMetrics(homeLambda, awayLambda) {
