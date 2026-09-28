@@ -3,6 +3,8 @@ const config = require('../config/config');
 
 // checkperiod: suresi dolan keyleri periyodik temizler, bellek sismesin diye
 const cache = new NodeCache({ checkperiod: 60 });
+// Single-flight registry: concurrent misses for the same key share one upstream request.
+const inFlight = new Map();
 
 /**
  * Cache-aside deseni: once cache'e bak, yoksa/bayatsa fetchFn'i calistir,
@@ -19,11 +21,22 @@ async function getOrFetch(key, ttlSeconds, fetchFn) {
     return { ...cached, fromCache: true };
   }
 
-  const fresh = await fetchFn();
-  if (fresh && fresh.ok !== false) {
-    cache.set(key, fresh, ttlSeconds);
+  if (inFlight.has(key)) {
+    const shared = await inFlight.get(key);
+    return { ...shared, fromCache: false, coalesced: true };
   }
-  return { ...fresh, fromCache: false };
+  const task = (async () => {
+    const fresh = await fetchFn();
+    if (fresh && fresh.ok !== false) cache.set(key, fresh, ttlSeconds);
+    return fresh;
+  })();
+  inFlight.set(key, task);
+  try {
+    const fresh = await task;
+    return { ...fresh, fromCache: false, coalesced: false };
+  } finally {
+    if (inFlight.get(key) === task) inFlight.delete(key);
+  }
 }
 
 function set(key, value, ttlSeconds) {
@@ -38,4 +51,4 @@ function del(key) {
   return cache.del(key);
 }
 
-module.exports = { getOrFetch, set, get, del, raw: cache };
+module.exports = { getOrFetch, set, get, del, raw: cache, inFlight };
