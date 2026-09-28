@@ -5,6 +5,8 @@ const selectionSchema = new mongoose.Schema({
   market: { type: String, required: true },
   label: { type: String, required: true },
   probability: { type: Number, default: null },
+  odds: { type: Number, default: null },
+  oddsCapturedAt: { type: Date, default: null },
   riskAcknowledged: { type: Boolean, default: false },
   result: { type: String, enum: ['pending', 'won', 'lost', 'void'], default: 'pending' },
 }, { _id: false });
