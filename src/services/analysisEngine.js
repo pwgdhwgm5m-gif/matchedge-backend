@@ -160,13 +160,13 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       : isMappedLeague
         ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
         : () => Promise.resolve({ ok:false, error:'standings_unavailable' });
+  // Standings identity is always canonical/provider-specific. Never key this
+  // cache from a raw fixture league id because BSD/SportsDB/SportMonks ids can
+  // overlap numerically while meaning different competitions.
+  const standingsCompetitionKey=registeredCompetition?.canonicalCompetitionKey||canonicalCompetitionForIds?.canonicalCompetitionKey||'unmapped';
   const standingsCacheKey = isSuperLig
-    ? 'tff-standings'
-    : bsdLeagueId
-      ? `bsd-standings:v2:${bsdLeagueId}:${effectiveTsdbLeagueId||'none'}:${currentSeason}`
-      : isMappedLeague
-        ? `tsdb-standings:v2:${effectiveTsdbLeagueId}:${currentSeason}`
-        : `standings:${league}:${season}`;
+    ? 'standings:v4:turkey-super-lig:tff'
+    : `standings:v4:${standingsCompetitionKey}:bsd-${bsdLeagueId||'none'}:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
