@@ -126,23 +126,26 @@ async function getLeagueStandingsFormatted(leagueId) {
   if (!leagueId) return {ok:true,available:false,table:[],groups:[],error:'bsd_league_id_missing'};
   const season=await fetchBsdCached('/leagues/'+encodeURIComponent(leagueId)+'/season/',30*60,8000);
   if(!season.ok)return {ok:false,available:false,table:[],groups:[],error:season.error||'bsd_season_unavailable'};
-  const seasonId=pickField(season.data,['id','season_id','season.id']);
+  // /season/ returns the season object itself (e.g. {id:1635,...}).
+  // Do not rely on pickField here: it is declared later in this module.
+  const seasonData=season.data?.data||season.data?.season||season.data;
+  const seasonId=seasonData?.id??seasonData?.season_id??null;
   if(!seasonId)return {ok:true,available:false,table:[],groups:[],error:'bsd_season_id_missing'};
   const result=await fetchBsdCached('/leagues/'+encodeURIComponent(leagueId)+'/standings/?season_id='+encodeURIComponent(seasonId),10*60,8000);
   if(!result.ok)return {ok:false,available:false,table:[],groups:[],error:result.error||'bsd_standings_unavailable'};
   const normalizeRow=r=>({
-    teamId:pickField(r,['team_id','team.id']),
-    teamName:String(pickField(r,['team_name','team.name','name'])||''),
-    rank:Number(pickField(r,['position','rank'])||0)||null,
-    played:Number(pickField(r,['played','matches','mp'])||0),
-    won:Number(pickField(r,['won','wins','w'])||0),
-    drawn:Number(pickField(r,['drawn','draws','d'])||0),
-    lost:Number(pickField(r,['lost','losses','l'])||0),
-    goalsFor:Number(pickField(r,['goals_for','gf'])||0),
-    goalsAgainst:Number(pickField(r,['goals_against','ga'])||0),
-    goalDifference:Number(pickField(r,['goal_difference','gd'])||0),
-    points:Number(pickField(r,['pts','points'])||0),
-    description:pickField(r,['zone.label','description'])||null
+    teamId:r?.team_id??r?.team?.id??null,
+    teamName:String(r?.team_name??r?.team?.name??r?.name??''),
+    rank:Number(r?.position??r?.rank??0)||null,
+    played:Number(r?.played??r?.matches??r?.mp??0),
+    won:Number(r?.won??r?.wins??r?.w??0),
+    drawn:Number(r?.drawn??r?.draws??r?.d??0),
+    lost:Number(r?.lost??r?.losses??r?.l??0),
+    goalsFor:Number(r?.goals_for??r?.gf??0),
+    goalsAgainst:Number(r?.goals_against??r?.ga??0),
+    goalDifference:Number(r?.goal_difference??r?.gd??0),
+    points:Number(r?.pts??r?.points??0),
+    description:r?.zone?.label??r?.description??null
   });
   const flat=Array.isArray(result.data?.standings)?result.data.standings.map(normalizeRow):[];
   const groups=Array.isArray(result.data?.groups)?result.data.groups.map((g,i)=>({
