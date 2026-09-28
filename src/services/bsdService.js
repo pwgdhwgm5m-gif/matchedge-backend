@@ -126,18 +126,19 @@ async function getLeagueStandingsFormatted(leagueId) {
   if (!leagueId) return {ok:true,available:false,table:[],groups:[],error:'bsd_league_id_missing'};
   const season=await fetchBsdCached('/leagues/'+encodeURIComponent(leagueId)+'/season/',30*60,8000);
   if(!season.ok)return {ok:false,available:false,table:[],groups:[],error:season.error||'bsd_season_unavailable'};
-  // /season/ returns the season object itself (e.g. {id:1635,...}).
-  // Do not rely on pickField here: it is declared later in this module.
-  const seasonData=season.data?.data||season.data?.season||season.data;
-  const seasonId=seasonData?.id??seasonData?.season_id??null;
+  const seasonRoot=season.data?.data??season.data?.results??season.data?.season??season.data;
+  const seasonRows=Array.isArray(seasonRoot)?seasonRoot:Array.isArray(seasonRoot?.data)?seasonRoot.data:[seasonRoot];
+  const seasonRow=seasonRows.filter(Boolean).sort((a,b)=>Number(b?.id??b?.season_id??0)-Number(a?.id??a?.season_id??0))[0]||null;
+  const seasonId=seasonRow?.id??seasonRow?.season_id??season.data?.id??season.data?.season_id??null;
   if(!seasonId)return {ok:true,available:false,table:[],groups:[],error:'bsd_season_id_missing'};
+
   const result=await fetchBsdCached('/leagues/'+encodeURIComponent(leagueId)+'/standings/?season_id='+encodeURIComponent(seasonId),10*60,8000);
   if(!result.ok)return {ok:false,available:false,table:[],groups:[],error:result.error||'bsd_standings_unavailable'};
   const normalizeRow=r=>({
     teamId:r?.team_id??r?.team?.id??null,
     teamName:String(r?.team_name??r?.team?.name??r?.name??''),
-    rank:Number(r?.position??r?.rank??0)||null,
-    played:Number(r?.played??r?.matches??r?.mp??0),
+    rank:Number(r?.position??r?.rank??r?.place??0)||null,
+    played:Number(r?.played??r?.matches??r?.mp??r?.games_played??0),
     won:Number(r?.won??r?.wins??r?.w??0),
     drawn:Number(r?.drawn??r?.draws??r?.d??0),
     lost:Number(r?.lost??r?.losses??r?.l??0),
@@ -147,11 +148,16 @@ async function getLeagueStandingsFormatted(leagueId) {
     points:Number(r?.pts??r?.points??0),
     description:r?.zone?.label??r?.description??null
   });
-  const flat=Array.isArray(result.data?.standings)?result.data.standings.map(normalizeRow):[];
-  const groups=Array.isArray(result.data?.groups)?result.data.groups.map((g,i)=>({
-    name:String(g.name||g.group||g.label||('Group '+(i+1))),
-    table:(g.standings||g.table||g.rows||[]).map(normalizeRow)
-  })).filter(g=>g.table.length):[];
+  const root=result.data?.data??result.data?.results??result.data;
+  const rawFlat=Array.isArray(root)?root:(Array.isArray(root?.standings)?root.standings:Array.isArray(result.data?.standings)?result.data.standings:[]);
+  const flat=rawFlat.filter(r=>r&&(r.team||r.team_name||r.team_id)).map(normalizeRow).filter(r=>r.teamName);
+  const rawGroups=Array.isArray(root?.groups)?root.groups:Array.isArray(result.data?.groups)?result.data.groups:
+    (!Array.isArray(root)&&root&&typeof root==='object' ? Object.entries(root).filter(([k,v])=>/group/i.test(k)&&Array.isArray(v)).map(([name,standings])=>({name,standings})) : []);
+  const groups=rawGroups.map((g,i)=>({
+    name:String(g?.name||g?.group||g?.label||('Group '+(i+1))),
+    table:(g?.standings||g?.table||g?.rows||g?.teams||[]).map(normalizeRow).filter(r=>r.teamName)
+  })).filter(g=>g.table.length);
+  console.log('[bsd/standings]',JSON.stringify({leagueId:String(leagueId),seasonId:String(seasonId),available:flat.length>0||groups.length>0,flat:flat.length,groups:groups.map(g=>({name:g.name,rows:g.table.length}))}));
   return {ok:true,available:flat.length>0||groups.length>0,source:'bsd',seasonId,table:flat,groups};
 }
 
