@@ -110,6 +110,18 @@ router.get('/selection-performance', async (req,res)=>{
   catch(error){console.error('[selection-performance]',error);res.status(500).json({error:'Selection performance unavailable.'});}
 });
 
+router.get('/five-dollar-history-audit', async (req,res)=>{
+ try{
+  const fiveDollar=require('../services/fiveDollarFootballService');
+  const leagueId=String(req.query.leagueId||'');if(!leagueId)return res.status(400).json({error:'leagueId required'});
+  const end=Math.floor(Date.now()/1000),start=Math.floor((Date.now()-365*86400000)/1000),maxPages=Math.min(24,Math.max(1,Number(req.query.pages)||4));
+  let fixtures=[],page=1,hasMore=true;
+  while(page<=maxPages&&hasMore){const body=await fiveDollar.getHistoricalLeagueFixtures(leagueId,{startTime:start,endTime:end,page,includeOdds:true});if(!body)break;fixtures.push(...(body.data||[]));hasMore=body.pagination?.has_more===true;page++;}
+  const rows=fixtures.map(f=>{const markets=f.normalizedMarkets||null;const root=f.odds||{};const norm=fiveDollar.normalizeMarkets(root);const stages=fiveDollar.marketStages(root);return {fixtureId:String(f.id),kickoff:f.kickoff_utc||null,home:f.teams?.home?.name||null,away:f.teams?.away?.name||null,goals:f.goals||null,corners:f.corners||null,cards:f.cards||null,odds:{h2h:norm.h2h,totals25:norm.totals,btts:norm.btts},stages};});
+  res.json({source:'5dollarfootball',mode:'historical-bootstrap-not-prospective-performance',leagueId,windowDays:365,count:rows.length,pagesFetched:page-1,hasMore,fixtures:rows});
+ }catch(error){console.error('[five-dollar-history-audit]',error);res.status(500).json({error:'5Dollar historical audit unavailable.'});}
+});
+
 router.get('/commercial-model-audit', async (req,res)=>{
   try{
     const [performance,selections,walkForward,paired]=await Promise.all([
