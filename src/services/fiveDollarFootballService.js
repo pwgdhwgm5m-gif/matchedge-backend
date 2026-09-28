@@ -27,18 +27,22 @@ function stage(block){
 }
 function fixed25(odds){
   const ladder=odds?.goal_line_fixed || odds?.goalline_fixed || odds?.totals || odds?.total_goals;
-  const rows=Array.isArray(ladder)?ladder:(Array.isArray(ladder?.lines)?ladder.lines:[]);
-  const row=rows.find(x=>Number(x?.line??x?.handicap??x?.total)===2.5);
+  let rows=Array.isArray(ladder)?ladder:(Array.isArray(ladder?.lines)?ladder.lines:Object.values(ladder||{}));
+  let row=rows.find(x=>Number(x?.line??x?.handicap??x?.total)===2.5);
+  if(!row&&ladder&&!Array.isArray(ladder))row=ladder['2.5']||ladder['2_5']||ladder.over_2_5||null;
   const p=stage(row);
-  if(p&&Number(p.over??p.over_odds)>1&&Number(p.under??p.under_odds)>1)return {over25:Number(p.over??p.over_odds),under25:Number(p.under??p.under_odds)};
+  const over=p?.over??p?.over_odds??p?.over25??p?.['over_2.5'];
+  const under=p?.under??p?.under_odds??p?.under25??p?.['under_2.5'];
+  if(Number(over)>1&&Number(under)>1)return {over25:Number(over),under25:Number(under)};
   const main=stage(odds?.goal_line||odds?.goalline);
-  if(main&&Number(main.line)===2.5&&Number(main.over)>1&&Number(main.under)>1)
-    return {over25:Number(main.over),under25:Number(main.under)};
+  if(main&&Number(main.line)===2.5&&Number(main.over)>1&&Number(main.under)>1)return {over25:Number(main.over),under25:Number(main.under)};
   return null;
 }
 function bttsPair(odds){
-  const p=stage(odds?.btts || odds?.both_teams_to_score || odds?.bothTeamsToScore);
-  return p&&Number(p.yes??p.both)>1&&Number(p.no??p.not_both)>1?{yes:Number(p.yes??p.both),no:Number(p.no??p.not_both)}:null;
+  const p=stage(odds?.btts||odds?.both_teams_to_score||odds?.bothTeamsToScore||odds?.both_teams_score);
+  const yes=p?.yes??p?.both??p?.btts_yes??p?.Yes;
+  const no=p?.no??p?.not_both??p?.btts_no??p?.No;
+  return Number(yes)>1&&Number(no)>1?{yes:Number(yes),no:Number(no)}:null;
 }
 function priceFreshness(value){
   const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;
@@ -49,7 +53,7 @@ function priceFreshness(value){
 }
 function oddsBlock(f){
   if(!f)return {};
-  if(f.odds?.['1x2']||f.odds?.goal_line||f.odds?.goalline||f.odds?.btts)return f.odds;
+  if(f.odds?.['1x2']||f.odds?.goal_line||f.odds?.goalline||f.odds?.goal_line_fixed||f.odds?.goalline_fixed||f.odds?.totals||f.odds?.total_goals||f.odds?.btts||f.odds?.both_teams_to_score||f.odds?.bothTeamsToScore)return f.odds;
   const books=f.odds?.bookmakers||f.bookmakers||[];
   const b=Array.isArray(books)?(books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0]):null;
   return b?.odds||{};
