@@ -211,7 +211,13 @@ router.get('/:fixtureId', async (req, res) => {
   const diagnosticToken = req.get('x-socceredge-diagnostic-token');
   const diagnosticFreshAllowed = diagnosticFreshRequested && Boolean(process.env.DIAGNOSTIC_TOKEN) && diagnosticToken === process.env.DIAGNOSTIC_TOKEN;
   const cacheKey=prematchArchive.precomputedKey({fixtureId,homeTeam:homeTeamName,awayTeam:awayTeamName,kickoff});
-  const precomputed = diagnosticFreshAllowed || !cacheKey ? null : cache.get(cacheKey);
+  let precomputed = diagnosticFreshAllowed || !cacheKey ? null : cache.get(cacheKey);
+  // Standings are provider-backed dynamic context. Old precomputed analyses
+  // created before standings support must not permanently keep "Bilgi yok".
+  // Recompute those responses once so BSD -> SportsDB standings can populate.
+  if(precomputed && (!precomputed.standings || !Array.isArray(precomputed.standings.table) || precomputed.standings.table.length===0)){
+    precomputed=null;
+  }
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
       const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider}).catch(()=>null) : null;
@@ -247,7 +253,7 @@ router.get('/:fixtureId', async (req, res) => {
     const providerIds={...(known?.providerIds||{})};
     if(verified)providerIds[verified.provider]=verified.id;
     const providerTeamIds=known?.providerTeamIds||{};
-    const analysisWorkKey='analysis-work:v2:'+[
+    const analysisWorkKey='analysis-work:v3-standings:'+[
       fixtureId||'', homeTeamName||'', awayTeamName||'', leagueName||'', String(kickoff||'').slice(0,16)
     ].join(':');
     const analysisPromise = diagnosticFreshAllowed
