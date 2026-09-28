@@ -39,7 +39,7 @@ async function capture(a, fixture) {
     .map(x=>[x.key,{odds:Number(x.verifiedOdds),capturedAt:new Date(),marketImpliedProbability:x.marketImpliedProbability??null}]));
   const result = await Prediction.updateOne(
     { canonicalFixtureKey, modelVersion: VERSION },
-    { $set: { executableOddsSnapshot }, $setOnInsert: {
+    { $set: { executableOddsSnapshot, marketIntelligenceSnapshot:a.marketIntelligence||null }, $setOnInsert: {
       fixtureId: String(fixture.fixtureId), canonicalFixtureKey, modelVersion: VERSION, calibrationVersion:a.calibrationVersion||null, selectionVersion:SELECTION_VERSION, kickoff,
       league: fixture.league || '', homeTeam: fixture.homeTeam, awayTeam: fixture.awayTeam,
       homeTeamId: fixture.homeTeamId || fixture.homeId || null, awayTeamId: fixture.awayTeamId || fixture.awayId || null,
