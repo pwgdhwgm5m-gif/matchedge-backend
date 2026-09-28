@@ -872,6 +872,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
         Math.min(lowEvidenceMarketBlend ? .60 : .80, earnedModelWeight - divergencePenalty))
     : 1;
   const blendedMatchProbabilities = oddsApi.blendWithMarket(matchProbabilities, marketImpliedProbabilities, v2ModelWeight);
+  const marketIntelligence = {
+    source: fiveDollarOdds?.matchOdds ? '5dollarfootball-market' : (bsdAnchorOdds ? 'bsd-consensus' : null),
+    modelWeight:+v2ModelWeight.toFixed(3),
+    marketWeight:+(1-v2ModelWeight).toFixed(3),
+    divergence:divergence||null,
+    oneXTwo:{executableOdds:fiveDollarOdds?.matchOdds||null,deVig:marketImpliedProbabilities||null},
+    stages:fiveDollarOdds?.marketStages||null,
+    capturedAt:new Date().toISOString()
+  };
 
   // Apply the same market-reality discipline to the two binary coupon markets.
   // BSD consensus is an anchor, not an executable quote: remove overround first,
