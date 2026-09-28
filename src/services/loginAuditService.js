@@ -68,6 +68,7 @@ async function recordLoginEvent({ user, req, clientTimezone, geoConsent }) {
     userId: user._id,
     geoConsent: geoConsent === true,
     ...location,
+    ipAddress: ip,
     ipHash,
     userAgent: String(req.headers['user-agent'] || '').slice(0, 240),
   });
@@ -126,4 +127,14 @@ async function setLocationConsent({ userId, req, clientTimezone, consent }) {
   return { consent: true, location };
 }
 
-module.exports = { recordLoginEvent, setLocationConsent, clientIp, resolveApproximateLocation };
+async function touchSession({userId}) {
+  const now=new Date();
+  const latest=await LoginEvent.findOne({userId,logoutAt:null}).sort({loginAt:-1});
+  if(!latest)return null;
+  latest.lastSeenAt=now;await latest.save();return latest;
+}
+async function closeSession({userId}) {
+  const now=new Date();
+  return LoginEvent.findOneAndUpdate({userId,logoutAt:null},{$set:{lastSeenAt:now,logoutAt:now}},{sort:{loginAt:-1},new:true});
+}
+module.exports = { recordLoginEvent, setLocationConsent, clientIp, resolveApproximateLocation, touchSession, closeSession };
