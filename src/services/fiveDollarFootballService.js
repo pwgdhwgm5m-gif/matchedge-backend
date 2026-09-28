@@ -21,22 +21,24 @@ function backoff(status,retryAfter){
 function rememberMiss(key){ memory.set(key,{data:null,miss:true,expires:Date.now()+MISS_TTL_MS}); }
 function stage(block){
   if(!block)return null;
-  return block.closing || block.opening || null;
+  // Provider payloads can expose a current/live snapshot as well as opening
+  // and closing. Prefer the newest executable quote without fabricating one.
+  return block.current || block.latest || block.closing || block.opening || block;
 }
 function fixed25(odds){
-  const ladder=odds?.goal_line_fixed || odds?.goalline_fixed;
+  const ladder=odds?.goal_line_fixed || odds?.goalline_fixed || odds?.totals || odds?.total_goals;
   const rows=Array.isArray(ladder)?ladder:(Array.isArray(ladder?.lines)?ladder.lines:[]);
-  const row=rows.find(x=>Number(x?.line)===2.5);
+  const row=rows.find(x=>Number(x?.line??x?.handicap??x?.total)===2.5);
   const p=stage(row);
-  if(p&&Number(p.over)>1&&Number(p.under)>1)return {over25:Number(p.over),under25:Number(p.under)};
+  if(p&&Number(p.over??p.over_odds)>1&&Number(p.under??p.under_odds)>1)return {over25:Number(p.over??p.over_odds),under25:Number(p.under??p.under_odds)};
   const main=stage(odds?.goal_line||odds?.goalline);
   if(main&&Number(main.line)===2.5&&Number(main.over)>1&&Number(main.under)>1)
     return {over25:Number(main.over),under25:Number(main.under)};
   return null;
 }
 function bttsPair(odds){
-  const p=stage(odds?.btts);
-  return p&&Number(p.yes)>1&&Number(p.no)>1?{yes:Number(p.yes),no:Number(p.no)}:null;
+  const p=stage(odds?.btts || odds?.both_teams_to_score || odds?.bothTeamsToScore);
+  return p&&Number(p.yes??p.both)>1&&Number(p.no??p.not_both)>1?{yes:Number(p.yes??p.both),no:Number(p.no??p.not_both)}:null;
 }
 function priceFreshness(value){
   const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;
@@ -55,7 +57,7 @@ function oddsBlock(f){
 function normalizeFixture(f,homeName,awayName,fetchedAt){
   if(!f||!teamNamesMatch(f.teams?.home?.name,homeName)||!teamNamesMatch(f.teams?.away?.name,awayName))return null;
   const odds=oddsBlock(f);
-  const one=stage(odds['1x2']);
+  const one=stage(odds['1x2'] || odds.match_result || odds.moneyline);
   const matchOdds=one&&Number(one.home)>1&&Number(one.draw)>1&&Number(one.away)>1
     ? {home:Number(one.home),draw:Number(one.draw),away:Number(one.away)}:null;
   const totals=fixed25(odds), btts=bttsPair(odds);
