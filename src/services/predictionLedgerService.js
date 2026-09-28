@@ -62,6 +62,10 @@ async function capture(a, fixture) {
       // Immutable full response used by the normal analysis screen before kickoff.
       // Live pages render this exact object; they never recompute a pre-match view.
       prematchAnalysisArchive: a,
+      ensembleProbabilities: {
+        home:percent(a.matchProbabilities?.homeWinProbability), draw:percent(a.matchProbabilities?.drawProbability), away:percent(a.matchProbabilities?.awayWinProbability),
+        over25:percent(a.marketProbabilities?.over25GoalsPercent), btts:percent(a.marketProbabilities?.bttsPercent)
+      },
       rawProbabilities: a.rawModelProbabilities ? {
         home: percent(a.rawModelProbabilities.homeWinProbability), draw: percent(a.rawModelProbabilities.drawProbability),
         away: percent(a.rawModelProbabilities.awayWinProbability), over25: percent(a.rawMarketProbabilities?.over25GoalsPercent),
