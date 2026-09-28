@@ -151,8 +151,9 @@ router.get('/following',async(req,res)=>{
 });
 router.get('/friends',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean();if(!me)return res.status(404).json({error:'User not found.'});
- const [friends,incoming,outgoing]=await Promise.all([User.find({_id:{$in:me.friends||[]}}).lean(),User.find({_id:{$in:me.incomingFriendRequests||[]}}).lean(),User.find({_id:{$in:me.outgoingFriendRequests||[]}}).lean()]);
- res.json({friends:friends.map(u=>publicUser(u)),requests:incoming.map(u=>publicUser(u)),sentRequests:outgoing.map(u=>publicUser(u))});
+ const [friends,incoming,outgoing,unreadRows]=await Promise.all([User.find({_id:{$in:me.friends||[]}}).lean(),User.find({_id:{$in:me.incomingFriendRequests||[]}}).lean(),User.find({_id:{$in:me.outgoingFriendRequests||[]}}).lean(),require('../models/DirectMessage').aggregate([{$match:{recipient:me._id,readAt:null,status:'visible'}},{$group:{_id:'$sender',count:{$sum:1}}}])]);
+ const unreadMap=new Map(unreadRows.map(x=>[String(x._id),x.count]));const online=u=>!!(u.lastActiveAt&&Date.now()-new Date(u.lastActiveAt).getTime()<120000);const decorate=u=>({...publicUser(u),online:online(u),unreadMessages:unreadMap.get(String(u._id))||0});
+ res.json({friends:friends.map(decorate),requests:incoming.map(decorate),sentRequests:outgoing.map(decorate),unreadMessages:unreadRows.reduce((n,x)=>n+x.count,0)});
 });
 router.get('/profile/:username',async(req,res)=>{
  const me=await User.findById(req.user.userId).lean(),user=await User.findOne({username:String(req.params.username||'').toLowerCase()}).lean();
