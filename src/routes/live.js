@@ -279,6 +279,11 @@ router.get('/:fixtureId', async (req, res) => {
   const bsdHomeXg = bsdNum(bsdHome,['xg.actual','xg','expected_goals']);
   const bsdAwayXg = bsdNum(bsdAway,['xg.actual','xg','expected_goals']);
   const bsdXgEstimated = Boolean(bsdLiveStats.data?.xg_estimated || bsdHome?.xg?.estimated || bsdAway?.xg?.estimated);
+  // Field-specific routing: football intelligence stays SportMonks-first in
+  // subscribed leagues; outside them 5Dollar live pressure may lead BSD for
+  // pressure fields without changing fixture/result ownership.
+  const fieldRoutes=require('../services/sourcePolicyService').fieldRouting({leagueName:match.league});
+  const routed=(field,values)=>{for(const provider of (fieldRoutes[field]||[])){const v=values[provider];if(v!==null&&v!==undefined&&v!==''&&Number.isFinite(Number(v)))return Number(v)}return null};
   const statFirst=(sm,bsd)=>sportmonksOwned ? (sm??bsd) : (bsd??sm);
 
   // Canli xG/momentum/gol yakinligi hesabi icin iki takimin ham istatistiklerini
@@ -288,21 +293,21 @@ router.get('/:fixtureId', async (req, res) => {
   // henuz yoksa (mac yeni basladiysa) tum degerler 0 olur ve asagidaki
   // fonksiyonlar otomatik 50-50/0 donuyor - hicbir sey kirilmiyor.
   const homeRawStats = {
-    shotsOnTarget: statFirst(smStats.shotsOnTargetHome,bsdNum(bsdHome,['shots_on_target','shotsOnTarget','shots.on_target'])) ?? fiveStats?.shotsOnTarget?.home ?? (stats.shotsOnTarget?.home ?? null),
+    shotsOnTarget: routed('shots',{'sportmonks':smStats.shotsOnTargetHome,'5dollarfootball':fiveStats?.shotsOnTarget?.home,'bsd':bsdNum(bsdHome,['shots_on_target','shotsOnTarget','shots.on_target']),'thesportsdb':stats.shotsOnTarget?.home}),
     shotsOffTarget: statFirst(smStats.shotsOffTargetHome,bsdNum(bsdHome,['shots_off_target','shotsOffTarget','shots.off_target'])) ?? ((smStats.shotsHome != null && smStats.shotsOnTargetHome != null) ? Math.max(0, smStats.shotsHome - smStats.shotsOnTargetHome) : null),
     corners: statFirst(smStats.cornersHome,bsdNum(bsdHome,['corners','corner_kicks'])) ?? (stats.corners?.home ?? null),
-    dangerousAttacks: statFirst(smStats.dangerousAttacksHome,bsdNum(bsdHome,['dangerous_attacks','dangerousAttacks'])) ?? fiveStats?.dangerousAttacks?.home,
-    attacks: statFirst(smStats.attacksHome,bsdNum(bsdHome,['attacks','total_attacks'])) ?? fiveStats?.attacks?.home,
+    dangerousAttacks: routed('livePressure',{'sportmonks':smStats.dangerousAttacksHome,'5dollarfootball':fiveStats?.dangerousAttacks?.home,'bsd':bsdNum(bsdHome,['dangerous_attacks','dangerousAttacks'])}),
+    attacks: routed('livePressure',{'sportmonks':smStats.attacksHome,'5dollarfootball':fiveStats?.attacks?.home,'bsd':bsdNum(bsdHome,['attacks','total_attacks'])}),
     blockedShots: statFirst(smStats.blockedShotsHome,bsdNum(bsdHome,['blocked_shots','blockedShots'])),
     shotsInsideBox: statFirst(smStats.shotsInsideBoxHome,bsdNum(bsdHome,['shots_inside_box','shotsInsideBox'])),
     bigChances: statFirst(smStats.bigChancesHome,bsdNum(bsdHome,['big_chances','bigChances'])),
   };
   const awayRawStats = {
-    shotsOnTarget: statFirst(smStats.shotsOnTargetAway,bsdNum(bsdAway,['shots_on_target','shotsOnTarget','shots.on_target'])) ?? fiveStats?.shotsOnTarget?.away ?? (stats.shotsOnTarget?.away ?? null),
+    shotsOnTarget: routed('shots',{'sportmonks':smStats.shotsOnTargetAway,'5dollarfootball':fiveStats?.shotsOnTarget?.away,'bsd':bsdNum(bsdAway,['shots_on_target','shotsOnTarget','shots.on_target']),'thesportsdb':stats.shotsOnTarget?.away}),
     shotsOffTarget: statFirst(smStats.shotsOffTargetAway,bsdNum(bsdAway,['shots_off_target','shotsOffTarget','shots.off_target'])) ?? ((smStats.shotsAway != null && smStats.shotsOnTargetAway != null) ? Math.max(0, smStats.shotsAway - smStats.shotsOnTargetAway) : null),
     corners: statFirst(smStats.cornersAway,bsdNum(bsdAway,['corners','corner_kicks'])) ?? (stats.corners?.away ?? null),
-    dangerousAttacks: statFirst(smStats.dangerousAttacksAway,bsdNum(bsdAway,['dangerous_attacks','dangerousAttacks'])) ?? fiveStats?.dangerousAttacks?.away,
-    attacks: statFirst(smStats.attacksAway,bsdNum(bsdAway,['attacks','total_attacks'])) ?? fiveStats?.attacks?.away,
+    dangerousAttacks: routed('livePressure',{'sportmonks':smStats.dangerousAttacksAway,'5dollarfootball':fiveStats?.dangerousAttacks?.away,'bsd':bsdNum(bsdAway,['dangerous_attacks','dangerousAttacks'])}),
+    attacks: routed('livePressure',{'sportmonks':smStats.attacksAway,'5dollarfootball':fiveStats?.attacks?.away,'bsd':bsdNum(bsdAway,['attacks','total_attacks'])}),
     blockedShots: statFirst(smStats.blockedShotsAway,bsdNum(bsdAway,['blocked_shots','blockedShots'])),
     shotsInsideBox: statFirst(smStats.shotsInsideBoxAway,bsdNum(bsdAway,['shots_inside_box','shotsInsideBox'])),
     bigChances: statFirst(smStats.bigChancesAway,bsdNum(bsdAway,['big_chances','bigChances'])),
