@@ -1117,6 +1117,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     calibrationVersion: calibrated.calibrationVersion || modelCalibration.CALIBRATION_VERSION,
       confidenceShrinkage: { evidenceStrength:+evidenceStrength.toFixed(3), playedSample, sportmonksOverallSample:smOverallSample, sportmonksVenueSample:smVenueSample, dataHealthScore },
     marketImpliedProbabilities,
+    marketIntelligence,
+    coherenceDiagnostics: {
+      bttsBounds: marketProbabilities?.scoring ? {
+        lower:+Math.max(0,Number(marketProbabilities.scoring.home||0)+Number(marketProbabilities.scoring.away||0)-100).toFixed(1),
+        upper:+Math.min(Number(marketProbabilities.scoring.home||0),Number(marketProbabilities.scoring.away||0)).toFixed(1),
+        value:Number(marketProbabilities.bttsPercent)
+      } : null,
+      coherent: marketProbabilities?.scoring ? (Number(marketProbabilities.bttsPercent) >= Math.max(0,Number(marketProbabilities.scoring.home||0)+Number(marketProbabilities.scoring.away||0)-100)-0.2 && Number(marketProbabilities.bttsPercent) <= Math.min(Number(marketProbabilities.scoring.home||0),Number(marketProbabilities.scoring.away||0))+0.2) : true
+    },
     marketProbabilities,
     cornerMetrics,
     halfMarkets,
@@ -1154,7 +1163,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     marketOdds: matchOdds,
     marketOddsBoard,
     marketOddsSource: primaryMatchOdds ? 'the-odds-api' : (fiveDollarOdds?.matchOdds ? '5dollarfootball-bet365' : (footballDataMatchOdds ? 'football-data.co.uk' : null)),
-    marketAnchorSource: bsdAnchorOdds ? 'bsd-consensus' : (primaryMatchOdds ? 'the-odds-api' : (fiveDollarOdds?.matchOdds ? '5dollarfootball-bet365' : (footballDataMatchOdds ? 'football-data.co.uk' : null))),
+    marketAnchorSource: fiveDollarOdds?.matchOdds ? '5dollarfootball-bet365' : (bsdAnchorOdds ? 'bsd-consensus' : (primaryMatchOdds ? 'the-odds-api' : (footballDataMatchOdds ? 'football-data.co.uk' : null))),
     sportmonksHistorical,
     sportmonksMarketEvidence: smMarketEvidence,
     bsdEvidence: {
