@@ -3,105 +3,95 @@ const config = require('../config/config');
 const { teamNamesMatch } = require('../utils/textNormalize');
 
 const memory = new Map();
-const TTL_MS = 10 * 60 * 1000;
-const AUTH_BACKOFF_MS = 15 * 60 * 1000;
-const RATE_BACKOFF_MS = 60 * 60 * 1000;
-let unavailableUntil = 0;
-
-function providerAvailable() { return Date.now() >= unavailableUntil; }
-function markUnavailable(status) {
-  if (status === 429) unavailableUntil = Date.now() + RATE_BACKOFF_MS;
-  else if (status === 401 || status === 403) unavailableUntil = Date.now() + AUTH_BACKOFF_MS;
-}
+const DAY_TTL_MS = 10 * 60 * 1000;
 const MISS_TTL_MS = 30 * 60 * 1000;
-const RATE_LIMIT_BACKOFF_MS = 60 * 60 * 1000;
+const RATE_BACKOFF_MS = 60 * 60 * 1000;
+const AUTH_BACKOFF_MS = 15 * 60 * 1000;
 let blockedUntil = 0;
 
-function available() { return enabled() && Date.now() >= blockedUntil; }
-function rememberMiss(key) { memory.set(key, { data:null, miss:true, expires:Date.now()+MISS_TTL_MS }); }
-function backoff(status) {
-  if (status === 429) blockedUntil = Math.max(blockedUntil, Date.now()+RATE_LIMIT_BACKOFF_MS);
+function enabled(){ return Boolean(config.fiveDollarFootball?.key); }
+function available(){ return enabled() && Date.now() >= blockedUntil; }
+function headers(){ return { Authorization: `Bearer ${config.fiveDollarFootball.key}` }; }
+function backoff(status,retryAfter){
+  if(status===429){
+    const retryMs=Math.max(60000,Number(retryAfter||0)*1000||RATE_BACKOFF_MS);
+    blockedUntil=Math.max(blockedUntil,Date.now()+retryMs);
+  } else if(status===401||status===403) blockedUntil=Math.max(blockedUntil,Date.now()+AUTH_BACKOFF_MS);
 }
-
-function enabled() { return Boolean(config.fiveDollarFootball?.key); }
-function headers() { return { Authorization: `Bearer ${config.fiveDollarFootball.key}` }; }
-function pickPrice(block) {
-  if (!block) return null;
+function rememberMiss(key){ memory.set(key,{data:null,miss:true,expires:Date.now()+MISS_TTL_MS}); }
+function stage(block){
+  if(!block)return null;
   return block.closing || block.opening || null;
 }
-function priceFreshness(f){
-  const stamp=f?.oddsUpdatedAt||f?.odds_updated_at||f?.last_update_at||f?.updated_at||null;
-  const age=stamp?Date.now()-Date.parse(stamp):NaN;
-  return {updatedAt:stamp,fresh:Number.isFinite(age)&&age>=0&&age<=6*60*60*1000};
+function fixed25(odds){
+  const ladder=odds?.goal_line_fixed || odds?.goalline_fixed;
+  const rows=Array.isArray(ladder)?ladder:(Array.isArray(ladder?.lines)?ladder.lines:[]);
+  const row=rows.find(x=>Number(x?.line)===2.5);
+  const p=stage(row);
+  if(p&&Number(p.over)>1&&Number(p.under)>1)return {over25:Number(p.over),under25:Number(p.under)};
+  const main=stage(odds?.goal_line||odds?.goalline);
+  if(main&&Number(main.line)===2.5&&Number(main.over)>1&&Number(main.under)>1)
+    return {over25:Number(main.over),under25:Number(main.under)};
+  return null;
 }
-function normalizeFixture(f, homeName, awayName) {
-  if (!f || !teamNamesMatch(f.teams?.home?.name, homeName) || !teamNamesMatch(f.teams?.away?.name, awayName)) return null;
-  const odds = f.odds || {};
-  const h2h = pickPrice(odds['1x2']);
-  const goals = pickPrice(odds.goal_line || odds.goalline);
-  const btts = pickPrice(odds.btts);
-  const matchOdds = h2h && Number(h2h.home)>1 && Number(h2h.draw)>1 && Number(h2h.away)>1
-    ? { home:Number(h2h.home), draw:Number(h2h.draw), away:Number(h2h.away) } : null;
-  const freshness=priceFreshness(f);
-  const marketBoard = {
-    bookmakers: [{ bookmaker:'Bet 365', h2h:matchOdds, totals:goals && Number(goals.line)===2.5 ? {over25:Number(goals.over)||null,under25:Number(goals.under)||null}:null, btts:btts ? {yes:Number(btts.yes)||null,no:Number(btts.no)||null}:null, ...freshness }],
-    bookmakerCount: 1,
-    best: matchOdds ? {home:{bookmaker:'Bet 365',price:matchOdds.home},draw:{bookmaker:'Bet 365',price:matchOdds.draw},away:{bookmaker:'Bet 365',price:matchOdds.away}} : {},
-    btts: btts || null,
+function bttsPair(odds){
+  const p=stage(odds?.btts);
+  return p&&Number(p.yes)>1&&Number(p.no)>1?{yes:Number(p.yes),no:Number(p.no)}:null;
+}
+function oddsBlock(f){
+  if(!f)return {};
+  if(f.odds?.['1x2']||f.odds?.goal_line||f.odds?.goalline||f.odds?.btts)return f.odds;
+  const books=f.odds?.bookmakers||f.bookmakers||[];
+  const b=Array.isArray(books)?(books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0]):null;
+  return b?.odds||{};
+}
+function normalizeFixture(f,homeName,awayName,fetchedAt){
+  if(!f||!teamNamesMatch(f.teams?.home?.name,homeName)||!teamNamesMatch(f.teams?.away?.name,awayName))return null;
+  const odds=oddsBlock(f);
+  const one=stage(odds['1x2']);
+  const matchOdds=one&&Number(one.home)>1&&Number(one.draw)>1&&Number(one.away)>1
+    ? {home:Number(one.home),draw:Number(one.draw),away:Number(one.away)}:null;
+  const totals=fixed25(odds), btts=bttsPair(odds);
+  const fresh=Date.now()-Number(fetchedAt||0)<=DAY_TTL_MS*1.5;
+  const bookmaker={bookmaker:'market',h2h:matchOdds,totals,btts,fresh,updatedAt:fetchedAt?new Date(fetchedAt).toISOString():null};
+  return {
+    fixtureId:String(f.id), matchOdds, totals25:totals, btts,
+    marketBoard:{bookmakers:[bookmaker],bookmakerCount:1},
+    rawOdds:odds, source:'5dollarfootball-market', fetchedAt
   };
-  return { fixtureId:f.id, matchOdds, marketBoard, rawOdds:odds, source:'5dollarfootball-bet365' };
 }
-
-async function getMatchOdds(homeName, awayName, kickoff) {
-  if (!available() || !homeName || !awayName || !kickoff) return null;
-  const d = new Date(kickoff);
-  if (Number.isNaN(d.getTime())) return null;
-  const start = Math.floor(new Date(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())).getTime()/1000);
-  const key = `five-dollar-day:${start}`;
-  let rows = memory.get(key);
-  if (!rows || rows.expires < Date.now()) {
-    try {
-      const response = await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`, {
-        headers: headers(),
-        params: { start_time:start, end_time:start+86400 },
-        timeout: 3500,
-      });
-      rows = { data:Array.isArray(response.data?.data)?response.data.data:[], expires:Date.now()+TTL_MS };
-      memory.set(key, rows);
-    } catch (e) {
-      const status=e.response?.status;
-      backoff(status);
-      if (status===429) console.warn('[5dollar] rate limit reached; fallback skipped');
-      else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; fallback skipped');
-      else console.warn('[5dollar] request failed; fallback skipped');
-      return null;
-    }
+async function getDay(start){
+  const key=`five-dollar-day-v2:${start}`;
+  const cached=memory.get(key);
+  if(cached&&cached.expires>Date.now())return cached;
+  if(!available())return null;
+  try{
+    // Pro supports compound list requests. One request supplies every fixture
+    // in the 24h window plus executable odds; never fan out one odds call/match.
+    const response=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{
+      headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50},timeout:5000
+    });
+    const now=Date.now();
+    const row={data:Array.isArray(response.data?.data)?response.data.data:[],expires:now+DAY_TTL_MS,fetchedAt:now,
+      rate:{limit:response.headers?.['x-ratelimit-limit']||null,remaining:response.headers?.['x-ratelimit-remaining']||null,reset:response.headers?.['x-ratelimit-reset']||null}};
+    memory.set(key,row);
+    return row;
+  }catch(e){
+    const status=e.response?.status;
+    backoff(status,e.response?.headers?.['retry-after']);
+    console.warn('[5dollar]',status===429?'rate limit backoff':status===401||status===403?'auth/plan unavailable':'request failed');
+    return null;
   }
-  const missKey = `five-dollar-miss:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`;
-  const knownMiss = memory.get(missKey);
-  if (knownMiss?.expires > Date.now()) return null;
-  const fixture = rows.data.find(f => teamNamesMatch(f.teams?.home?.name,homeName) && teamNamesMatch(f.teams?.away?.name,awayName));
-  if (!fixture?.id) { rememberMiss(missKey); return null; }
-  const oddsKey = `five-dollar-odds:${fixture.id}`;
-  let oddsRow = memory.get(oddsKey);
-  if (!oddsRow || oddsRow.expires < Date.now()) {
-    try {
-      const response = await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixture.id}/odds`, {
-        headers: headers(), params: { bookmakers:'bet365' }, timeout: 3500,
-      });
-      oddsRow = { data:response.data?.data || null, expires:Date.now()+TTL_MS };
-      memory.set(oddsKey, oddsRow);
-    } catch (e) {
-      const status=e.response?.status;
-      backoff(status);
-      if (status===429) console.warn('[5dollar] rate limit reached; odds fallback skipped');
-      else if (status===401||status===403) console.warn('[5dollar] auth/plan unavailable; odds fallback skipped');
-      else console.warn('[5dollar] odds request failed; fallback skipped');
-      return null;
-    }
-  }
-  const bet365 = oddsRow.data?.bookmakers?.find(b => String(b.slug||'').toLowerCase()==='bet365') || oddsRow.data?.bookmakers?.[0];
-  return normalizeFixture({...fixture, odds:bet365?.odds || {}, oddsUpdatedAt:bet365?.last_update_at||bet365?.updated_at||oddsRow.data?.last_update_at||oddsRow.data?.updated_at},homeName,awayName);
 }
-
-module.exports = { enabled, getMatchOdds, priceFreshness };
+async function getMatchOdds(homeName,awayName,kickoff){
+  if(!available()||!homeName||!awayName||!kickoff)return null;
+  const d=new Date(kickoff); if(Number.isNaN(d.getTime()))return null;
+  const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000);
+  const missKey=`five-dollar-miss-v2:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`;
+  const miss=memory.get(missKey); if(miss?.expires>Date.now())return null;
+  const day=await getDay(start); if(!day)return null;
+  const fixture=day.data.find(x=>teamNamesMatch(x.teams?.home?.name,homeName)&&teamNamesMatch(x.teams?.away?.name,awayName));
+  if(!fixture){rememberMiss(missKey);return null;}
+  return normalizeFixture(fixture,homeName,awayName,day.fetchedAt);
+}
+module.exports={enabled,available,getMatchOdds};
