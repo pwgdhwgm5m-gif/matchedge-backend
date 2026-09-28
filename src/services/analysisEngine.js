@@ -726,6 +726,25 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   } else {
     cornerMetrics = {...cornerMetrics,marketAvailable:false,marketSource:null};
   }
+  // Public/card consumers must never receive legacy fixed-line corner
+  // probabilities as displayable markets. Historical corner projections remain
+  // internal evidence only. The only exposed Over/Under line is BSD marketLine.
+  cornerMetrics = {
+    ...cornerMetrics,
+    over85Percent:null,
+    over95Percent:null,
+    under95Percent:null,
+    rawOver85Percent:null,
+    rawOver95Percent:null,
+    displayMarket: bsdCornerMarket ? {
+      line:Number(bsdCornerMarket.line),
+      overPercent:Number(bsdCornerMarket.overDeVigPercent),
+      underPercent:Number(bsdCornerMarket.underDeVigPercent),
+      overOdds:Number(bsdCornerMarket.over),
+      underOdds:Number(bsdCornerMarket.under),
+      source:'bsd-consensus'
+    } : null
+  };
 
   const oddsRaw = oddsResult.status === 'fulfilled' && oddsResult.value.ok
     ? oddsResult.value.data
