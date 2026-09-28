@@ -10,6 +10,7 @@ const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
+const fiveDollar = require('../services/fiveDollarFootballService');
 
 /**
  * GET /api/results?date=2026-09-09
@@ -40,14 +41,15 @@ router.get('/sportmonks-turkey-diagnostic', async (req, res) => {
 
 router.get('/', async (req, res) => {
   const date = req.query.date || new Date().toISOString().split('T')[0];
-  const [turkeySmResult, smResult, bsdResult, sportsdbDay] = await Promise.all([
+  const [turkeySmResult, smResult, bsdResult, sportsdbDay, fiveDollarDay] = await Promise.all([
     cache.getOrFetch(`sportmonks:tr:600:${date}`, config.cache.ttlLive, () => sportmonks.getLeagueFixturesByDate(date, 600)),
     Promise.race([
       cache.getOrFetch(`sportmonks:date:${date}`, config.cache.ttlLive, () => sportmonks.getFixturesByDate(date)),
       new Promise(resolve => setTimeout(() => resolve({ok:false,error:'sportmonks_date_timeout'}), 5000))
     ]),
     cache.getOrFetch(`bsd:canonical-results:${date}`, 300, () => bsdService.getResultMatchesForDate(date)),
-    cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date))
+    cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date)),
+    fiveDollar.getScoreboardDay(date).catch(()=>({available:false,matches:[]}))
   ]);
 
   const todayKey = new Date().toISOString().slice(0,10);
@@ -124,6 +126,29 @@ router.get('/', async (req, res) => {
       providerIds:{...(live.providerIds||{}),...(old.providerIds||{})}
     };
   }
+  // 5Dollar is a scoreboard enrichment layer: it fills missing FT/HT fields and
+  // provider identity without taking canonical settlement ownership.
+  const fiveRows=fiveDollarDay?.available?(fiveDollarDay.matches||[]):[];
+  const normTeam=x=>competitionRegistry.normalizeTeamIdentity(x||'');
+  const kickoffClose=(a,b)=>{
+    const x=new Date(a?.kickoff||a?.date||0).getTime(),y=new Date(b?.kickoff||b?.date||0).getTime();
+    return !Number.isFinite(x)||!Number.isFinite(y)||Math.abs(x-y)<=6*60*60*1000;
+  };
+  for(const f of fiveRows){
+    const i=canonicalMatches.findIndex(m=>normTeam(m.homeTeam)===normTeam(f.homeTeam)&&normTeam(m.awayTeam)===normTeam(f.awayTeam)&&kickoffClose(m,f));
+    if(i<0){
+      canonicalMatches.push(competitionRegistry.decorateMatch({...f,canonicalProvider:'5dollarfootball',providerIds:{fiveDollar:f.fiveDollarFixtureId}},'5dollarfootball'));
+      continue;
+    }
+    const old=canonicalMatches[i];
+    canonicalMatches[i]={...old,
+      homeScore:old.homeScore??f.homeScore,awayScore:old.awayScore??f.awayScore,
+      halftimeHome:old.halftimeHome??f.halftimeHome,halftimeAway:old.halftimeAway??f.halftimeAway,
+      statusShort:old.statusShort&&old.statusShort!=='NS'?old.statusShort:(f.statusShort||old.statusShort),
+      isFinished:old.isFinished===true||f.isFinished===true,
+      providerIds:{...(old.providerIds||{}),fiveDollar:f.fiveDollarFixtureId}
+    };
+  }
   await sportsDb.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='thesportsdb'));
   await bsdService.attachHalftimeScores(canonicalMatches.filter(m=>String(m.canonicalProvider||'')==='bsd'));
   const matches=canonicalMatches
@@ -135,6 +160,7 @@ router.get('/', async (req, res) => {
     sportmonksCount:sportmonksMatches.length,
     bsdCount:bsdMatches.length,
     sportsdbFallbackCount:sportsdbMatches.length,
+    fiveDollarScoreboardCount:fiveRows.length,
     liveCount:liveRows.length,
     bsdRegistryAvailable:!!bsdResult?.registryAvailable
   });
