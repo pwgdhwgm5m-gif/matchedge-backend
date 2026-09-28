@@ -6,6 +6,7 @@ const sourcePolicy=require('../src/services/sourcePolicyService');
 const cache=require('../src/utils/cache');
 const resultsRouter=require('../src/routes/results');
 const bsd=require('../src/services/bsdService');
+const fiveDollar=require('../src/services/fiveDollarFootballService');
 
 test('every SportsDB whitelist ID has one visible registered competition and a safe analysis route',()=>{
   assert.equal(db.WHITELISTED_LEAGUE_IDS.size,64);
@@ -31,7 +32,7 @@ test('cross-league numeric identity cannot turn a Brazilian row into Italian Ser
 
 test('results use a whitelisted SportsDB fallback when BSD omits a match and keep BSD for a duplicate',async()=>{
   const route=resultsRouter.stack.find(x=>x.route?.path==='/').route.stack.find(x=>x.method==='get').handle;
-  const original={getOrFetch:cache.getOrFetch,tsdbHt:db.attachHalftimeScores,bsdHt:bsd.attachHalftimeScores};
+  const original={getOrFetch:cache.getOrFetch,tsdbHt:db.attachHalftimeScores,bsdHt:bsd.attachHalftimeScores,fiveDay:fiveDollar.getScoreboardDay};
   const fixture={idEvent:'tsdb-brazil-1',idLeague:'4351',strLeague:'Brazilian Serie A',
     dateEvent:'2026-09-25',strTimestamp:'2026-09-25T18:00:00',strHomeTeam:'Flamengo',
     strAwayTeam:'Palmeiras',intHomeScore:'2',intAwayScore:'1',strStatus:'FT'};
@@ -43,7 +44,7 @@ test('results use a whitelisted SportsDB fallback when BSD omits a match and kee
     cache.getOrFetch=async key=>key.startsWith('fixtures:')?{ok:true,data:{events:[fixture]}}:
       key.startsWith('bsd:canonical-results:')?{ok:true,matches:withBsd?[bsdMatch]:[]}:
       {ok:false,fixtures:[]};
-    db.attachHalftimeScores=async()=>{};bsd.attachHalftimeScores=async()=>{};
+    db.attachHalftimeScores=async()=>{};bsd.attachHalftimeScores=async()=>{};fiveDollar.getScoreboardDay=async()=>({available:false,matches:[]});
     const respond=async()=>{
       const res={statusCode:200,json(body){this.body=body;return this},status(code){this.statusCode=code;return this}};
       await route({query:{date:'2026-09-25'}},res);return res.body.matches;
@@ -56,5 +57,5 @@ test('results use a whitelisted SportsDB fallback when BSD omits a match and kee
     assert.equal(preferred[0].homeScore,3);
     assert.equal(preferred[0].providerIds.sportsdb,'tsdb-brazil-1');
   }finally{cache.getOrFetch=original.getOrFetch;db.attachHalftimeScores=original.tsdbHt;
-    bsd.attachHalftimeScores=original.bsdHt;}
+    bsd.attachHalftimeScores=original.bsdHt;fiveDollar.getScoreboardDay=original.fiveDay;}
 });
