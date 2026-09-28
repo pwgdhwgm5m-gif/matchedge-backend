@@ -279,12 +279,23 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   let homeStandingRow = null, awayStandingRow = null;
   if (standingsResult.status === 'fulfilled' && standingsResult.value.ok) {
     const sv = standingsResult.value;
-    if (isSuperLig || isMappedLeague) {
-      const table = sv.table || [];
+    if (isSuperLig || isMappedLeague || sv.available) {
+      let table = sv.table || [];
+      // BSD cup/international competitions expose one table per group.
+      // Select the unique group containing both teams so Nations League A1
+      // never renders another group's standings.
+      if(!table.length && Array.isArray(sv.groups)){
+        const hn=normalizeTeamIdentity(homeTeamName),an=normalizeTeamIdentity(awayTeamName);
+        const matching=sv.groups.filter(g=>{
+          const names=(g.table||[]).map(r=>normalizeTeamIdentity(r.teamName));
+          return names.includes(hn)&&names.includes(an);
+        });
+        if(matching.length===1)table=matching[0].table;
+      }
       standingsTable = table;
       const standingFor=(name,id,source)=>{
         // The table uses TFF/SportsDB IDs, never a SportMonks or BSD ID.
-        const sameProvider=isSuperLig ? source==='tff' : String(source||'').startsWith('sportsdb');
+        const sameProvider=isSuperLig ? source==='tff' : (sv.source==='bsd' ? source==='bsd' : String(source||'').startsWith('sportsdb'));
         if(sameProvider){const row=motivation.findTeamStanding(table,id);if(row)return row;}
         const exact=table.filter(row=>normalizeTeamIdentity(row.teamName)===normalizeTeamIdentity(name));
         return exact.length===1?exact[0]:null;
