@@ -612,8 +612,36 @@ function normalizeConsensusOdds(payload) {
       over25:n(root.over_25_goals),under25:n(root.under_25_goals),
       over35:n(root.over_35_goals),under35:n(root.under_35_goals)
     },
-    btts:{yes:n(root.btts_yes),no:n(root.btts_no)}
+    btts:{yes:n(root.btts_yes),no:n(root.btts_no)},
+    corners:normalizeCornerOdds(root)
   };
+}
+
+function normalizeCornerOdds(root) {
+  const n=v=>{const x=Number(v);return Number.isFinite(x)&&x>1?x:null;};
+  const lines=[];
+  const add=(line,over,under)=>{
+    const o=n(over),u=n(under);
+    if(!(o&&u)) return;
+    const sum=1/o+1/u;
+    lines.push({
+      line:Number(line),over:o,under:u,
+      overDeVigPercent:+(((1/o)/sum)*100).toFixed(1),
+      underDeVigPercent:+(((1/u)/sum)*100).toFixed(1)
+    });
+  };
+  // BSD odds payloads have used both flat and nested corner-total shapes.
+  for(const line of [7.5,8.5,9.5,10.5,11.5,12.5]){
+    const compact=String(line).replace('.','');
+    const nested=root?.corners?.[String(line)] || root?.corner_totals?.[String(line)] || root?.total_corners?.[String(line)] || {};
+    add(line,
+      root?.['over_'+compact+'_corners'] ?? root?.['corners_over_'+compact] ?? nested.over,
+      root?.['under_'+compact+'_corners'] ?? root?.['corners_under_'+compact] ?? nested.under);
+  }
+  if(!lines.length) return null;
+  // Main market line is normally the most balanced two-way price.
+  lines.sort((a,b)=>Math.abs(a.overDeVigPercent-50)-Math.abs(b.overDeVigPercent-50));
+  return {mainLine:lines[0],lines};
 }
 
 async function getFixtureDataBundle(homeTeam,awayTeam,kickoffIso,verifiedBsdEventId) {
