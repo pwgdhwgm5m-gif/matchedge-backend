@@ -162,7 +162,18 @@ function buildMarketBoard({ modelProbabilities, goalMarkets, cornerMetrics, half
       if(!current || Number(odd)>current.odds) priceMap.set(key,{bookmaker,odds:Number(odd),deVigProbability:deVig,overround,verifiedFresh:true});
     }
   };
-  for(const b of books){if(b.fresh!==true)continue;registerBook(b.bookmaker,'1X2',b.h2h);registerBook(b.bookmaker,'TOTALS',b.totals);}
+  for(const b of books){
+    if(b.fresh!==true)continue;
+    registerBook(b.bookmaker,'1X2',b.h2h);
+    registerBook(b.bookmaker,'TOTALS',b.totals);
+    if(b.btts&&Number(b.btts.yes)>1&&Number(b.btts.no)>1){
+      const y=Number(b.btts.yes),n=Number(b.btts.no),sum=1/y+1/n;
+      for(const [key,odd] of [['bttsYes',y],['bttsNo',n]]){
+        const current=priceMap.get(key);
+        if(!current||odd>current.odds)priceMap.set(key,{bookmaker:b.bookmaker,odds:odd,deVigProbability:(1/odd)/sum*100,overround:sum,verifiedFresh:true});
+      }
+    }
+  }
 
   for(const item of candidates){
     const px=priceMap.get(item.key);
