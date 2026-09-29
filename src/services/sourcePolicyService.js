@@ -29,8 +29,8 @@ function oddsSportKeyForCompetition(canonicalCompetitionKey){
 }
 
 const PROVIDER_CHAIN = Object.freeze({
-  subscribed: Object.freeze(['sportmonks','bsd','thesportsdb']),
-  other: Object.freeze(['bsd','thesportsdb'])
+  subscribed: Object.freeze(['sportmonks','5dollarfootball','thesportsdb']),
+  other: Object.freeze(['5dollarfootball','thesportsdb'])
 });
 function providerChain(ctx={}){
   return resolve(ctx) ? [...PROVIDER_CHAIN.subscribed] : [...PROVIDER_CHAIN.other];
@@ -55,8 +55,8 @@ function isBsdCoreLeague({leagueName,country}={}){
 function fieldRouting(ctx={}){
  const core=resolve(ctx);
  return Object.freeze({
-  fixture:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb','5dollarfootball'],
-  result:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb','5dollarfootball'],
+  fixture:core?['sportmonks','5dollarfootball','thesportsdb']:['5dollarfootball','thesportsdb'],
+  result:core?['sportmonks','5dollarfootball','thesportsdb']:['5dollarfootball','thesportsdb'],
   xg:core?['sportmonks','bsd-measured','live-estimate']:['bsd-measured','live-estimate'],
   livePressure:core?['sportmonks','5dollarfootball','bsd','thesportsdb']:['5dollarfootball','bsd','thesportsdb'],
   shots:core?['sportmonks','5dollarfootball','bsd','thesportsdb']:['5dollarfootball','bsd','thesportsdb'],
