@@ -44,11 +44,19 @@ function normalizeMarkets(root,options={}){
  return {h2h,totals:t?{over25:t.a,under25:t.b}:null,btts:yes&&no?{yes,no}:null};
 }
 function normalizeCornerMarket(root,options={}){
+ // Native 5Dollar contract: odds.corner_line.{opening,closing,inplay}
  const ladder=root?.corner_line||root?.corners||root?.corner_kicks||root?.total_corners||root?.corners_total;
- const rows=Array.isArray(ladder)?ladder:Array.isArray(ladder?.lines)?ladder.lines:Object.entries(ladder||{}).map(([k,v])=>typeof v==='object'?{_key:k,...v}:v);
- const candidates=rows.map(row=>{const v=stage(row,options)||row||{},line=Number(v?.line??v?.handicap??v?.total??v?._key);const p=pair(v,['over','over_odds','o'],['under','under_odds','u'],options);return Number.isFinite(line)&&p?{line,over:p.a,under:p.b}:null}).filter(Boolean);
- if(!candidates.length)return null;
- const preferred=candidates.find(x=>[8.5,9.5,10.5].includes(x.line))||candidates.sort((a,b)=>Math.abs(a.line-9.5)-Math.abs(b.line-9.5))[0];
+ if(!ladder)return null;
+ const chosen=stage(ladder,options)||ladder;
+ const directLine=Number(chosen?.line??chosen?.handicap??chosen?.total);
+ const directPair=pair(chosen,['over','over_odds','o'],['under','under_odds','u'],options);
+ let preferred=Number.isFinite(directLine)&&directPair?{line:directLine,over:directPair.a,under:directPair.b}:null;
+ if(!preferred){
+   const rows=Array.isArray(ladder)?ladder:Array.isArray(ladder?.lines)?ladder.lines:[];
+   const candidates=rows.map(row=>{const v=stage(row,options)||row||{},line=Number(v?.line??v?.handicap??v?.total);const p=pair(v,['over','over_odds','o'],['under','under_odds','u'],options);return Number.isFinite(line)&&p?{line,over:p.a,under:p.b}:null}).filter(Boolean);
+   preferred=candidates.find(x=>[8.5,9.5,10.5].includes(x.line))||candidates.sort((a,b)=>Math.abs(a.line-9.5)-Math.abs(b.line-9.5))[0]||null;
+ }
+ if(!preferred)return null;
  const invO=1/preferred.over,invU=1/preferred.under,sum=invO+invU;
  return {...preferred,overDeVigPercent:+(100*invO/sum).toFixed(1),underDeVigPercent:+(100*invU/sum).toFixed(1)};
 }
@@ -244,11 +252,12 @@ async function getMatchOdds(homeName,awayName,kickoff){
  if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}
  // The list include is intentionally compact. The documented single-fixture
  // odds endpoint is the authoritative payload for BTTS and goal_line_fixed.
+ // Always use the documented single-fixture odds endpoint as authoritative.
+ // The day-list include is discovery/cache only and must never decide whether
+ // Bet365 prices are present.
  let normalized=normalizeFixture(f,homeName,awayName,day.fetchedAt);
- if(!normalized?.totals25||!normalized?.btts){
-   const full=await getFullOdds(f.id);
-   if(full)normalized=normalizeFixture({...f,odds:full},homeName,awayName,Date.now());
- }
+ const full=await getFullOdds(f.id);
+ if(full) normalized=normalizeFixture({...f,odds:full},homeName,awayName,Date.now());
  return normalized;
 }
 module.exports={enabled,available,getMatchOdds,getCornerHistoryForMatch,getTeamCornerHistory,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeCornerMarket,normalizeFixture,marketStages};
