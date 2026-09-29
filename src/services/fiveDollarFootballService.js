@@ -202,36 +202,38 @@ async function getStandings(leagueId,season){
 
 
 const CORNER_HISTORY_TTL_MS=6*60*60*1000;
+async function getTeamCornerHistory(teamId,leagueId){
+ if(!teamId||!leagueId)return null;
+ const key=`five-dollar-team-corners-v2:${leagueId}:${teamId}`,cached=memory.get(key);
+ if(cached?.expires>Date.now())return cached.data;
+ const end=Math.floor(Date.now()/1000),start=end-365*86400;
+ const r=await request(`/teams/${teamId}/fixtures`,{status:'finished',order:'desc',page:1,per_page:50,start_time:start,end_time:end},12000);
+ const rows=Array.isArray(r?.data?.data)?r.data.data:[];
+ const samples=[];
+ for(const x of rows){
+   if(String(x?.league?.id||'')!==String(leagueId))continue;
+   const hc=Number(x?.corners?.home),ac=Number(x?.corners?.away);
+   if(!Number.isFinite(hc)||!Number.isFinite(ac))continue;
+   const isHome=String(x?.teams?.home?.id||'')===String(teamId),isAway=String(x?.teams?.away?.id||'')===String(teamId);
+   if(!isHome&&!isAway)continue;
+   samples.push({for:isHome?hc:ac,against:isHome?ac:hc});
+   if(samples.length>=12)break;
+ }
+ const avg=k=>samples.length?samples.reduce((s,x)=>s+x[k],0)/samples.length:null;
+ const data=samples.length>=3?{cornerSample:samples.length,avgCornersFor:+avg('for').toFixed(2),avgCornersAgainst:+avg('against').toFixed(2),teamId:String(teamId),leagueId:String(leagueId)}:null;
+ memory.set(key,{data,expires:Date.now()+CORNER_HISTORY_TTL_MS});return data;
+}
 async function getCornerHistoryForMatch({leagueName,homeName,awayName,kickoff}={}){
  const identity=await resolveLeagueIdentity(leagueName,homeName,awayName,kickoff);
- if(!identity?.leagueId)return {available:false,source:'5dollarfootball-corners'};
- const key=`five-dollar-corner-history-v1:${identity.leagueId}`,cached=memory.get(key);
- let rows=cached?.expires>Date.now()?cached.data:null;
- if(!rows){
-   const end=Math.floor(Date.now()/1000),start=end-180*86400;
-   const params={status:'finished',order:'desc',page:1,per_page:100,start_time:start,end_time:end,include:'stats'};
-   const r=await request(`/leagues/${identity.leagueId}/fixtures`,params,12000);
-   rows=Array.isArray(r?.data?.data)?r.data.data:[];
-   memory.set(key,{data:rows,expires:Date.now()+CORNER_HISTORY_TTL_MS});
- }
- const aggregate=(teamName,teamId)=>{
-   const samples=[];
-   for(const x of rows){
-     const h=x?.teams?.home,a=x?.teams?.away;
-     const home=teamId?String(h?.id||'')===String(teamId):teamNamesMatch(h?.name,teamName);
-     const away=teamId?String(a?.id||'')===String(teamId):teamNamesMatch(a?.name,teamName);
-     if(!home&&!away)continue;
-     const st=normalizeStats(x?.statistics||x?.stats||x),hc=Number(st?.corners?.home),ac=Number(st?.corners?.away);
-     if(!Number.isFinite(hc)||!Number.isFinite(ac))continue;
-     samples.push({for:home?hc:ac,against:home?ac:hc});
-     if(samples.length>=12)break;
-   }
-   if(samples.length<3)return null;
-   const avg=k=>samples.reduce((s,x)=>s+x[k],0)/samples.length;
-   return {cornerSample:samples.length,avgCornersFor:+avg('for').toFixed(2),avgCornersAgainst:+avg('against').toFixed(2)};
- };
- const home=aggregate(homeName,identity.homeTeamId),away=aggregate(awayName,identity.awayTeamId);
- return {available:Boolean(home&&away),home,away,leagueId:String(identity.leagueId),source:'5dollarfootball-corners',fetchedAt:Date.now()};
+ if(!identity?.leagueId||!identity?.homeTeamId||!identity?.awayTeamId)
+   return {available:false,source:'5dollarfootball-corners',identity};
+ const [home,away]=await Promise.all([
+   getTeamCornerHistory(identity.homeTeamId,identity.leagueId),
+   getTeamCornerHistory(identity.awayTeamId,identity.leagueId)
+ ]);
+ return {available:Boolean(home&&away),home,away,leagueId:String(identity.leagueId),
+   providerTeamIds:{home:String(identity.homeTeamId),away:String(identity.awayTeamId)},
+   source:'5dollarfootball-corners',fetchedAt:Date.now()};
 }
 
 async function getMatchOdds(homeName,awayName,kickoff){
@@ -249,4 +251,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getCornerHistoryForMatch,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeCornerMarket,normalizeFixture,marketStages};
+module.exports={enabled,available,getMatchOdds,getCornerHistoryForMatch,getTeamCornerHistory,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeCornerMarket,normalizeFixture,marketStages};
