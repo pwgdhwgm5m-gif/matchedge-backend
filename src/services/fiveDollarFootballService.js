@@ -39,6 +39,32 @@ async function getDay(start){
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar]',e.response?.status===429?'rate limit backoff':e.response?.status===401||e.response?.status===403?'auth/plan unavailable':'request failed');return null}
 }
 
+function kickoffMs(f){return Number(f?.kickoff_ts)*1000||Date.parse(f?.kickoff_utc||f?.start_time||'')}
+function toAnalysisFixture(f){
+ const homeId=String(f?.teams?.home?.id||''),awayId=String(f?.teams?.away?.id||'');
+ return {fixture:{id:String(f.id),date:f.kickoff_utc||f.start_time||null,status:{short:f.status==='finished'?'FT':String(f.status||'').toUpperCase()}},
+  league:{id:String(f?.league?.id||''),name:f?.league?.name||''},teams:{home:{id:homeId,name:f?.teams?.home?.name||''},away:{id:awayId,name:f?.teams?.away?.name||''}},
+  goals:{home:Number.isFinite(Number(f?.goals?.home))?Number(f.goals.home):null,away:Number.isFinite(Number(f?.goals?.away))?Number(f.goals.away):null},
+  corners:{home:Number.isFinite(Number(f?.corners?.home))?Number(f.corners.home):null,away:Number.isFinite(Number(f?.corners?.away))?Number(f.corners.away):null},cards:f?.cards||null,_fiveDollar:true};
+}
+async function getFixturesByDate(date){
+ const d=new Date(String(date)+'T12:00:00Z');if(Number.isNaN(d.getTime()))return {ok:false,error:'invalid_date',matches:[]};
+ const start=Math.floor((d.getTime()-12*3600000)/1000),day=await getDay(start);if(!day)return {ok:false,error:'five_dollar_unavailable',matches:[]};
+ return {ok:true,matches:day.data.map(f=>({fixtureId:String(f.id),fiveDollarFixtureId:String(f.id),homeTeam:f?.teams?.home?.name||'',awayTeam:f?.teams?.away?.name||'',homeTeamId:String(f?.teams?.home?.id||''),awayTeamId:String(f?.teams?.away?.id||''),league:f?.league?.name||'',leagueName:f?.league?.name||'',leagueId:String(f?.league?.id||''),kickoff:f?.kickoff_utc||f?.start_time||null,date:f?.kickoff_utc||f?.start_time||null,status:f?.status||null,homeScore:f?.goals?.home??null,awayScore:f?.goals?.away??null,canonicalProvider:'5dollarfootball',source:'5dollarfootball',providerIds:{fiveDollar:String(f.id)},providerTeamIds:{fiveDollar:{home:String(f?.teams?.home?.id||''),away:String(f?.teams?.away?.id||'')}},fiveDollarLeagueId:String(f?.league?.id||'')})),fetchedAt:day.fetchedAt};
+}
+async function resolveFixture(homeName,awayName,kickoff){
+ if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
+ const start=Math.floor((d.getTime()-12*3600000)/1000),day=await getDay(start);if(!day)return null;const target=d.getTime();
+ const candidates=day.data.filter(x=>teamNamesMatch(x.teams?.home?.name,homeName)&&teamNamesMatch(x.teams?.away?.name,awayName)).sort((a,b)=>Math.abs(kickoffMs(a)-target)-Math.abs(kickoffMs(b)-target));
+ const f=candidates.find(x=>!Number.isFinite(kickoffMs(x))||Math.abs(kickoffMs(x)-target)<=4*3600000);if(!f)return null;
+ return {raw:f,fixtureId:String(f.id),leagueId:String(f?.league?.id||''),homeTeamId:String(f?.teams?.home?.id||''),awayTeamId:String(f?.teams?.away?.id||''),homeTeam:f?.teams?.home?.name||homeName,awayTeam:f?.teams?.away?.name||awayName,kickoff:f?.kickoff_utc||f?.start_time||kickoff};
+}
+async function getTeamFixtures(teamId,{leagueId=null,limit=15}={}){
+ if(!available()||!teamId)return {ok:false,error:'missing_team_id',data:{response:[]}};const key=`five-dollar-team-v1:${teamId}:${leagueId||'all'}:${limit}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
+ try{let rows=[],page=1;while(page<=4&&rows.length<Math.max(limit,15)){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/teams/${teamId}/fixtures`,{headers:headers(),params:{status:'finished',per_page:50,page},timeout:7000});const batch=Array.isArray(r.data?.data)?r.data.data:[];rows.push(...batch);if(r.data?.pagination?.has_more!==true||!batch.length)break;page++}
+  if(leagueId)rows=rows.filter(x=>String(x?.league?.id||'')===String(leagueId));rows=rows.slice(0,limit);const out={ok:rows.length>0,source:'5dollarfootball-team-history',teamId:String(teamId),data:{response:rows.map(toAnalysisFixture)},raw:rows};memory.set(key,{data:out,expires:Date.now()+DAY_TTL_MS});return out;
+ }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,error:`five_dollar_team_${e.response?.status||'failed'}`,data:{response:[]}}}
+}
 async function getFullOdds(fixtureId){
  const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
  try{
@@ -62,4 +88,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture};
+module.exports={enabled,available,getFixturesByDate,resolveFixture,getTeamFixtures,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
