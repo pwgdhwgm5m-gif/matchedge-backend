@@ -156,7 +156,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // Canonical standings policy matches the rest of analysis:
   // six SportMonks leagues keep their existing primary path for now; every
   // other mapped competition (including UEFA) must try BSD before SportsDB.
-  const standingsFetcher = isSuperLig
+  const standingsFetcher = useFiveDollarPrimary && fiveDollarContext?.leagueId
+    ? () => fiveDollarFootball.getStandings(fiveDollarContext.leagueId).then(r=>r?.available?r:sportsdbStandingsFallback())
+    : isSuperLig
     ? () => tffScraper.getStandings().then(table => ({
         ok: true,
         available: table.length > 0,
@@ -244,7 +246,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     const primaryIsBsd = useBsdPrimary;
     if (th?.ok && th.data?.response?.length && th.teamId) {
       const tsdbHomeUsable = stats.summarizeMatches(th.data.response, th.teamId)?.played || 0;
-      const mayFallbackHome = primaryIsBsd ? currentHomeUsable === 0 : tsdbHomeUsable > currentHomeUsable;
+      const mayFallbackHome = (primaryIsBsd || useFiveDollarPrimary) ? currentHomeUsable === 0 : tsdbHomeUsable > currentHomeUsable;
       if (mayFallbackHome && tsdbHomeUsable > 0) {
         homeFixtures = th.data.response;
         internationalHomeTeamId = th.teamId;
@@ -254,7 +256,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
     if (ta?.ok && ta.data?.response?.length && ta.teamId) {
       const tsdbAwayUsable = stats.summarizeMatches(ta.data.response, ta.teamId)?.played || 0;
-      const mayFallbackAway = primaryIsBsd ? currentAwayUsable === 0 : tsdbAwayUsable > currentAwayUsable;
+      const mayFallbackAway = (primaryIsBsd || useFiveDollarPrimary) ? currentAwayUsable === 0 : tsdbAwayUsable > currentAwayUsable;
       if (mayFallbackAway && tsdbAwayUsable > 0) {
         awayFixtures = ta.data.response;
         internationalAwayTeamId = ta.teamId;
@@ -755,7 +757,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // fields that the subscribed SportMonks payload does not provide; elsewhere
   // BSD is the primary rich fixture source. It never overwrites a verified
   // SportMonks field merely because another provider also has it.
-  const bsdBundle = await Promise.race([
+  const bsdBundle = useFiveDollarPrimary ? {available:false,error:'provider_policy_fivedollar_primary'} : await Promise.race([
     bsd.getFixtureDataBundle(homeTeamName,awayTeamName,kickoff,providerIds.bsd),
     new Promise(resolve=>setTimeout(()=>resolve({available:false,error:'timeout'}),3500))
   ]);
@@ -1186,7 +1188,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
           selectedHistoryAudit: { home: internationalHomeHistoryAudit, away: internationalAwayHistoryAudit },
         },
       },
-      bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useBsdPrimary?'primary-outside-sportmonks':'secondary' },
+      bsd: { predictionAvailable:bsdPrediction?.available===true, consensusOddsAvailable:Boolean(bsdConsensus), role:useFiveDollarPrimary?'disabled-by-fivedollar-policy':(useBsdPrimary?'primary-outside-sportmonks':'secondary') },
       calibrationApplied: calibrated.applied,
       architecture:'analysis-v4-historical-shrinkage-ensemble',
       dixonColes:{ rho:+fittedRho.toFixed(4), leagueEstimate:leagueDc, reliability:+dcReliability.toFixed(3), dynamicHomeMultiplier:+dynamicHome.toFixed(4) },
