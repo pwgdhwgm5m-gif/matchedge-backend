@@ -818,14 +818,18 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ...cornerMetrics,
     analysisOnly:true,
     limitedData:!realCornerEvidence,
-    displayMarket: bsdCornerMarket ? {
-      line:Number(bsdCornerMarket.line),
-      overPercent:Number(bsdCornerMarket.overDeVigPercent),
-      underPercent:Number(bsdCornerMarket.underDeVigPercent),
-      overOdds:Number(bsdCornerMarket.over),
-      underOdds:Number(bsdCornerMarket.under),
-      source:'bsd-consensus',
+    displayMarket: fiveDollarCornerMarket ? {
+      line:Number(fiveDollarCornerMarket.line),
+      overPercent:Number(fiveDollarCornerMarket.overDeVigPercent),
+      underPercent:Number(fiveDollarCornerMarket.underDeVigPercent),
+      overOdds:Number(fiveDollarCornerMarket.over),
+      underOdds:Number(fiveDollarCornerMarket.under),
+      source:'5dollarfootball-market',
       type:'market',
+      expectedTotal:Number.isFinite(Number(cornerMetrics.expectedTotal))?Number(cornerMetrics.expectedTotal):null,
+      expectedHome:Number.isFinite(Number(cornerMetrics.expectedHome))?Number(cornerMetrics.expectedHome):null,
+      expectedAway:Number.isFinite(Number(cornerMetrics.expectedAway))?Number(cornerMetrics.expectedAway):null,
+      modelOverPercent:Number.isFinite(Number(cornerMetrics['over'+String(Number(fiveDollarCornerMarket.line)*10).replace('.','')+'Percent']))?Number(cornerMetrics['over'+String(Number(fiveDollarCornerMarket.line)*10).replace('.','')+'Percent']):null,
       projection:cornerLineProjection
     } : (realCornerEvidence ? {
       expectedTotal:Number(cornerMetrics.expectedTotal),
