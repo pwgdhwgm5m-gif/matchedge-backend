@@ -23,10 +23,22 @@ function normalizeTeamName(str) {
   return normalized === 'czechia' ? 'czech republic' : normalized;
 }
 
-/** Iki takim adinin normalize edilince ayni olup olmadigini kontrol eder */
+/** Provider-safe club-name comparison. Provider-native IDs remain authoritative;
+ * this alias layer is only used to resolve that provider's fixture/team IDs. */
+function teamNameCore(str) {
+  const tokens=normalizeTeamName(str).replace(/[^a-z0-9]+/g,' ').trim().split(/\s+/).filter(Boolean);
+  const noise=new Set(['fc','afc','cf','sc','sv','fk','fk','ac','calcio','football','club']);
+  while(tokens.length>1 && noise.has(tokens[0])) tokens.shift();
+  while(tokens.length>1 && noise.has(tokens[tokens.length-1])) tokens.pop();
+  return tokens.join(' ');
+}
 function teamNamesMatch(nameA, nameB) {
   if (!nameA || !nameB) return false;
-  return normalizeTeamName(nameA) === normalizeTeamName(nameB);
+  const a=normalizeTeamName(nameA).replace(/[^a-z0-9]+/g,' ').trim();
+  const b=normalizeTeamName(nameB).replace(/[^a-z0-9]+/g,' ').trim();
+  if(a===b)return true;
+  const ca=teamNameCore(a),cb=teamNameCore(b);
+  return ca.length>=4 && cb.length>=4 && ca===cb;
 }
 
-module.exports = { normalizeTeamName, teamNamesMatch };
+module.exports = { normalizeTeamName, teamNameCore, teamNamesMatch };
