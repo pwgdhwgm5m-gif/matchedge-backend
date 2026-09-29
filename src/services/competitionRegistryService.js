@@ -544,9 +544,9 @@ function normalizeTeamIdentity(value) {
 
 function sourceRank(match, preferBsd = false) {
   const provider = normalizeCompetitionName(match?.canonicalProvider || match?.source || match?.dataSource);
-  if (provider.includes('sportmonks')) return 4;
+  if (provider.includes('sportmonks')) return preferBsd ? 2 : 4;
   if (provider.includes('5dollar') || provider.includes('fivedollar')) return 3;
-  if (provider === 'bsd' || provider.includes('bzzoiro')) return preferBsd ? 3 : 2;
+  if (provider === 'bsd' || provider.includes('bzzoiro')) return preferBsd ? 4 : 2;
   if (provider.includes('sportsdb')) return 1;
   return 0;
 }
