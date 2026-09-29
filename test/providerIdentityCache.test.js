@@ -33,3 +33,13 @@ test('same-day rematches retain separate event IDs while near-time provider alia
   assert.deepEqual((await identity.lookup(rematch)).providerIds,{sportsdb:'db:second'});
   assert.notEqual(identity.keyOf(first),identity.keyOf(rematch));
 });
+
+
+test('5Dollar identities stay in their own fixture and team namespace',async()=>{
+  const row={canonicalCompetitionKey:'netherlands-eerste-divisie',homeTeam:'Almere City',awayTeam:'FC Volendam',kickoff:'2026-10-01T18:00:00Z',canonicalProvider:'5dollarfootball',fixtureId:'50001',homeTeamId:'51001',awayTeamId:'51002'};
+  assert.deepEqual(identity.idsOf(row),{'5dollarfootball':'50001'});
+  assert.deepEqual(identity.teamIdsOf(row),{'5dollarfootball':{home:'51001',away:'51002'}});
+  const sm={...row,canonicalProvider:'sportmonks',fixtureId:'60001',homeTeamId:'61001',awayTeamId:'61002'};
+  assert.deepEqual(identity.idsOf(sm),{sportmonks:'60001'});
+  assert.deepEqual(identity.teamIdsOf(sm),{sportmonks:{home:'61001',away:'61002'}});
+});
