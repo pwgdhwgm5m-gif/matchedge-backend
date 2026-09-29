@@ -33,3 +33,13 @@ test('same-day rematches retain separate event IDs while near-time provider alia
   assert.deepEqual((await identity.lookup(rematch)).providerIds,{sportsdb:'db:second'});
   assert.notEqual(identity.keyOf(first),identity.keyOf(rematch));
 });
+
+
+test('Five Dollar canonical fixture keeps its native fixture and team IDs',async()=>{
+  const base={canonicalCompetitionKey:'usa-mls',homeTeam:'New York Red Bulls',awayTeam:'St. Louis City SC',kickoff:'2026-09-30T23:30:00Z'};
+  const row=registry.decorateMatch({...base,fixtureId:'fd-605013',canonicalProvider:'5dollarfootball',homeTeamId:'fd-home',awayTeamId:'fd-away',providerIds:{fiveDollar:'fd-605013'},providerTeamIds:{fiveDollar:{home:'fd-home',away:'fd-away'}}},'5dollarfootball');
+  await identity.remember(row);
+  const found=await identity.lookup(row);
+  assert.equal(found.providerIds.fiveDollar,'fd-605013');
+  assert.deepEqual(found.providerTeamIds.fiveDollar,{home:'fd-home',away:'fd-away'});
+});

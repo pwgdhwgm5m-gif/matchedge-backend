@@ -6,6 +6,7 @@ const { normalizeTeamIdentity } = require('./competitionRegistryService');
 const provider = value => {
   const v=String(value||'').toLowerCase().replace(/[^a-z]/g,'');
   if(v==='bsd')return 'bsd';
+  if(v.includes('5dollar')||v.includes('fivedollar'))return 'fiveDollar';
   if(v.startsWith('sportmonk'))return 'sportmonks';
   if(v==='tsdb'||v.startsWith('thesportsdb')||v.startsWith('sportsdb'))return 'sportsdb';
   return null;

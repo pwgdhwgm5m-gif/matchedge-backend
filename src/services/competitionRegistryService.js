@@ -414,6 +414,7 @@ function providerKind(value) {
   const key = normalizeCompetitionName(value);
   if (!key) return null;
   if (key.includes('sportmonks')) return 'sportmonks';
+  if (key.includes('5dollar') || key.includes('fivedollar')) return 'fiveDollar';
   if (key === 'bsd' || key.includes('bzzoiro')) return 'bsd';
   if (key.includes('oddsapi') || key.includes('theoddsapievents')) return 'oddsApi';
   if (key.includes('sportsdb') || key.includes('thesportsdb')) return 'sportsdb';

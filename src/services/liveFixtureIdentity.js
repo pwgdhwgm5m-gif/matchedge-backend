@@ -4,6 +4,7 @@ function providerKey(value) {
   const key = String(value || '').toLowerCase().replace(/[^a-z]/g, '');
   if (key === 'tsdb' || key.startsWith('thesportsdb') || key.startsWith('sportsdb')) return 'sportsdb';
   if (key.startsWith('sportmonk')) return 'sportmonks';
+  if (key.includes('5dollar') || key.includes('fivedollar')) return 'fiveDollar';
   return key === 'bsd' ? 'bsd' : null;
 }
 
