@@ -124,11 +124,39 @@ async function getScoreboardDay(date){
 }
 
 
-const STANDINGS_TTL_MS=6*60*60*1000;
+const STANDINGS_TTL_MS=12*60*60*1000, STANDINGS_MISS_TTL_MS=2*60*60*1000, LEAGUE_ID_TTL_MS=7*24*60*60*1000;
 function normalizeStandingsRow(r){
  const gf=Number(r?.goals_for??r?.goals?.for??r?.all?.goals?.for),ga=Number(r?.goals_against??r?.goals?.against??r?.all?.goals?.against);
  return {teamId:r?.team?.id??r?.team_id??null,teamName:r?.team?.name??r?.team_name??'',rank:Number(r?.position??r?.rank)||null,played:Number(r?.played??r?.all?.played)||0,win:Number(r?.win??r?.wins??r?.all?.win)||0,draw:Number(r?.draw??r?.draws??r?.all?.draw)||0,lose:Number(r?.lose??r?.losses??r?.all?.lose)||0,goalsFor:Number.isFinite(gf)?gf:null,goalsAgainst:Number.isFinite(ga)?ga:null,goalDifference:Number(r?.goal_difference??r?.goals_diff??r?.goalsDiff) || (Number.isFinite(gf)&&Number.isFinite(ga)?gf-ga:null),points:Number(r?.points)||0,description:r?.description??null};
 }
+async function resolveLeagueIdByName(leagueName){
+ if(!leagueName)return null;
+ const normalized=String(leagueName).trim().toLowerCase();
+ const key=`five-dollar-league-id-v1:${normalized}`,cached=memory.get(key);
+ if(cached?.expires>Date.now())return cached.value||null;
+ // One lookup per competition per week at most. It shares the same global
+ // 6.5-second queue as live/odds calls, so it can never create a quota burst.
+ const r=await request('/leagues',{search:leagueName,per_page:50},9000);
+ if(!r)return null;
+ const rows=Array.isArray(r.data?.data)?r.data.data:[];
+ const compact=v=>String(v||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+ const target=compact(leagueName);
+ const aliases=target.replace(/^dutch /,'').replace(/^netherlands /,'');
+ const best=rows.find(x=>{const n=compact(x?.name),s=compact(x?.short_name);return n===target||n===aliases||s===target||n.includes(aliases)||aliases.includes(n)});
+ const value=best?.id?String(best.id):null;
+ memory.set(key,{value,expires:Date.now()+(value?LEAGUE_ID_TTL_MS:STANDINGS_MISS_TTL_MS)});
+ return value;
+}
+async function getStandingsByLeagueName(leagueName,season){
+ const missKey=`five-dollar-standings-name-miss-v1:${String(leagueName||'').toLowerCase()}:${season||'current'}`;
+ const miss=memory.get(missKey);if(miss?.expires>Date.now())return {ok:true,available:false,table:[],source:'5dollarfootball'};
+ const leagueId=await resolveLeagueIdByName(leagueName);
+ if(!leagueId){memory.set(missKey,{expires:Date.now()+STANDINGS_MISS_TTL_MS});return {ok:true,available:false,table:[],source:'5dollarfootball'};}
+ const out=await getStandings(leagueId,season);
+ if(!out?.available)memory.set(missKey,{expires:Date.now()+STANDINGS_MISS_TTL_MS});
+ return out;
+}
+
 async function getStandings(leagueId,season){
  if(!leagueId)return {ok:true,available:false,table:[],source:'5dollarfootball'};
  const key=`five-dollar-standings-v1:${leagueId}:${season||'current'}`,cached=memory.get(key);
@@ -156,4 +184,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
+module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsByLeagueName,resolveLeagueIdByName,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
