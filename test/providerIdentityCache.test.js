@@ -43,3 +43,6 @@ test('5Dollar identities stay in their own fixture and team namespace',async()=>
   assert.deepEqual(identity.idsOf(sm),{sportmonks:'60001'});
   assert.deepEqual(identity.teamIdsOf(sm),{sportmonks:{home:'61001',away:'61002'}});
 });
+
+const {teamNamesMatch}=require('../src/utils/textNormalize');
+test('provider alias resolver matches Volendam to FC Volendam without substring guessing',()=>{assert.equal(teamNamesMatch('Volendam','FC Volendam'),true);assert.equal(teamNamesMatch('City','Manchester City'),false);assert.equal(teamNamesMatch('United','Leeds United'),false);});

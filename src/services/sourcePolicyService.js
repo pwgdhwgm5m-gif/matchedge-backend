@@ -68,22 +68,22 @@ function fieldRouting(ctx={}){
   executableOdds:['5dollarfootball'],
   marketMovement:['5dollarfootball'],
   historicalOdds:['5dollarfootball','socceredge-ledger'],
-  h2h:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb'],
-  form:core?['sportmonks','bsd','thesportsdb']:['bsd','thesportsdb']
+  h2h:core?['sportmonks','5dollarfootball','thesportsdb']:['5dollarfootball','thesportsdb'],
+  form:core?['sportmonks','5dollarfootball','thesportsdb']:['5dollarfootball','thesportsdb']
  });
 }
 function policy(ctx={}){
   const core=resolve(ctx),fields=fieldRouting(ctx);
   return core ? {
     tier:'sportmonks-primary', sportmonks:true, sportmonksLeagueId:core.sportmonksId,
-    primary:'sportmonks', secondary:'bsd', fieldFallbacks:fields,
-    marketAnchorPrimary:'5dollarfootball', oddsPrimary:'5dollarfootball', oddsSecondary:'bsd-consensus', supplemental:['bsd','5dollarfootball','thesportsdb','football-data'],
+    primary:'sportmonks', secondary:'5dollarfootball', fieldFallbacks:fields,
+    marketAnchorPrimary:'5dollarfootball', oddsPrimary:'5dollarfootball', oddsSecondary:'bsd-consensus', supplemental:['5dollarfootball','thesportsdb'],
     rule:'Canonical fixtures remain SportMonks-first in the six subscribed leagues. Routing is field-specific: SportMonks owns premium football intelligence/xG, 5Dollar owns executable odds and market movement and supplements live pressure, BSD owns broad non-core coverage/results, SportsDB is fallback. Correlated evidence is deduplicated before blending.'
   } : {
     tier:'non-sportmonks', sportmonks:false, sportmonksLeagueId:null,
-    primary:'bsd', secondary:'thesportsdb', fieldFallbacks:fields,
-    marketAnchorPrimary:'5dollarfootball', oddsPrimary:'5dollarfootball', oddsSecondary:'bsd-consensus', supplemental:['5dollarfootball','bsd','thesportsdb','football-data'],
-    rule:'Outside the six subscribed leagues BSD remains canonical fixture/result owner. 5Dollar is first for executable odds/market movement and first supplemental source for live pressure/shots/possession; SportsDB remains coverage fallback.'
+    primary:'5dollarfootball', secondary:'thesportsdb', fieldFallbacks:fields,
+    marketAnchorPrimary:'5dollarfootball', oddsPrimary:'5dollarfootball', oddsSecondary:'bsd-consensus', supplemental:['thesportsdb'],
+    rule:'Outside the six subscribed leagues 5Dollar is the canonical fixture/team/league, form, H2H, odds, standings and corner-data owner. SportsDB is fallback only.'
   };
 }
 

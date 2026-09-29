@@ -229,6 +229,13 @@ router.get('/:fixtureId', async (req, res) => {
   if(precomputed && (!precomputed.standings || !Array.isArray(precomputed.standings.table) || precomputed.standings.table.length===0)){
     precomputed=null;
   }
+  // Provider-native corner history was introduced after older prematch snapshots.
+  // Do not keep serving a stale "limited data" snapshot for non-SportMonks leagues;
+  // recompute once so 5Dollar league/team IDs can populate real corner samples.
+  if(precomputed && !sourcePolicy.resolve({leagueName}) &&
+     (!precomputed.cornerMetrics || precomputed.cornerMetrics.limitedData===true)){
+    precomputed=null;
+  }
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
       const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider}).catch(()=>null) : null;
