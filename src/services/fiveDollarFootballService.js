@@ -4,7 +4,8 @@ const { teamNamesMatch } = require('../utils/textNormalize');
 
 const memory = new Map();
 const DAY_TTL_MS = 10 * 60 * 1000;
-const MISS_TTL_MS = 30 * 60 * 1000;
+const MISS_TTL_MS = 10 * 60 * 1000;
+const IDENTITY_TTL_MS = 24 * 60 * 60 * 1000;
 const RATE_BACKOFF_MS = 60 * 60 * 1000;
 const AUTH_BACKOFF_MS = 15 * 60 * 1000;
 let blockedUntil = 0;
@@ -76,7 +77,7 @@ async function getDay(start){
     // Pro supports compound list requests. One request supplies every fixture
     // in the 24h window plus executable odds; never fan out one odds call/match.
     const response=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{
-      headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50},timeout:5000
+      headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50,page:1},timeout:7000
     });
     const now=Date.now();
     const row={data:Array.isArray(response.data?.data)?response.data.data:[],expires:now+DAY_TTL_MS,fetchedAt:now,
@@ -90,15 +91,44 @@ async function getDay(start){
     return null;
   }
 }
-async function getMatchOdds(homeName,awayName,kickoff){
-  if(!available()||!homeName||!awayName||!kickoff)return null;
-  const d=new Date(kickoff); if(Number.isNaN(d.getTime()))return null;
-  const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000);
-  const missKey=`five-dollar-miss-v2:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`;
-  const miss=memory.get(missKey); if(miss?.expires>Date.now())return null;
-  const day=await getDay(start); if(!day)return null;
-  const fixture=day.data.find(x=>teamNamesMatch(x.teams?.home?.name,homeName)&&teamNamesMatch(x.teams?.away?.name,awayName));
-  if(!fixture){rememberMiss(missKey);return null;}
-  return normalizeFixture(fixture,homeName,awayName,day.fetchedAt);
+function kickoffMs(f){
+  const raw=f?.kickoff_utc||f?.start_time||f?.date||null;
+  const fromText=raw?Date.parse(raw):NaN;
+  if(Number.isFinite(fromText))return fromText;
+  const ts=Number(f?.kickoff_ts||f?.timestamp);
+  return Number.isFinite(ts)?(ts>1e12?ts:ts*1000):NaN;
 }
-module.exports={enabled,available,getMatchOdds,priceFreshness};
+async function resolveFixtureIdentity(homeName,awayName,kickoff){
+  if(!available()||!homeName||!awayName||!kickoff)return null;
+  const target=Date.parse(kickoff); if(!Number.isFinite(target))return null;
+  const identityKey=`five-dollar-identity-v1:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}:${new Date(target).toISOString()}`;
+  const cached=memory.get(identityKey); if(cached?.expires>Date.now())return cached.data;
+  // Five Dollar fixture queries are limited to 24h. Centre the window on the
+  // actual kickoff so timezone/midnight boundaries cannot hide the fixture.
+  const start=Math.floor((target-12*60*60*1000)/1000);
+  const day=await getDay(start); if(!day)return null;
+  const candidates=day.data.filter(x=>teamNamesMatch(x.teams?.home?.name,homeName)&&teamNamesMatch(x.teams?.away?.name,awayName));
+  const fixture=candidates.sort((a,b)=>{
+    const ak=kickoffMs(a),bk=kickoffMs(b);
+    return Math.abs((Number.isFinite(ak)?ak:target)-target)-Math.abs((Number.isFinite(bk)?bk:target)-target);
+  })[0]||null;
+  if(!fixture){rememberMiss(identityKey);return null;}
+  const actualKickoff=kickoffMs(fixture);
+  if(Number.isFinite(actualKickoff)&&Math.abs(actualKickoff-target)>6*60*60*1000){rememberMiss(identityKey);return null;}
+  const identity={
+    fixtureId:String(fixture.id),
+    leagueId:fixture.league?.id!=null?String(fixture.league.id):null,
+    homeTeamId:fixture.teams?.home?.id!=null?String(fixture.teams.home.id):null,
+    awayTeamId:fixture.teams?.away?.id!=null?String(fixture.teams.away.id):null,
+    fixture
+  };
+  memory.set(identityKey,{data:identity,expires:Date.now()+IDENTITY_TTL_MS});
+  return identity;
+}
+async function getMatchOdds(homeName,awayName,kickoff){
+  const identity=await resolveFixtureIdentity(homeName,awayName,kickoff);
+  if(!identity)return null;
+  const normalized=normalizeFixture(identity.fixture,homeName,awayName,Date.now());
+  return normalized?{...normalized,providerIdentity:{fixtureId:identity.fixtureId,leagueId:identity.leagueId,homeTeamId:identity.homeTeamId,awayTeamId:identity.awayTeamId}}:null;
+}
+module.exports={enabled,available,resolveFixtureIdentity,getMatchOdds,priceFreshness};
