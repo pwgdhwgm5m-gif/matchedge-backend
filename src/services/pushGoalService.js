@@ -64,7 +64,12 @@ function configured() {
 
 async function sendToUsers(userIds, payload) {
   if (!userIds.length || !configured()) return {subscriptions:0,accepted:0};
-  const subs = await PushSubscription.find({ userId: { $in: userIds } }).lean();
+  // Recheck the preference at delivery time so a concurrent opt-out wins.
+  const allowedIds = payload.type === 'strong-goal-signal'
+    ? (await User.find({_id:{$in:userIds},strongGoalNotifications:{$ne:false}}).select('_id').lean()).map(u=>String(u._id))
+    : userIds;
+  if (!allowedIds.length) return {subscriptions:0,accepted:0};
+  const subs = await PushSubscription.find({ userId: { $in: allowedIds } }).lean();
   const outcomes=await Promise.allSettled(subs.map(async s => {
     try {
       await webpush.sendNotification(
@@ -201,12 +206,15 @@ async function processStrongGoalFixtures(tracked,fixtures,source,fetchedAt=Date.
       const stateKey=hist.key+':'+side,state=signalStates.get(stateKey);
       if(!sig.qualified){signalStates.set(stateKey,{strong:false,lastSent:state?.lastSent||0});continue}
       if(state?.strong||now-(state?.lastSent||0)<GOAL_SIGNAL_RESET_MS)continue;
+      const allowed=new Set((await User.find({_id:{$in:[...recipients.keys()]},strongGoalNotifications:{$ne:false}})
+        .select('_id').lean()).map(u=>String(u._id)));
+      if(!allowed.size)continue;
       const phase=Math.floor(now/GOAL_SIGNAL_RESET_MS);
       const eventId='strong-goal-signal:'+hist.key+':'+side+':'+phase;
       if(!await claimPushEvent(eventId,'strong-goal-signal')){signalStates.set(stateKey,{strong:true,lastSent:now});continue}
       signalStates.set(stateKey,{strong:true,lastSent:now});
       const byFixture=new Map();
-      for(const [userId,fixtureId] of recipients){if(!byFixture.has(fixtureId))byFixture.set(fixtureId,[]);byFixture.get(fixtureId).push(userId)}
+      for(const [userId,fixtureId] of recipients){if(!allowed.has(userId))continue;if(!byFixture.has(fixtureId))byFixture.set(fixtureId,[]);byFixture.get(fixtureId).push(userId)}
       let accepted=0,subscriptions=0;
       for(const [fixtureId,userIds] of byFixture){
         const delivery=await sendToUsers(userIds,{type:'strong-goal-signal',eventId,fixtureId,title:'⚡ STRONG GOAL SIGNAL',body:team+(minute==null?'':(' · '+minute+"'")),homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,signalTeam:team,minute,signalScore:sig.score,url:'/canli-simulator.html?fixtureId='+encodeURIComponent(fixtureId)});
