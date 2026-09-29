@@ -4,9 +4,10 @@ const cache = require('../utils/cache');
 const { normalizeTeamIdentity } = require('./competitionRegistryService');
 
 const provider = value => {
-  const v=String(value||'').toLowerCase().replace(/[^a-z]/g,'');
+  const raw=String(value||'').toLowerCase();
+  const v=raw.replace(/[^a-z]/g,'');
+  if(raw.includes('5dollar')||v==='fivedollar'||v==='fivedollarfootball')return '5dollarfootball';
   if(v==='bsd')return 'bsd';
-  if(v==='5dollar'||v==='fivedollar'||v==='5dollarfootball'||v==='fivedollarfootball')return '5dollarfootball';
   if(v.startsWith('sportmonk'))return 'sportmonks';
   if(v==='tsdb'||v.startsWith('thesportsdb')||v.startsWith('sportsdb'))return 'sportsdb';
   return null;
