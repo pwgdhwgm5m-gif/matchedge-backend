@@ -17,6 +17,7 @@ const {hasTrackedSportmonksFixture,sportmonksGoalMatches}=require('./goalPushSou
 const {runGoalSources}=require('./goalSourceRunner');
 const {canonicalSignalFixture}=require('./canonicalSignalFixture');
 const {sameTeam,sameLiveFixture}=require('./liveSignalIdentity');
+const {liveMinute,signalTiming}=require('./liveSignalTiming');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -31,7 +32,6 @@ const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
 let lastTrackedLiveAt = 0;
 const lastSignalStatusAt = new Map();
-let signalDebugLogged = false;
 function signalStatus(fields){
   const now=Date.now(),key=fields.source||fields.reason||'unknown';
   if(now-(lastSignalStatusAt.get(key)||0)<5*60*1000)return;
@@ -144,18 +144,13 @@ function usersForTrackedMatch(tracked, match, fixtureId, couponsOnly=false){
 }
 
 
-function liveMinute(f){
-  const candidates=[f?.minute,f?.time?.minute,f?.timer?.minute,f?.status?.minute,f?.elapsed];
-  for(const v of candidates){const n=Number(v);if(Number.isFinite(n)&&n>=0&&n<=130)return Math.round(n)}
-  return null;
-}
 function liveTeamNames(f){
   return {homeTeam:f?.teams?.home?.name||f?.home_team?.name||f?.homeTeam||'',awayTeam:f?.teams?.away?.name||f?.away_team?.name||f?.awayTeam||''};
 }
 function liveScore(f){
   const s=f?.scores||f?.score||{};
   const cur=s.current||s.live||s.fulltime||s.full_time||s;
-  const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
+  const n=v=>{if(v==null||v==='')return null;const x=Number(v);return Number.isFinite(x)?x:null};
   return {home:n(cur?.home??f?.goals?.home??f?.home_score),away:n(cur?.away??f?.goals?.away??f?.away_score)};
 }
 function statSide(stats,key,side){const n=Number(stats?.[key]?.[side]);return Number.isFinite(n)?n:0}
@@ -167,7 +162,7 @@ function signalFixtureKey(f){
 function pushSignalSample(f,now=Date.now()){
   const key=signalFixtureKey(f),stats=f.normalizedStats||fiveDollar.normalizeStats(f.statistics);
   const score=liveScore(f),minute=liveMinute(f);
-  if(!key||!stats||minute==null)return null;
+  if(!key||!stats)return null;
   const sample={at:now,minute,score,home:{da:statSide(stats,'dangerousAttacks','home'),sot:statSide(stats,'shotsOnTarget','home'),soff:statSide(stats,'shotsOffTarget','home'),att:statSide(stats,'attacks','home'),poss:statSide(stats,'possession','home')},away:{da:statSide(stats,'dangerousAttacks','away'),sot:statSide(stats,'shotsOnTarget','away'),soff:statSide(stats,'shotsOffTarget','away'),att:statSide(stats,'attacks','away'),poss:statSide(stats,'possession','away')},coverage:Object.fromEntries(['home','away'].map(side=>[side,{da:observedStat(stats,'dangerousAttacks',side),sot:observedStat(stats,'shotsOnTarget',side)}]))};
   const rows=(goalSignalHistory.get(key)||[]).filter(x=>now-x.at<=GOAL_SIGNAL_HISTORY_MS);
   rows.push(sample);goalSignalHistory.set(key,rows);return {key,rows,sample};
@@ -195,8 +190,8 @@ async function processStrongGoalFixtures(tracked,fixtures,source){
   const favorites=(tracked.trackedRows||[]).filter(x=>!x.coupon);
   const status={source,available:true,fixtures:fixtures.length,trackedFavorites:favorites.length,nameMatches:0,identityMatches:0,matched:0,sampled:0,qualified:0,accepted:0};
   for(const f of fixtures){
-    const teams=liveTeamNames(f),minute=liveMinute(f);
-    if(!teams.homeTeam||!teams.awayTeam||minute==null||minute<10||minute>88)continue;
+    const teams=liveTeamNames(f),timing=signalTiming(f,now),minute=timing.minute;
+    if(!teams.homeTeam||!teams.awayTeam||!timing.eligible)continue;
     const match={homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,kickoff:Number(f.kickoff_ts)?new Date(Number(f.kickoff_ts)*1000).toISOString():(f.kickoff_utc||f.start_time),source};
     if(favorites.some(row=>sameTeam(row.homeTeam,match.homeTeam)&&sameTeam(row.awayTeam,match.awayTeam)))status.nameMatches++;
     if((tracked.identities||[]).some(row=>(source==='5dollar'?sameLiveFixture:sameFixture)(row,match)))status.identityMatches++;
@@ -226,7 +221,7 @@ async function processStrongGoalFixtures(tracked,fixtures,source){
       for(const [userId,fixtureId] of recipients){if(!byFixture.has(fixtureId))byFixture.set(fixtureId,[]);byFixture.get(fixtureId).push(userId)}
       let accepted=0,subscriptions=0;
       for(const [fixtureId,userIds] of byFixture){
-        const delivery=await sendToUsers(userIds,{type:'strong-goal-signal',eventId,fixtureId,title:'⚡ STRONG GOAL SIGNAL',body:team+' · '+minute+"'",homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,signalTeam:team,minute,signalScore:sig.score,url:'/canli-simulator.html?fixtureId='+encodeURIComponent(fixtureId)});
+        const delivery=await sendToUsers(userIds,{type:'strong-goal-signal',eventId,fixtureId,title:'⚡ STRONG GOAL SIGNAL',body:team+(minute==null?'':(' · '+minute+"'")),homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,signalTeam:team,minute,signalScore:sig.score,url:'/canli-simulator.html?fixtureId='+encodeURIComponent(fixtureId)});
         accepted+=delivery.accepted;subscriptions+=delivery.subscriptions;
       }
       status.accepted+=accepted;
@@ -235,15 +230,6 @@ async function processStrongGoalFixtures(tracked,fixtures,source){
   }
   for(const [k,rows] of goalSignalHistory)if(!rows.length||now-rows[rows.length-1].at>GOAL_SIGNAL_HISTORY_MS)goalSignalHistory.delete(k);
   for(const [k,state] of signalStates)if(!goalSignalHistory.has(k.slice(0,k.lastIndexOf(':')))&&now-state.lastSent>GOAL_SIGNAL_HISTORY_MS)signalStates.delete(k);
-  if(source==='5dollar'&&!signalDebugLogged&&status.matched===0){
-    signalDebugLogged=true;
-    console.log('[push/signal-match-debug]',JSON.stringify({
-      favorites:favorites.map(row=>({home:row.homeTeam,away:row.awayTeam})),
-      live:fixtures.map(row=>({home:liveTeamNames(row).homeTeam,away:liveTeamNames(row).awayTeam,
-        kickoff:row.kickoff_ts||row.kickoff_utc||row.start_time||null})),
-      identities:(tracked.identities||[]).map(row=>({home:row.home,away:row.away,kickoff:row.kickoff}))
-    }));
-  }
   signalStatus(status);
 }
 async function checkStrongGoalSignals(tracked){
