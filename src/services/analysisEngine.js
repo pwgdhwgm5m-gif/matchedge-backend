@@ -782,18 +782,24 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? {available:true,eventId:bsdBundle.eventId,source:'bsd',markets:bsdBundle.prediction.markets||null,recommendations:bsdBundle.prediction.recommendations||null,model:bsdBundle.prediction.model||null}
     : {available:false,error:bsdBundle?.error||'prediction_unavailable'};
   const bsdConsensus = bsdBundle?.consensusOdds || null;
-  // Corner display follows BSD's actual bookmaker consensus line. Do not
-  // manufacture a fixed 9.5 market when BSD has no two-way corner price.
-  const bsdCornerMarket = bsdConsensus?.fresh ? bsdConsensus?.corners?.mainLine : null;
-  if (bsdCornerMarket) {
+  // Reuse the cached 5Dollar day/odds bundle for both normal markets and
+  // corners. This call is intentionally made once per analysis request.
+  const fiveDollarOdds = (homeTeamName && awayTeamName)
+    ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
+    : null;
+  // Corner display uses the real 5Dollar two-way market line when present.
+  // Never manufacture a fixed 8.5/9.5/10.5 line. Existing historical corner
+  // evidence remains analysis-only and is not added back to coupon markets.
+  const fiveDollarCornerMarket = fiveDollarOdds?.cornerMarket || null;
+  if (fiveDollarCornerMarket) {
     cornerMetrics = {
       ...cornerMetrics,
-      marketLine:Number(bsdCornerMarket.line),
-      marketOverOdds:Number(bsdCornerMarket.over),
-      marketUnderOdds:Number(bsdCornerMarket.under),
-      marketOverPercent:Number(bsdCornerMarket.overDeVigPercent),
-      marketUnderPercent:Number(bsdCornerMarket.underDeVigPercent),
-      marketSource:'bsd-consensus',
+      marketLine:Number(fiveDollarCornerMarket.line),
+      marketOverOdds:Number(fiveDollarCornerMarket.over),
+      marketUnderOdds:Number(fiveDollarCornerMarket.under),
+      marketOverPercent:Number(fiveDollarCornerMarket.overDeVigPercent),
+      marketUnderPercent:Number(fiveDollarCornerMarket.underDeVigPercent),
+      marketSource:'5dollarfootball-market',
       marketAvailable:true
     };
   } else {
@@ -861,9 +867,6 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // The bookmaker lookup is day-cached and fails open when unavailable.
   const bsdAnchorOdds = bsdConsensus?.fresh && bsdConsensus?.h2h?.home && bsdConsensus?.h2h?.draw && bsdConsensus?.h2h?.away
     ? bsdConsensus.h2h : null;
-  const fiveDollarOdds = (homeTeamName && awayTeamName)
-    ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
-    : null;
   if (!marketOddsBoard && fiveDollarOdds?.marketBoard) marketOddsBoard = fiveDollarOdds.marketBoard;
 
   // Football-Data remains the final additive odds fallback.
