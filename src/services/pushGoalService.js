@@ -18,6 +18,7 @@ const {runGoalSources}=require('./goalSourceRunner');
 const {canonicalSignalFixture}=require('./canonicalSignalFixture');
 const {sameTeam,sameLiveFixture}=require('./liveSignalIdentity');
 const {liveMinute,signalTiming}=require('./liveSignalTiming');
+const {goalProximitySignal,confirmedGoalProximity}=require('./goalProximitySignal');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -153,39 +154,25 @@ function liveScore(f){
   const n=v=>{if(v==null||v==='')return null;const x=Number(v);return Number.isFinite(x)?x:null};
   return {home:n(cur?.home??f?.goals?.home??f?.home_score),away:n(cur?.away??f?.goals?.away??f?.away_score)};
 }
-function statSide(stats,key,side){const n=Number(stats?.[key]?.[side]);return Number.isFinite(n)?n:0}
-function observedStat(stats,key,side){const value=stats?.[key]?.[side];return value!=null&&value!==''&&Number.isFinite(Number(value))}
 function signalFixtureKey(f){
   const t=liveTeamNames(f),kick=Number(f?.kickoff_ts)||Math.floor(Date.parse(f?.kickoff_utc||f?.start_time||'')/1000);
   return [normalizeTeam(t.homeTeam),normalizeTeam(t.awayTeam),Number.isFinite(kick)?Math.round(kick/900):''].join(':');
 }
-function pushSignalSample(f,now=Date.now()){
+function pushSignalSample(f,now=Date.now(),fetchedAt=now,source='5dollar'){
   const key=signalFixtureKey(f),stats=f.normalizedStats||fiveDollar.normalizeStats(f.statistics);
   const score=liveScore(f),minute=liveMinute(f);
   if(!key||!stats)return null;
-  const sample={at:now,minute,score,home:{da:statSide(stats,'dangerousAttacks','home'),sot:statSide(stats,'shotsOnTarget','home'),soff:statSide(stats,'shotsOffTarget','home'),att:statSide(stats,'attacks','home'),poss:statSide(stats,'possession','home')},away:{da:statSide(stats,'dangerousAttacks','away'),sot:statSide(stats,'shotsOnTarget','away'),soff:statSide(stats,'shotsOffTarget','away'),att:statSide(stats,'attacks','away'),poss:statSide(stats,'possession','away')},coverage:Object.fromEntries(['home','away'].map(side=>[side,{da:observedStat(stats,'dangerousAttacks',side),sot:observedStat(stats,'shotsOnTarget',side)}]))};
+  const {proximity,qualified}=goalProximitySignal(stats,{
+    minute,homeScore:score.home,awayScore:score.away,recentEvents:f.normalizedEvents||[]
+  });
+  const sample={at:now,fetchedAt,source,minute,score,proximity,qualified};
   const rows=(goalSignalHistory.get(key)||[]).filter(x=>now-x.at<=GOAL_SIGNAL_HISTORY_MS);
-  rows.push(sample);goalSignalHistory.set(key,rows);return {key,rows,sample};
+  // The 5Dollar response is shared for 20 seconds across monitor cycles.
+  // Count one actual feed response as one observation.
+  if(!rows.some(x=>x.source===source&&x.fetchedAt===fetchedAt))rows.push(sample);
+  goalSignalHistory.set(key,rows);return {key,rows:rows.filter(x=>x.source===source),sample};
 }
-function delta(a,b,k){return Math.max(0,Number(b?.[k]||0)-Number(a?.[k]||0))}
-function strongGoalSignal(side,opp,old,cur,minutes){
-  const da=delta(old[side],cur[side],'da'),sot=delta(old[side],cur[side],'sot'),shots=sot+delta(old[side],cur[side],'soff'),att=delta(old[side],cur[side],'att');
-  const oppDa=delta(old[opp],cur[opp],'da'),oppSot=delta(old[opp],cur[opp],'sot');
-  const poss=Number(cur[side].poss||0),scale=Math.max(.65,Math.min(2.2,5/Math.max(1,minutes)));
-  // Recent-window consensus. SOT and dangerous-attack acceleration dominate;
-  // shots/attacks/possession only support the signal and cannot trigger it alone.
-  let score=0;
-  score+=Math.min(38,sot*19*scale);
-  score+=Math.min(30,da*3.0*scale);
-  score+=Math.min(12,Math.max(0,shots-sot)*4*scale);
-  score+=Math.min(8,att*.7*scale);
-  if(poss>=58)score+=5;if(poss>=65)score+=3;
-  if(da>=Math.max(4,oppDa*1.7))score+=6;
-  if(sot>=2&&sot>oppSot)score+=8;
-  const consensus=sot>=2&&da>=4&&shots>=3;
-  return {score:Math.round(Math.min(100,score)),qualified:consensus&&score>=82,metrics:{da,sot,shots,att,poss}};
-}
-async function processStrongGoalFixtures(tracked,fixtures,source){
+async function processStrongGoalFixtures(tracked,fixtures,source,fetchedAt=Date.now()){
   const now=Date.now();
   const favorites=(tracked.trackedRows||[]).filter(x=>!x.coupon);
   const status={source,available:true,fixtures:fixtures.length,trackedFavorites:favorites.length,nameMatches:0,identityMatches:0,matched:0,sampled:0,qualified:0,accepted:0};
@@ -198,18 +185,19 @@ async function processStrongGoalFixtures(tracked,fixtures,source){
     const recipients=signalFavoriteRecipients(tracked,match,String(f.id));
     if(!recipients.size)continue;
     status.matched++;
-    const hist=pushSignalSample(f,now);if(!hist||hist.rows.length<2)continue;
-    const old=[...hist.rows].reverse().find(x=>hist.sample.at-x.at>=4*60*1000)||hist.rows[0];
-    const mins=Math.max(1,(hist.sample.at-old.at)/60000);
-    if(mins<3.5)continue;
+    const hist=pushSignalSample(f,now,fetchedAt,source);if(!hist||hist.rows.length<2)continue;
+    const previous=hist.rows[hist.rows.length-2];
     status.sampled++;
-    const currentScore=hist.sample.score,oldScore=old.score;
+    const currentScore=hist.sample.score,oldScore=previous.score;
     const goalChanged=currentScore.home!=null&&oldScore.home!=null&&(currentScore.home!==oldScore.home||currentScore.away!==oldScore.away);
-    if(goalChanged){for(const side of ['home','away'])signalStates.delete(hist.key+':'+side);continue}
-    for(const [side,opp,team] of [['home','away',teams.homeTeam],['away','home',teams.awayTeam]]){
-      if(!old.coverage?.[side]?.da||!old.coverage?.[side]?.sot||!hist.sample.coverage?.[side]?.da||!hist.sample.coverage?.[side]?.sot)continue;
-      const sig=strongGoalSignal(side,opp,old,hist.sample,mins);
-      if(sig.qualified)status.qualified++;
+    if(goalChanged){for(const side of ['home','away']){
+      const key=hist.key+':'+side,state=signalStates.get(key);
+      signalStates.set(key,{strong:false,lastSent:state?.lastSent||now});
+    }continue}
+    for(const [side,team] of [['home',teams.homeTeam],['away',teams.awayTeam]]){
+      const qualified=confirmedGoalProximity(previous,hist.sample,side);
+      if(qualified)status.qualified++;
+      const sig={score:hist.sample.proximity[side],qualified,metrics:{goalProximity:hist.sample.proximity,source}};
       const stateKey=hist.key+':'+side,state=signalStates.get(stateKey);
       if(!sig.qualified){signalStates.set(stateKey,{strong:false,lastSent:state?.lastSent||0});continue}
       if(state?.strong||now-(state?.lastSent||0)<GOAL_SIGNAL_RESET_MS)continue;
@@ -239,7 +227,7 @@ async function checkStrongGoalSignals(tracked){
   }
   const intel=await fiveDollar.getLiveIntelligence();
   if(!intel?.available){signalStatus({source:'5dollar',available:false,configured:true,reason:'request-unavailable'});return}
-  await processStrongGoalFixtures(tracked,intel.fixtures||[],'5dollar');
+  await processStrongGoalFixtures(tracked,intel.fixtures||[],'5dollar',intel.fetchedAt);
 }
 
 
