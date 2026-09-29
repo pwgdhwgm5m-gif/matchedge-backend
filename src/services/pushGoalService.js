@@ -28,6 +28,13 @@ const GOAL_SIGNAL_RESET_MS = 15 * 60 * 1000;
 const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
 let lastTrackedLiveAt = 0;
+let lastSignalStatusAt = 0;
+function signalStatus(fields){
+  const now=Date.now();
+  if(now-lastSignalStatusAt<5*60*1000)return;
+  lastSignalStatusAt=now;
+  console.log('[push/signal-status]',JSON.stringify(fields));
+}
 
 function goalEventKey(fixtureId, home, away) {
   return `${String(fixtureId)}:${Number(home)}-${Number(away)}`;
@@ -180,25 +187,32 @@ function strongGoalSignal(side,opp,old,cur,minutes){
   return {score:Math.round(Math.min(100,score)),qualified:consensus&&score>=82,metrics:{da,sot,shots,att,poss}};
 }
 async function checkStrongGoalSignals(tracked){
-  if(!fiveDollar.available())return;
+  if(!fiveDollar.available()){
+    signalStatus({source:'5dollar',available:false,configured:fiveDollar.enabled(),trackedFavorites:(tracked.trackedRows||[]).filter(x=>!x.coupon).length});
+    return;
+  }
   const intel=await fiveDollar.getLiveIntelligence();
-  if(!intel?.available)return;
+  if(!intel?.available){signalStatus({source:'5dollar',available:false,configured:true,reason:'request-unavailable'});return}
   const now=Date.now();
+  const status={source:'5dollar',available:true,fixtures:(intel.fixtures||[]).length,trackedFavorites:(tracked.trackedRows||[]).filter(x=>!x.coupon).length,matched:0,sampled:0,qualified:0,accepted:0};
   for(const f of intel.fixtures||[]){
     const teams=liveTeamNames(f),minute=liveMinute(f);
     if(!teams.homeTeam||!teams.awayTeam||minute==null||minute<10||minute>88)continue;
     const match={homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,kickoff:Number(f.kickoff_ts)?new Date(Number(f.kickoff_ts)*1000).toISOString():(f.kickoff_utc||f.start_time)};
     const recipients=signalFavoriteRecipients(tracked,match,String(f.id));
     if(!recipients.size)continue;
+    status.matched++;
     const hist=pushSignalSample(f,now);if(!hist||hist.rows.length<2)continue;
     const old=[...hist.rows].reverse().find(x=>hist.sample.at-x.at>=4*60*1000)||hist.rows[0];
     const mins=Math.max(1,(hist.sample.at-old.at)/60000);
     if(mins<3.5)continue;
+    status.sampled++;
     const currentScore=hist.sample.score,oldScore=old.score;
     const goalChanged=currentScore.home!=null&&oldScore.home!=null&&(currentScore.home!==oldScore.home||currentScore.away!==oldScore.away);
     if(goalChanged){for(const side of ['home','away'])signalStates.delete(hist.key+':'+side);continue}
     for(const [side,opp,team] of [['home','away',teams.homeTeam],['away','home',teams.awayTeam]]){
       const sig=strongGoalSignal(side,opp,old,hist.sample,mins);
+      if(sig.qualified)status.qualified++;
       const stateKey=hist.key+':'+side,state=signalStates.get(stateKey);
       if(!sig.qualified){signalStates.set(stateKey,{strong:false,lastSent:state?.lastSent||0});continue}
       if(state?.strong||now-(state?.lastSent||0)<GOAL_SIGNAL_RESET_MS)continue;
@@ -213,11 +227,13 @@ async function checkStrongGoalSignals(tracked){
         const delivery=await sendToUsers(userIds,{type:'strong-goal-signal',eventId,fixtureId,title:'⚡ STRONG GOAL SIGNAL',body:team+' · '+minute+"'",homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,signalTeam:team,minute,signalScore:sig.score,url:'/canli-simulator.html?fixtureId='+encodeURIComponent(fixtureId)});
         accepted+=delivery.accepted;subscriptions+=delivery.subscriptions;
       }
+      status.accepted+=accepted;
       console.log('[push/strong-goal-signal]',JSON.stringify({fixtureId:String(f.id),team,minute,score:sig.score,metrics:sig.metrics,users:recipients.size,subscriptions,accepted}));
     }
   }
   for(const [k,rows] of goalSignalHistory)if(!rows.length||now-rows[rows.length-1].at>GOAL_SIGNAL_HISTORY_MS)goalSignalHistory.delete(k);
   for(const [k,state] of signalStates)if(!goalSignalHistory.has(k.slice(0,k.lastIndexOf(':')))&&now-state.lastSent>GOAL_SIGNAL_HISTORY_MS)signalStates.delete(k);
+  signalStatus(status);
 }
 
 
@@ -228,7 +244,7 @@ async function checkGoals() {
   try {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     const tracked = await withProviderAliases(await trackedUsersByFixture());
-    if (!tracked.all.size) return;
+    if (!tracked.all.size){signalStatus({reason:'no-tracked-matches',trackedFavorites:0});return}
     try{await checkStrongGoalSignals(tracked)}catch(e){console.warn('[push/strong-goal-signal]',e.message)}
     // Refresh more often around a tracked kickoff and while a tracked match
     // is live. The shared BSD request budget still limits all requests.
