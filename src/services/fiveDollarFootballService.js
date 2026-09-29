@@ -156,7 +156,7 @@ async function resolveLeagueIdentity(leagueName,homeName,awayName,kickoff){
  if(homeName&&awayName&&kickoff){
    const d=new Date(kickoff);
    if(!Number.isNaN(d.getTime())){
-     const day=await getDay(Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000));
+     const day=await getDay(Math.floor((d.getTime()-12*60*60*1000)/1000));
      const target=d.getTime();
      const fixture=day?.data?.find(x=>{
        const k=Number(x.kickoff_ts)*1000||Date.parse(x.kickoff_utc||x.start_time||'');
@@ -246,7 +246,7 @@ async function getCornerHistoryForMatch({leagueName,homeName,awayName,kickoff}={
 
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
- const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
+ const start=Math.floor((d.getTime()-12*60*60*1000)/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
  const day=await getDay(start);if(!day)return null;const target=d.getTime();
  const f=day.data.find(x=>{if(!teamNamesMatch(x.teams?.home?.name,homeName)||!teamNamesMatch(x.teams?.away?.name,awayName))return false;const k=Number(x.kickoff_ts)*1000||Date.parse(x.kickoff_utc||x.start_time||'');return !Number.isFinite(k)||Math.abs(k-target)<=4*60*60*1000});
  if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}
