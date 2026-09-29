@@ -31,6 +31,7 @@ const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
 let lastTrackedLiveAt = 0;
 const lastSignalStatusAt = new Map();
+let signalDebugLogged = false;
 function signalStatus(fields){
   const now=Date.now(),key=fields.source||fields.reason||'unknown';
   if(now-(lastSignalStatusAt.get(key)||0)<5*60*1000)return;
@@ -234,6 +235,15 @@ async function processStrongGoalFixtures(tracked,fixtures,source){
   }
   for(const [k,rows] of goalSignalHistory)if(!rows.length||now-rows[rows.length-1].at>GOAL_SIGNAL_HISTORY_MS)goalSignalHistory.delete(k);
   for(const [k,state] of signalStates)if(!goalSignalHistory.has(k.slice(0,k.lastIndexOf(':')))&&now-state.lastSent>GOAL_SIGNAL_HISTORY_MS)signalStates.delete(k);
+  if(source==='5dollar'&&!signalDebugLogged&&status.matched===0){
+    signalDebugLogged=true;
+    console.log('[push/signal-match-debug]',JSON.stringify({
+      favorites:favorites.map(row=>({home:row.homeTeam,away:row.awayTeam})),
+      live:fixtures.map(row=>({home:liveTeamNames(row).homeTeam,away:liveTeamNames(row).awayTeam,
+        kickoff:row.kickoff_ts||row.kickoff_utc||row.start_time||null})),
+      identities:(tracked.identities||[]).map(row=>({home:row.home,away:row.away,kickoff:row.kickoff}))
+    }));
+  }
   signalStatus(status);
 }
 async function checkStrongGoalSignals(tracked){
