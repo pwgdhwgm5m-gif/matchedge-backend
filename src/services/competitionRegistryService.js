@@ -544,8 +544,9 @@ function normalizeTeamIdentity(value) {
 
 function sourceRank(match, preferBsd = false) {
   const provider = normalizeCompetitionName(match?.canonicalProvider || match?.source || match?.dataSource);
-  if (provider.includes('sportmonks')) return preferBsd ? 2 : 3;
-  if (provider === 'bsd' || provider.includes('bzzoiro')) return preferBsd ? 3 : 2;
+  if (provider.includes('sportmonks')) return preferBsd ? 2 : 4;
+  if (provider.includes('5dollar') || provider.includes('fivedollar')) return 3;
+  if (provider === 'bsd' || provider.includes('bzzoiro')) return preferBsd ? 4 : 2;
   if (provider.includes('sportsdb')) return 1;
   return 0;
 }
@@ -553,7 +554,7 @@ function sourceRank(match, preferBsd = false) {
 function mergeDuplicate(preferred, secondary) {
   const scopedTeamIds = row => {
     const source=String(row.canonicalProvider||row.source||row.dataSource||'').toLowerCase();
-    const provider=source.includes('sportmonk')?'sportmonks':source==='bsd'?'bsd':source.includes('sportsdb')?'sportsdb':null;
+    const provider=source.includes('sportmonk')?'sportmonks':(source.includes('5dollar')||source.includes('fivedollar'))?'fiveDollar':source==='bsd'?'bsd':source.includes('sportsdb')?'sportsdb':null;
     const native=provider && (row.homeTeamId!=null||row.awayTeamId!=null)
       ? {[provider]:{home:row.homeTeamId==null?null:String(row.homeTeamId),away:row.awayTeamId==null?null:String(row.awayTeamId)}} : {};
     return {...native,...(row.providerTeamIds||{})};

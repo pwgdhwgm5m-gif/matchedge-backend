@@ -6,6 +6,7 @@ const sportsDb = require('../services/sportsDbService');
 const oddsApi = require('../services/oddsApiService');
 const sportmonks = require('../services/sportmonksService');
 const bsdService = require('../services/bsdService');
+const fiveDollarFootball = require('../services/fiveDollarFootballService');
 const sourcePolicy = require('../services/sourcePolicyService');
 const competitionRegistry = require('../services/competitionRegistryService');
 const oddsFetches = new Map();
@@ -37,14 +38,15 @@ function fixtureOddsWithoutBlocking(date) {
  */
 router.get('/', async (req,res)=>{
   const date=req.query.date||new Date().toISOString().split('T')[0];
-  const [legacy,live,oddsEvents,turkeySm,smDay,bsdDay,bsdLive]=await Promise.all([
+  const [legacy,live,oddsEvents,turkeySm,smDay,bsdDay,bsdLive,fiveDollarDay]=await Promise.all([
     cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date)),
     cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),
     fixtureOddsWithoutBlocking(date),
     cache.getOrFetch(`sportmonks:tr:600:${date}`,config.cache.ttlLive,()=>sportmonks.getLeagueFixturesByDate(date,600)),
     Promise.race([cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),new Promise(r=>setTimeout(()=>r({ok:false,error:'sportmonks_date_timeout'}),5000))]),
     cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date)),
-    cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches())
+    cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches()),
+    cache.getOrFetch(`five-dollar:fixtures:v1:${date}`,config.cache.ttlLive,()=>fiveDollarFootball.getFixturesByDate(date))
   ]);
   const candidates=[];
   const put=(m,provider)=>{
@@ -63,6 +65,8 @@ router.get('/', async (req,res)=>{
         canonicalProvider:'bsd',
         providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}
       };
+    }else if(kind==='5dollarfootball'){
+      row={...m,canonicalProvider:'5dollarfootball',providerIds:{...(m.providerIds||{}),fiveDollar:String(m.fiveDollarFixtureId||m.fixtureId||'')},providerTeamIds:{...(m.providerTeamIds||{}),fiveDollar:{home:String(m.homeTeamId||''),away:String(m.awayTeamId||'')}}};
     }else if(kind==='sportmonks'){
       row={
         ...m,
@@ -91,18 +95,17 @@ router.get('/', async (req,res)=>{
   }
   for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
 
-  // BSD owns scores/results across leagues. Retain SportMonks and SportsDB as
-  // verified fallbacks for fixtures missing from BSD's day response.
-  for(const m of (bsdDay?.ok?bsdDay.matches:[])){
-    put({...m,canonicalProvider:'bsd',providerIds:{...(m.providerIds||{}),bsd:String(m.bsdEventId||m.fixtureId||'')}},'bsd');
-  }
-  // BSD's compact day feed and its live feed can contain different events.
-  // Include same-day live events in the fixture backbone without altering
-  // the live score/statistics pipeline itself.
-  for(const m of (bsdLive?.ok?bsdLive.matches:[])){
-    const kickoff = new Date(m.date || m.kickoff);
-    if (!Number.isFinite(kickoff.getTime()) || kickoff.toISOString().slice(0,10)!==date) continue;
-    put(m,'bsd');
+  // Keep legacy provider rows as fallback candidates. Five Dollar rows below
+  // outrank them for non-SportMonks competitions, but preserving these rows keeps
+  // coverage when Five Dollar is unavailable.
+  for(const m of (bsdDay?.ok?bsdDay.matches:[])) put(m,'bsd');
+  for(const m of (bsdLive?.ok?bsdLive.matches:[])) put(m,'bsd');
+
+  // Outside the six subscribed leagues Five Dollar is the canonical fixture backbone.
+  // Its fixture ID, league ID and native team IDs travel together into analysis.
+  for(const m of (fiveDollarDay?.ok?fiveDollarDay.matches:[])){
+    if(sourcePolicy.resolve({leagueName:m.leagueName||m.league}))continue;
+    put(m,'5dollarfootball');
   }
 
   // SportMonks owns the six subscribed leagues and replaces matching fallback rows.
@@ -113,7 +116,7 @@ router.get('/', async (req,res)=>{
     put({...m,canonicalProvider:'sportmonks',providerIds:{...(m.providerIds||{}),sportmonks:String(m.sportmonksId||m.fixtureId||'')}},'sportmonks');
   }
 
-  let matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{preferBsd:true})
+  let matches=competitionRegistry.dedupeCompetitionFixtures(candidates,{preferBsd:false})
     .sort((a,b)=>new Date(a.kickoff||a.date||0)-new Date(b.kickoff||b.date||0));
   if(live?.ok){
     const raw=(live.data?.livescore||[]).filter(e=>String(e.strSport||'').toLowerCase()==='soccer');
@@ -121,11 +124,11 @@ router.get('/', async (req,res)=>{
   }
   matches=competitionRegistry.dedupeCompetitionFixtures(matches.map(m=>
     competitionRegistry.decorateMatch(m,m.canonicalProvider||m.source||m.dataSource)
-  ),{preferBsd:true}).filter(competitionRegistry.isFixtureCompetitionAllowed);
+  ),{preferBsd:false}).filter(competitionRegistry.isFixtureCompetitionAllowed);
   const providerIdentity=require('../services/providerIdentityCache');
   const identityWrites=await Promise.allSettled(matches.map(match=>providerIdentity.remember(match)));
   for(const write of identityWrites)if(write.status==='rejected')console.warn('[provider-identity/fixtures]',write.reason?.message);
-  if(!matches.length&&!legacy?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
-  res.json({date,matches,coveragePolicy:'selected-leagues-and-uefa-with-canonical-overlays'});
+  if(!matches.length&&!legacy?.ok&&!fiveDollarDay?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
+  res.json({date,matches,coveragePolicy:'sportmonks-six-else-fivedollar-native-with-sportsdb-fallback'});
 });
 module.exports=router;
