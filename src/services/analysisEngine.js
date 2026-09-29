@@ -144,6 +144,14 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       const primary=await bsd.getLeagueStandingsFormatted(bsdLeagueId).catch(e=>({ok:false,available:false,error:e.message}));
       if(primary?.available)return primary;
     }
+    // 5Dollar is a standings fallback, not a canonical fixture provider.
+    // Its lookup/table responses are aggressively cached so analysis traffic
+    // does not compete with the 20s compound live/odds feed.
+    const five=await fiveDollarFootball.getStandingsByLeagueName(
+      registeredCompetition?.displayName||leagueName||league,
+      undefined
+    ).catch(()=>({ok:false,available:false,table:[]}));
+    if(five?.available)return five;
     return sportsdbStandingsFallback();
   };
   // Canonical standings policy matches the rest of analysis:
@@ -166,7 +174,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const standingsCompetitionKey=registeredCompetition?.canonicalCompetitionKey||canonicalCompetitionForIds?.canonicalCompetitionKey||'unmapped';
   const standingsCacheKey = isSuperLig
     ? 'standings:v4:turkey-super-lig:tff'
-    : `standings:v4:${standingsCompetitionKey}:bsd-${bsdLeagueId||'none'}:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
+    : `standings:v5:${standingsCompetitionKey}:bsd-${bsdLeagueId||'none'}:5dollar:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
