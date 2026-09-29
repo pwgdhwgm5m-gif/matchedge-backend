@@ -254,9 +254,13 @@ async function getCornerHistoryForMatch({leagueName,homeName,awayName,kickoff}={
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
  const start=Math.floor((d.getTime()-12*60*60*1000)/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
- const day=await getDay(start);if(!day)return null;const target=d.getTime();
+ const day=await getDay(start);if(!day){console.warn('[5dollar/odds-discovery]',JSON.stringify({homeName,awayName,kickoff,start,reason:'day-unavailable'}));return null}const target=d.getTime();
  const f=day.data.find(x=>{if(!teamNamesMatch(x.teams?.home?.name,homeName)||!teamNamesMatch(x.teams?.away?.name,awayName))return false;const k=Number(x.kickoff_ts)*1000||Date.parse(x.kickoff_utc||x.start_time||'');return !Number.isFinite(k)||Math.abs(k-target)<=4*60*60*1000});
- if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}
+ if(!f){
+   const sample=day.data.slice(0,8).map(x=>({id:x?.id,home:x?.teams?.home?.name,away:x?.teams?.away?.name,kickoff:x?.kickoff_utc||x?.start_time||x?.kickoff_ts||null,league:x?.league?.name||x?.competition?.name||null}));
+   console.warn('[5dollar/odds-discovery]',JSON.stringify({homeName,awayName,kickoff,start,rowCount:day.data.length,reason:'fixture-not-found',sample}));
+   memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null
+ }
  // The list include is intentionally compact. The documented single-fixture
  // odds endpoint is the authoritative payload for BTTS and goal_line_fixed.
  // Always use the documented single-fixture odds endpoint as authoritative.
