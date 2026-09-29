@@ -65,6 +65,10 @@ async function getTeamFixtures(teamId,{leagueId=null,limit=15}={}){
   if(leagueId)rows=rows.filter(x=>String(x?.league?.id||'')===String(leagueId));rows=rows.slice(0,limit);const out={ok:rows.length>0,source:'5dollarfootball-team-history',teamId:String(teamId),data:{response:rows.map(toAnalysisFixture)},raw:rows};memory.set(key,{data:out,expires:Date.now()+DAY_TTL_MS});return out;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,error:`five_dollar_team_${e.response?.status||'failed'}`,data:{response:[]}}}
 }
+async function getStandings(leagueId){
+ if(!available()||!leagueId)return {ok:false,available:false,table:[]};const key=`five-dollar-standings-v1:${leagueId}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
+ try{const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/standings`,{headers:headers(),params:{league:leagueId,type:'total'},timeout:7000});const rows=Array.isArray(r.data?.data?.table)?r.data.data.table:[];const out={ok:true,available:rows.length>0,source:'5dollarfootball',table:rows.map(x=>({teamId:String(x?.team?.id||''),teamName:x?.team?.name||'',rank:Number(x.position),points:Number.isFinite(Number(x.points))?Number(x.points):null,played:Number.isFinite(Number(x.played))?Number(x.played):null,description:null}))};memory.set(key,{data:out,expires:Date.now()+DAY_TTL_MS});return out;}catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,available:false,error:`five_dollar_standings_${e.response?.status||'failed'}`,table:[]}}
+}
 async function getFullOdds(fixtureId){
  const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
  try{
@@ -88,4 +92,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getFixturesByDate,resolveFixture,getTeamFixtures,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
+module.exports={enabled,available,getFixturesByDate,resolveFixture,getTeamFixtures,getStandings,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
