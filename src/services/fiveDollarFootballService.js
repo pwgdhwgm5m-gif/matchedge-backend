@@ -162,9 +162,21 @@ async function getStandings(leagueId,season){
  const key=`five-dollar-standings-v1:${leagueId}:${season||'current'}`,cached=memory.get(key);
  if(cached?.expires>Date.now())return cached.data;
  const params={league:leagueId,type:'total'};if(season)params.season=season;
- const r=await request('/standings',params,9000);
- if(!r)return {ok:false,available:false,table:[],source:'5dollarfootball'};
- const root=r.data?.data||{},table=(Array.isArray(root.table)?root.table:[]).map(normalizeStandingsRow).filter(x=>x.teamName);
+ let r=await request('/standings',params,9000);
+ let root=r?.data?.data||null;
+ // Native standings has returned 404 for some production keys even though the
+ // provider documents the route. The provider's API-Football-compatible host
+ // shares the same key, ids, plan and quota, so use it as the safe fallback.
+ if(!r){
+   try{
+     const cr=await rateLimited(()=>axios.get('https://api-football.5dollarfootballapi.com/standings',{headers:headers(),params:{league:leagueId,...(season?{season}: {})},timeout:9000}));
+     const groups=cr.data?.response?.[0]?.league?.standings;
+     const rows=Array.isArray(groups)?groups.flat():[];
+     root={table:rows,source:'compatible-host',season:cr.data?.response?.[0]?.league?.season||season||null};
+   }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);}
+ }
+ if(!root)return {ok:false,available:false,table:[],source:'5dollarfootball'};
+ const table=(Array.isArray(root.table)?root.table:[]).map(normalizeStandingsRow).filter(x=>x.teamName);
  const data={ok:true,available:table.length>0,table,source:'5dollarfootball',providerSource:root.source||null,season:root.season||season||null,leagueId:String(leagueId),fetchedAt:Date.now()};
  memory.set(key,{data,expires:Date.now()+STANDINGS_TTL_MS});return data;
 }
