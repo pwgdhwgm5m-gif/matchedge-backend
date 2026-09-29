@@ -139,14 +139,11 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
     return {ok:true,available:false,table:[],source:'sportsdb'};
   };
-  const bsdThenSportsdbStandings=async()=>{
-    if(bsdLeagueId){
-      const primary=await bsd.getLeagueStandingsFormatted(bsdLeagueId).catch(e=>({ok:false,available:false,error:e.message}));
-      if(primary?.available)return primary;
-    }
-    // 5Dollar is a standings fallback, not a canonical fixture provider.
-    // Its lookup/table responses are aggressively cached so analysis traffic
-    // does not compete with the 20s compound live/odds feed.
+  const fiveDollarThenSportsdbStandings=async()=>{
+    // Outside the six SportMonks leagues, 5Dollar is the standings primary.
+    // League identity is resolved only inside the 5Dollar namespace. The
+    // service caches fixture identity for 7 days and standings for 12 hours,
+    // so opening multiple matches from one league does not multiply quota use.
     const five=await fiveDollarFootball.getStandingsForMatch({
       leagueName:registeredCompetition?.displayName||leagueName||league,
       homeName:homeTeamName,
@@ -156,27 +153,27 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     if(five?.available)return five;
     return sportsdbStandingsFallback();
   };
-  // Canonical standings policy matches the rest of analysis:
-  // six SportMonks leagues keep their existing primary path for now; every
-  // other mapped competition (including UEFA) must try BSD before SportsDB.
+  // Standings provider policy: the six SportMonks leagues keep their existing
+  // league-specific path; every other supported competition uses 5Dollar
+  // first and SportsDB only as fallback. BSD is deliberately not queried here.
   const standingsFetcher = isSuperLig
     ? () => tffScraper.getStandings().then(table => ({
         ok: true,
         available: table.length > 0,
         table: table.map(r => ({ teamId: r.kulupID, teamName: r.name, rank: r.rank, points: r.points, description: null })),
       }))
-    : useBsdPrimary || bsdLeagueId
-      ? bsdThenSportsdbStandings
+    : !useSportmonksPrimary
+      ? fiveDollarThenSportsdbStandings
       : isMappedLeague
         ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
-        : () => Promise.resolve({ ok:false, error:'standings_unavailable' });
+        : fiveDollarThenSportsdbStandings;
   // Standings identity is always canonical/provider-specific. Never key this
   // cache from a raw fixture league id because BSD/SportsDB/SportMonks ids can
   // overlap numerically while meaning different competitions.
   const standingsCompetitionKey=registeredCompetition?.canonicalCompetitionKey||canonicalCompetitionForIds?.canonicalCompetitionKey||'unmapped';
   const standingsCacheKey = isSuperLig
     ? 'standings:v4:turkey-super-lig:tff'
-    : `standings:v6:${standingsCompetitionKey}:bsd-${bsdLeagueId||'none'}:5dollar-fixture-identity:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
+    : `standings:v7:${standingsCompetitionKey}:5dollar-primary:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
