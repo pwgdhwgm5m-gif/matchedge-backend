@@ -41,10 +41,24 @@ function goalMatchKey(identities,match) {
   const identity=uniqueIdentity(identities,match.fixtureId,match);
   return identity?.canonicalKey || `${match.source||match.canonicalProvider||'unknown'}:${String(match.fixtureId)}`;
 }
+// 5Dollar is a signal feed, not a canonical fixture ID source. Resolve a
+// favorite through the already verified provider identity before addressing it.
+function signalFavoriteRecipients(tracked,match,signalFixtureId) {
+  const direct=(tracked.trackedRows||[]).filter(row=>!row.coupon&&String(row.fixtureId)===String(signalFixtureId)&&
+    sameFixture({home:row.homeTeam,away:row.awayTeam,kickoff:row.kickoff},match));
+  const identities=(tracked.identities||[]).filter(row=>sameFixture(row,match));
+  const identity=identities.length===1?identities[0]:null;
+  const rows=identity?(tracked.trackedRows||[]).filter(row=>!row.coupon&&idsOf(identity).includes(String(row.fixtureId))&&
+    normalizeTeamIdentity(row.homeTeam)===normalizeTeamIdentity(identity.home)&&
+    normalizeTeamIdentity(row.awayTeam)===normalizeTeamIdentity(identity.away)):[];
+  const recipients=new Map();
+  for(const row of [...direct,...rows])recipients.set(String(row.userId),String(row.fixtureId));
+  return recipients;
+}
 function nextGoalScore(previous,home,away,isLive) {
   const total=home+away;
   if(previous && total<previous.total)return {score:previous,advanced:false};
   return {score:{home,away,total,started:Boolean(previous?.started||isLive)},
     advanced:Boolean(previous&&total>previous.total)};
 }
-module.exports={sameFixture,uniqueIdentity,uniqueTrackedIdentity,attachAliases,goalMatchKey,nextGoalScore};
+module.exports={sameFixture,uniqueIdentity,uniqueTrackedIdentity,attachAliases,goalMatchKey,nextGoalScore,signalFavoriteRecipients};
