@@ -16,6 +16,7 @@ const {attachAliases,goalMatchKey,nextGoalScore,signalFavoriteRecipients,sameFix
 const {hasTrackedSportmonksFixture,sportmonksGoalMatches}=require('./goalPushSourcePolicy');
 const {runGoalSources}=require('./goalSourceRunner');
 const {canonicalSignalFixture}=require('./canonicalSignalFixture');
+const {sameTeam,sameLiveFixture}=require('./liveSignalIdentity');
 
 const lastScores = new Map();
 // Prevent the same goal event from being pushed again after a process restart,
@@ -195,9 +196,9 @@ async function processStrongGoalFixtures(tracked,fixtures,source){
   for(const f of fixtures){
     const teams=liveTeamNames(f),minute=liveMinute(f);
     if(!teams.homeTeam||!teams.awayTeam||minute==null||minute<10||minute>88)continue;
-    const match={homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,kickoff:Number(f.kickoff_ts)?new Date(Number(f.kickoff_ts)*1000).toISOString():(f.kickoff_utc||f.start_time)};
-    if(favorites.some(row=>normalizeTeam(row.homeTeam)===normalizeTeam(match.homeTeam)&&normalizeTeam(row.awayTeam)===normalizeTeam(match.awayTeam)))status.nameMatches++;
-    if((tracked.identities||[]).some(row=>sameFixture(row,match)))status.identityMatches++;
+    const match={homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,kickoff:Number(f.kickoff_ts)?new Date(Number(f.kickoff_ts)*1000).toISOString():(f.kickoff_utc||f.start_time),source};
+    if(favorites.some(row=>sameTeam(row.homeTeam,match.homeTeam)&&sameTeam(row.awayTeam,match.awayTeam)))status.nameMatches++;
+    if((tracked.identities||[]).some(row=>(source==='5dollar'?sameLiveFixture:sameFixture)(row,match)))status.identityMatches++;
     const recipients=signalFavoriteRecipients(tracked,match,String(f.id));
     if(!recipients.size)continue;
     status.matched++;
