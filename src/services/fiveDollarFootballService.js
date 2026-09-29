@@ -43,10 +43,19 @@ function normalizeMarkets(root,options={}){
  const yes=num(bp.yes??bp.Yes??bp.both??bp.btts_yes),no=num(bp.no??bp.No??bp.not_both??bp.btts_no);
  return {h2h,totals:t?{over25:t.a,under25:t.b}:null,btts:yes&&no?{yes,no}:null};
 }
+function normalizeCornerMarket(root,options={}){
+ const ladder=root?.corner_line||root?.corners||root?.corner_kicks||root?.total_corners||root?.corners_total;
+ const rows=Array.isArray(ladder)?ladder:Array.isArray(ladder?.lines)?ladder.lines:Object.entries(ladder||{}).map(([k,v])=>typeof v==='object'?{_key:k,...v}:v);
+ const candidates=rows.map(row=>{const v=stage(row,options)||row||{},line=Number(v?.line??v?.handicap??v?.total??v?._key);const p=pair(v,['over','over_odds','o'],['under','under_odds','u'],options);return Number.isFinite(line)&&p?{line,over:p.a,under:p.b}:null}).filter(Boolean);
+ if(!candidates.length)return null;
+ const preferred=candidates.find(x=>[8.5,9.5,10.5].includes(x.line))||candidates.sort((a,b)=>Math.abs(a.line-9.5)-Math.abs(b.line-9.5))[0];
+ const invO=1/preferred.over,invU=1/preferred.under,sum=invO+invU;
+ return {...preferred,overDeVigPercent:+(100*invO/sum).toFixed(1),underDeVigPercent:+(100*invU/sum).toFixed(1)};
+}
 function normalizeFixture(f,homeName,awayName,fetchedAt){
  if(!f||!teamNamesMatch(f.teams?.home?.name,homeName)||!teamNamesMatch(f.teams?.away?.name,awayName))return null;
- const root=oddsRoot(f),markets=normalizeMarkets(root),stages=marketStages(root),fresh=Date.now()-Number(fetchedAt||0)<=DAY_TTL_MS*1.5;
- return {fixtureId:String(f.id),providerIdentity:{competitionId:String(f.league?.id||f.competition?.id||''),fixtureId:String(f.id),homeTeamId:String(f.teams?.home?.id||''),awayTeamId:String(f.teams?.away?.id||'')},matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,marketStages:stages,marketBoard:{bookmakers:[{bookmaker:'market',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh,updatedAt:fetchedAt?new Date(fetchedAt).toISOString():null}],bookmakerCount:1},source:'5dollarfootball-market',fetchedAt};
+ const root=oddsRoot(f),markets=normalizeMarkets(root),cornerMarket=normalizeCornerMarket(root),stages=marketStages(root),fresh=Date.now()-Number(fetchedAt||0)<=DAY_TTL_MS*1.5;
+ return {fixtureId:String(f.id),cornerMarket,providerIdentity:{competitionId:String(f.league?.id||f.competition?.id||''),fixtureId:String(f.id),homeTeamId:String(f.teams?.home?.id||''),awayTeamId:String(f.teams?.away?.id||'')},matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,marketStages:stages,marketBoard:{bookmakers:[{bookmaker:'market',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh,updatedAt:fetchedAt?new Date(fetchedAt).toISOString():null}],bookmakerCount:1},source:'5dollarfootball-market',fetchedAt};
 }
 async function getDay(start){
  const key=`five-dollar-day-v3:${start}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached;if(!available())return null;
@@ -206,4 +215,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
+module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeCornerMarket,normalizeFixture,marketStages};

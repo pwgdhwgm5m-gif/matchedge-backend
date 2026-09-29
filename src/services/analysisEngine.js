@@ -139,14 +139,11 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
     return {ok:true,available:false,table:[],source:'sportsdb'};
   };
-  const bsdThenSportsdbStandings=async()=>{
-    if(bsdLeagueId){
-      const primary=await bsd.getLeagueStandingsFormatted(bsdLeagueId).catch(e=>({ok:false,available:false,error:e.message}));
-      if(primary?.available)return primary;
-    }
-    // 5Dollar is a standings fallback, not a canonical fixture provider.
-    // Its lookup/table responses are aggressively cached so analysis traffic
-    // does not compete with the 20s compound live/odds feed.
+  const fiveDollarThenSportsdbStandings=async()=>{
+    // Outside the six SportMonks leagues, 5Dollar is the standings primary.
+    // League identity is resolved only inside the 5Dollar namespace. The
+    // service caches fixture identity for 7 days and standings for 12 hours,
+    // so opening multiple matches from one league does not multiply quota use.
     const five=await fiveDollarFootball.getStandingsForMatch({
       leagueName:registeredCompetition?.displayName||leagueName||league,
       homeName:homeTeamName,
@@ -156,27 +153,27 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     if(five?.available)return five;
     return sportsdbStandingsFallback();
   };
-  // Canonical standings policy matches the rest of analysis:
-  // six SportMonks leagues keep their existing primary path for now; every
-  // other mapped competition (including UEFA) must try BSD before SportsDB.
+  // Standings provider policy: the six SportMonks leagues keep their existing
+  // league-specific path; every other supported competition uses 5Dollar
+  // first and SportsDB only as fallback. BSD is deliberately not queried here.
   const standingsFetcher = isSuperLig
     ? () => tffScraper.getStandings().then(table => ({
         ok: true,
         available: table.length > 0,
         table: table.map(r => ({ teamId: r.kulupID, teamName: r.name, rank: r.rank, points: r.points, description: null })),
       }))
-    : useBsdPrimary || bsdLeagueId
-      ? bsdThenSportsdbStandings
+    : !useSportmonksPrimary
+      ? fiveDollarThenSportsdbStandings
       : isMappedLeague
         ? () => sportsDb.getLeagueStandingsFormatted(effectiveTsdbLeagueId, currentSeason)
-        : () => Promise.resolve({ ok:false, error:'standings_unavailable' });
+        : fiveDollarThenSportsdbStandings;
   // Standings identity is always canonical/provider-specific. Never key this
   // cache from a raw fixture league id because BSD/SportsDB/SportMonks ids can
   // overlap numerically while meaning different competitions.
   const standingsCompetitionKey=registeredCompetition?.canonicalCompetitionKey||canonicalCompetitionForIds?.canonicalCompetitionKey||'unmapped';
   const standingsCacheKey = isSuperLig
     ? 'standings:v4:turkey-super-lig:tff'
-    : `standings:v6:${standingsCompetitionKey}:bsd-${bsdLeagueId||'none'}:5dollar-fixture-identity:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
+    : `standings:v7:${standingsCompetitionKey}:5dollar-primary:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
@@ -785,18 +782,24 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ? {available:true,eventId:bsdBundle.eventId,source:'bsd',markets:bsdBundle.prediction.markets||null,recommendations:bsdBundle.prediction.recommendations||null,model:bsdBundle.prediction.model||null}
     : {available:false,error:bsdBundle?.error||'prediction_unavailable'};
   const bsdConsensus = bsdBundle?.consensusOdds || null;
-  // Corner display follows BSD's actual bookmaker consensus line. Do not
-  // manufacture a fixed 9.5 market when BSD has no two-way corner price.
-  const bsdCornerMarket = bsdConsensus?.fresh ? bsdConsensus?.corners?.mainLine : null;
-  if (bsdCornerMarket) {
+  // Reuse the cached 5Dollar day/odds bundle for both normal markets and
+  // corners. This call is intentionally made once per analysis request.
+  const fiveDollarOdds = (homeTeamName && awayTeamName)
+    ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
+    : null;
+  // Corner display uses the real 5Dollar two-way market line when present.
+  // Never manufacture a fixed 8.5/9.5/10.5 line. Existing historical corner
+  // evidence remains analysis-only and is not added back to coupon markets.
+  const fiveDollarCornerMarket = fiveDollarOdds?.cornerMarket || null;
+  if (fiveDollarCornerMarket) {
     cornerMetrics = {
       ...cornerMetrics,
-      marketLine:Number(bsdCornerMarket.line),
-      marketOverOdds:Number(bsdCornerMarket.over),
-      marketUnderOdds:Number(bsdCornerMarket.under),
-      marketOverPercent:Number(bsdCornerMarket.overDeVigPercent),
-      marketUnderPercent:Number(bsdCornerMarket.underDeVigPercent),
-      marketSource:'bsd-consensus',
+      marketLine:Number(fiveDollarCornerMarket.line),
+      marketOverOdds:Number(fiveDollarCornerMarket.over),
+      marketUnderOdds:Number(fiveDollarCornerMarket.under),
+      marketOverPercent:Number(fiveDollarCornerMarket.overDeVigPercent),
+      marketUnderPercent:Number(fiveDollarCornerMarket.underDeVigPercent),
+      marketSource:'5dollarfootball-market',
       marketAvailable:true
     };
   } else {
@@ -815,14 +818,18 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     ...cornerMetrics,
     analysisOnly:true,
     limitedData:!realCornerEvidence,
-    displayMarket: bsdCornerMarket ? {
-      line:Number(bsdCornerMarket.line),
-      overPercent:Number(bsdCornerMarket.overDeVigPercent),
-      underPercent:Number(bsdCornerMarket.underDeVigPercent),
-      overOdds:Number(bsdCornerMarket.over),
-      underOdds:Number(bsdCornerMarket.under),
-      source:'bsd-consensus',
+    displayMarket: fiveDollarCornerMarket ? {
+      line:Number(fiveDollarCornerMarket.line),
+      overPercent:Number(fiveDollarCornerMarket.overDeVigPercent),
+      underPercent:Number(fiveDollarCornerMarket.underDeVigPercent),
+      overOdds:Number(fiveDollarCornerMarket.over),
+      underOdds:Number(fiveDollarCornerMarket.under),
+      source:'5dollarfootball-market',
       type:'market',
+      expectedTotal:Number.isFinite(Number(cornerMetrics.expectedTotal))?Number(cornerMetrics.expectedTotal):null,
+      expectedHome:Number.isFinite(Number(cornerMetrics.expectedHome))?Number(cornerMetrics.expectedHome):null,
+      expectedAway:Number.isFinite(Number(cornerMetrics.expectedAway))?Number(cornerMetrics.expectedAway):null,
+      modelOverPercent:Number.isFinite(Number(cornerMetrics['over'+String(Number(fiveDollarCornerMarket.line)*10).replace('.','')+'Percent']))?Number(cornerMetrics['over'+String(Number(fiveDollarCornerMarket.line)*10).replace('.','')+'Percent']):null,
       projection:cornerLineProjection
     } : (realCornerEvidence ? {
       expectedTotal:Number(cornerMetrics.expectedTotal),
@@ -864,9 +871,6 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // The bookmaker lookup is day-cached and fails open when unavailable.
   const bsdAnchorOdds = bsdConsensus?.fresh && bsdConsensus?.h2h?.home && bsdConsensus?.h2h?.draw && bsdConsensus?.h2h?.away
     ? bsdConsensus.h2h : null;
-  const fiveDollarOdds = (homeTeamName && awayTeamName)
-    ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
-    : null;
   if (!marketOddsBoard && fiveDollarOdds?.marketBoard) marketOddsBoard = fiveDollarOdds.marketBoard;
 
   // Football-Data remains the final additive odds fallback.
