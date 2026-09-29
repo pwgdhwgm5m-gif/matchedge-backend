@@ -61,6 +61,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const providerPolicy = sourcePolicy.policy({leagueName, sportKey});
   const useSportmonksPrimary = providerPolicy.sportmonks === true;
   const useBsdPrimary = providerPolicy.primary === 'bsd';
+  const useFiveDollarPrimary = providerPolicy.primary === 'fiveDollarFootball';
   const isSuperLig = String(league) === SUPERLIG_LEAGUE_ID;
   const leagueIdNum = league ? parseInt(league, 10) : null;
   const mappedTsdbLeagueId = leagueIdNum ? sportsDb.LEAGUE_ID_MAP[String(leagueIdNum)] : null;
@@ -78,6 +79,8 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const isMappedLeague = Boolean(effectiveTsdbLeagueId && sportsDb.isWhitelistedLeague(effectiveTsdbLeagueId));
   const useOwnSource = isSuperLig || isMappedLeague;
   const isInternationalCompetition = /nations league|world cup|euro|international/i.test(String(leagueName || ''));
+  const fiveDollarContext = useFiveDollarPrimary ? await fiveDollarFootball.resolveFixture(homeTeamName,awayTeamName,kickoff).catch(()=>null) : null;
+
   // Resolve provider-native SportMonks teams before selecting historical form.
   // BSD/SportsDB are per-team fallbacks, never a source of SportMonks IDs.
   const smContext=useSportmonksPrimary ? await sportmonksHistory.load({homeTeamName,awayTeamName,
@@ -88,26 +91,30 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // - Eslesmesi bilinen diger ligler -> TheSportsDB (Premium)
   // - Eslesmesi olmayan ligler -> eskisi gibi API-Football denenir (suspended
   //   oldugu icin muhtemelen bos doner, sistem yine de cokme, notr deger uretir)
-  const homeFormFetcher = useBsdPrimary || useSportmonksPrimary
+  const homeFormFetcher = useFiveDollarPrimary
+      ? async () => fiveDollarContext?.homeTeamId ? fiveDollarFootball.getTeamFixtures(fiveDollarContext.homeTeamId,{leagueId:fiveDollarContext.leagueId,limit:15}) : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,sportsdbOptions('home')) : {ok:false,error:'no_verified_home_history'})
+    : useBsdPrimary || useSportmonksPrimary
       ? async () => { const br=verifiedHistory(await bsd.getTeamFixturesForAnalysis(homeTeamName,15),homeTeamName,kickoff); return br || (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(homeTeamName,leagueIdNum,15,effectiveTsdbLeagueId,sportsdbOptions('home')) : {ok:false,error:'no_verified_home_history'}); }
     : isSuperLig
       ? () => tffScraper.getTeamFixturesForAnalysis(homeTeamName, 15)
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(homeTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,sportsdbOptions('home'))
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
-  const awayFormFetcher = useBsdPrimary || useSportmonksPrimary
+  const awayFormFetcher = useFiveDollarPrimary
+      ? async () => fiveDollarContext?.awayTeamId ? fiveDollarFootball.getTeamFixtures(fiveDollarContext.awayTeamId,{leagueId:fiveDollarContext.leagueId,limit:15}) : (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,sportsdbOptions('away')) : {ok:false,error:'no_verified_away_history'})
+    : useBsdPrimary || useSportmonksPrimary
       ? async () => { const br=verifiedHistory(await bsd.getTeamFixturesForAnalysis(awayTeamName,15),awayTeamName,kickoff); return br || (isMappedLeague ? sportsDb.getTeamFixturesForAnalysis(awayTeamName,leagueIdNum,15,effectiveTsdbLeagueId,sportsdbOptions('away')) : {ok:false,error:'no_verified_away_history'}); }
     : isSuperLig
       ? () => tffScraper.getTeamFixturesForAnalysis(awayTeamName, 15)
     : isMappedLeague
       ? () => sportsDb.getTeamFixturesForAnalysis(awayTeamName, leagueIdNum, 15, effectiveTsdbLeagueId,sportsdbOptions('away'))
       : () => Promise.resolve({ok:false,error:'legacy_api_disabled'});
-  const homeFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `verified-form:v7:${effectiveTsdbLeagueId||'unknown'}:${String(kickoff||'').slice(0,10)}:${homeTeamName}`
+  const homeFormCacheKey = useFiveDollarPrimary ? `five-dollar-form:v1:${fiveDollarContext?.leagueId||'none'}:${fiveDollarContext?.homeTeamId||homeTeamName}` : useBsdPrimary || useSportmonksPrimary ? `verified-form:v7:${effectiveTsdbLeagueId||'unknown'}:${String(kickoff||'').slice(0,10)}:${homeTeamName}`
     : isSuperLig ? `tff-form:${homeTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${homeTeamName}`
       : `form:${home}`;
-  const awayFormCacheKey = useBsdPrimary || useSportmonksPrimary ? `verified-form:v7:${effectiveTsdbLeagueId||'unknown'}:${String(kickoff||'').slice(0,10)}:${awayTeamName}`
+  const awayFormCacheKey = useFiveDollarPrimary ? `five-dollar-form:v1:${fiveDollarContext?.leagueId||'none'}:${fiveDollarContext?.awayTeamId||awayTeamName}` : useBsdPrimary || useSportmonksPrimary ? `verified-form:v7:${effectiveTsdbLeagueId||'unknown'}:${String(kickoff||'').slice(0,10)}:${awayTeamName}`
     : isSuperLig ? `tff-form:${awayTeamName}`
     : isMappedLeague
       ? `tsdb-form:v3:${effectiveTsdbLeagueId}:${awayTeamName}`
@@ -257,10 +264,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
     }
   }
 
-  const homeTeamIdForStats = internationalHomeTeamId || (homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
+  const homeTeamIdForStats = (useFiveDollarPrimary && fiveDollarContext?.homeTeamId) || internationalHomeTeamId || (homeFixturesResult.status === 'fulfilled' && homeFixturesResult.value.teamId
     ? homeFixturesResult.value.teamId
     : home);
-  const awayTeamIdForStats = internationalAwayTeamId || (awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
+  const awayTeamIdForStats = (useFiveDollarPrimary && fiveDollarContext?.awayTeamId) || internationalAwayTeamId || (awayFixturesResult.status === 'fulfilled' && awayFixturesResult.value.teamId
     ? awayFixturesResult.value.teamId
     : away);
   const homeOverallHistory = stats.summarizeMatches(homeFixtures, homeTeamIdForStats);
