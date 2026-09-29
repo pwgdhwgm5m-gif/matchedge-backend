@@ -1,6 +1,6 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const {attachAliases,goalMatchKey,nextGoalScore}=require('../src/services/goalNotificationIdentity');
+const {attachAliases,goalMatchKey,nextGoalScore,signalFavoriteRecipients}=require('../src/services/goalNotificationIdentity');
 
 const kickoff='2026-09-27T18:00:00.000Z';
 const identity={canonicalKey:'match:de-graafschap-den-bosch:2026-09-27T18:00:00.000Z',
@@ -51,4 +51,13 @@ test('a stale provider score cannot reset the goal baseline and replay a push',(
   assert.equal(observed.advanced,false);
   observed=nextGoalScore(observed.score,2,0,true);
   assert.equal(observed.advanced,true);
+});
+
+test('5Dollar signal reaches a favorite through verified team and kickoff identity with its own navigation ID',()=>{
+  const mapped=attachAliases(tracked,[identity],Date.parse(kickoff));
+  const recipients=signalFavoriteRecipients(mapped,{homeTeam:'De Graafschap',awayTeam:'Den Bosch',kickoff},'five-dollar-999');
+  assert.deepEqual([...recipients], [['user-1','bsd-100']]);
+  assert.equal(signalFavoriteRecipients(mapped,{homeTeam:'De Graafschap',awayTeam:'Den Bosch',kickoff:'2026-09-27T21:00:00.000Z'},'five-dollar-999').size,0);
+  assert.equal(signalFavoriteRecipients({...mapped,identities:[identity,{...identity,canonicalKey:'ambiguous'}]},
+    {homeTeam:'De Graafschap',awayTeam:'Den Bosch',kickoff},'five-dollar-999').size,0);
 });
