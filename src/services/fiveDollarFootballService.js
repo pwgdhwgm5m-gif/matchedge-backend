@@ -189,7 +189,14 @@ async function getStandings(leagueId,season){
  const key=`five-dollar-standings-v1:${leagueId}:${season||'current'}`,cached=memory.get(key);
  if(cached?.expires>Date.now())return cached.data;
  const params={league:leagueId,type:'total'};if(season)params.season=season;
- let r=await request('/standings',params,9000);
+ // Standings is optional enrichment. A plan/auth rejection on this route must
+ // never trip the shared bookmaker/live backoff and suppress valid Bet365 odds.
+ let r=null;
+ try{
+   r=await rateLimited(()=>axios.get(`${config.fiveDollarFootball.baseUrl}/standings`,{headers:headers(),params,timeout:9000}));
+ }catch(e){
+   if(e.response?.status===429) backoff(429,e.response?.headers?.['retry-after']);
+ }
  let root=r?.data?.data||null;
  // Native standings has returned 404 for some production keys even though the
  // provider documents the route. The provider's API-Football-compatible host
@@ -200,7 +207,7 @@ async function getStandings(leagueId,season){
      const groups=cr.data?.response?.[0]?.league?.standings;
      const rows=Array.isArray(groups)?groups.flat():[];
      root={table:rows,source:'compatible-host',season:cr.data?.response?.[0]?.league?.season||season||null};
-   }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);}
+   }catch(e){if(e.response?.status===429) backoff(429,e.response?.headers?.['retry-after']);}
  }
  if(!root)return {ok:false,available:false,table:[],source:'5dollarfootball'};
  const table=(Array.isArray(root.table)?root.table:[]).map(normalizeStandingsRow).filter(x=>x.teamName);
