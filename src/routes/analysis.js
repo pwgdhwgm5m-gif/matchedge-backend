@@ -236,6 +236,13 @@ router.get('/:fixtureId', async (req, res) => {
      (!precomputed.cornerMetrics || precomputed.cornerMetrics.limitedData===true)){
     precomputed=null;
   }
+  // Bookmaker prices are supplied by the cached 5Dollar day/fixture odds bundle.
+  // Older prematch snapshots created before that overlay must not suppress current
+  // executable prices in Match Analysis.
+  if(precomputed && (!precomputed.marketOddsSource || !precomputed.marketOdds ||
+     !precomputed.marketBoard?.allMarkets?.some(x=>Number(x?.verifiedOdds)>1))){
+    precomputed=null;
+  }
   if (precomputed) {
     if (kickoff && homeTeamName && awayTeamName) {
       const verified=new Date(kickoff)>new Date() ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,leagueName,kickoff,provider:req.query.provider}).catch(()=>null) : null;
