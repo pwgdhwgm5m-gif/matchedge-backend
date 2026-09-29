@@ -12,7 +12,7 @@ const sportmonks = require('./sportmonksService');
 const fiveDollar = require('./fiveDollarFootballService');
 const cache = require('../utils/cache');
 const {createHash}=require('crypto');
-const {attachAliases,goalMatchKey,nextGoalScore,signalFavoriteRecipients}=require('./goalNotificationIdentity');
+const {attachAliases,goalMatchKey,nextGoalScore,signalFavoriteRecipients,sameFixture}=require('./goalNotificationIdentity');
 const {hasTrackedSportmonksFixture,sportmonksGoalMatches}=require('./goalPushSourcePolicy');
 const {runGoalSources}=require('./goalSourceRunner');
 
@@ -194,11 +194,14 @@ async function checkStrongGoalSignals(tracked){
   const intel=await fiveDollar.getLiveIntelligence();
   if(!intel?.available){signalStatus({source:'5dollar',available:false,configured:true,reason:'request-unavailable'});return}
   const now=Date.now();
-  const status={source:'5dollar',available:true,fixtures:(intel.fixtures||[]).length,trackedFavorites:(tracked.trackedRows||[]).filter(x=>!x.coupon).length,matched:0,sampled:0,qualified:0,accepted:0};
+  const favorites=(tracked.trackedRows||[]).filter(x=>!x.coupon);
+  const status={source:'5dollar',available:true,fixtures:(intel.fixtures||[]).length,trackedFavorites:favorites.length,nameMatches:0,identityMatches:0,matched:0,sampled:0,qualified:0,accepted:0};
   for(const f of intel.fixtures||[]){
     const teams=liveTeamNames(f),minute=liveMinute(f);
     if(!teams.homeTeam||!teams.awayTeam||minute==null||minute<10||minute>88)continue;
     const match={homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,kickoff:Number(f.kickoff_ts)?new Date(Number(f.kickoff_ts)*1000).toISOString():(f.kickoff_utc||f.start_time)};
+    if(favorites.some(row=>normalizeTeam(row.homeTeam)===normalizeTeam(match.homeTeam)&&normalizeTeam(row.awayTeam)===normalizeTeam(match.awayTeam)))status.nameMatches++;
+    if((tracked.identities||[]).some(row=>sameFixture(row,match)))status.identityMatches++;
     const recipients=signalFavoriteRecipients(tracked,match,String(f.id));
     if(!recipients.size)continue;
     status.matched++;
