@@ -69,25 +69,48 @@ function normalizeFixture(f,homeName,awayName,fetchedAt){
   };
 }
 async function getDay(start){
-  const key=`five-dollar-day-v2:${start}`;
+  const key=`five-dollar-day-v3:${start}`;
   const cached=memory.get(key);
   if(cached&&cached.expires>Date.now())return cached;
   if(!available())return null;
   try{
-    // Pro supports compound list requests. One request supplies every fixture
-    // in the 24h window plus executable odds; never fan out one odds call/match.
-    const response=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{
-      headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50,page:1},timeout:7000
-    });
+    // Discover identity without odds so each page can carry up to 100 rows.
+    // Follow pagination: a busy 24h window can contain well over one page.
+    const rows=[]; let page=1; let hasMore=true; let lastHeaders={};
+    while(hasMore && page<=8){
+      const response=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{
+        headers:headers(),params:{start_time:start,end_time:start+86400,per_page:100,page},timeout:7000
+      });
+      lastHeaders=response.headers||{};
+      const batch=Array.isArray(response.data?.data)?response.data.data:[];
+      rows.push(...batch);
+      hasMore=Boolean(response.data?.pagination?.has_more) && batch.length>0;
+      page+=1;
+    }
     const now=Date.now();
-    const row={data:Array.isArray(response.data?.data)?response.data.data:[],expires:now+DAY_TTL_MS,fetchedAt:now,
-      rate:{limit:response.headers?.['x-ratelimit-limit']||null,remaining:response.headers?.['x-ratelimit-remaining']||null,reset:response.headers?.['x-ratelimit-reset']||null}};
-    memory.set(key,row);
-    return row;
+    const row={data:rows,expires:now+DAY_TTL_MS,fetchedAt:now,
+      rate:{limit:lastHeaders['x-ratelimit-limit']||null,remaining:lastHeaders['x-ratelimit-remaining']||null,reset:lastHeaders['x-ratelimit-reset']||null}};
+    memory.set(key,row); return row;
   }catch(e){
-    const status=e.response?.status;
-    backoff(status,e.response?.headers?.['retry-after']);
-    console.warn('[5dollar]',status===429?'rate limit backoff':status===401||status===403?'auth/plan unavailable':'request failed');
+    const status=e.response?.status; backoff(status,e.response?.headers?.['retry-after']);
+    console.warn('[5dollar/fixtures]',status||'network','fixture discovery failed');
+    return null;
+  }
+}
+async function getFixtureOddsById(fixtureId){
+  if(!available()||!fixtureId)return null;
+  const key=`five-dollar-odds-v1:${fixtureId}`;
+  const cached=memory.get(key); if(cached&&cached.expires>Date.now())return cached.data;
+  try{
+    const response=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${encodeURIComponent(fixtureId)}/odds`,{
+      headers:headers(),params:{bookmakers:'bet365'},timeout:7000
+    });
+    const payload=response.data?.data||null;
+    memory.set(key,{data:payload,expires:Date.now()+DAY_TTL_MS});
+    return payload;
+  }catch(e){
+    const status=e.response?.status; backoff(status,e.response?.headers?.['retry-after']);
+    console.warn('[5dollar/odds]',status||'network','fixture odds unavailable',String(fixtureId));
     return null;
   }
 }
@@ -128,7 +151,12 @@ async function resolveFixtureIdentity(homeName,awayName,kickoff){
 async function getMatchOdds(homeName,awayName,kickoff){
   const identity=await resolveFixtureIdentity(homeName,awayName,kickoff);
   if(!identity)return null;
-  const normalized=normalizeFixture(identity.fixture,homeName,awayName,Date.now());
-  return normalized?{...normalized,providerIdentity:{fixtureId:identity.fixtureId,leagueId:identity.leagueId,homeTeamId:identity.homeTeamId,awayTeamId:identity.awayTeamId}}:null;
+  // Odds must come from the authoritative per-fixture endpoint using the
+  // Five Dollar native fixture id; never pass a SoccerEdge/BSD/SportsDB id.
+  const oddsPayload=await getFixtureOddsById(identity.fixtureId);
+  if(!oddsPayload)return null;
+  const fixtureForOdds={...identity.fixture,bookmakers:oddsPayload.bookmakers||[],odds:oddsPayload.odds||identity.fixture.odds};
+  const normalized=normalizeFixture(fixtureForOdds,homeName,awayName,Date.now());
+  return normalized?{...normalized,source:'5dollarfootball-bet365',providerIdentity:{fixtureId:identity.fixtureId,leagueId:identity.leagueId,homeTeamId:identity.homeTeamId,awayTeamId:identity.awayTeamId}}:null;
 }
 module.exports={enabled,available,resolveFixtureIdentity,getMatchOdds,priceFreshness};
