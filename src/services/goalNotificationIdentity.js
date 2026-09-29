@@ -1,4 +1,5 @@
 const {normalizeTeamIdentity}=require('./competitionRegistryService');
+const {sameTeam,sameLiveFixture}=require('./liveSignalIdentity');
 
 const idsOf=row=>[...new Set(Object.values(row?.providerIds||{}).filter(Boolean).map(String))];
 const kickoffOf=row=>Date.parse(row?.kickoff||row?.date||'');
@@ -44,13 +45,13 @@ function goalMatchKey(identities,match) {
 // 5Dollar is a signal feed, not a canonical fixture ID source. Resolve a
 // favorite through the already verified provider identity before addressing it.
 function signalFavoriteRecipients(tracked,match,signalFixtureId) {
+  const matchFn=match.source==='5dollar'?sameLiveFixture:sameFixture;
   const direct=(tracked.trackedRows||[]).filter(row=>!row.coupon&&String(row.fixtureId)===String(signalFixtureId)&&
-    sameFixture({home:row.homeTeam,away:row.awayTeam,kickoff:row.kickoff},match));
-  const identities=(tracked.identities||[]).filter(row=>sameFixture(row,match));
+    matchFn({home:row.homeTeam,away:row.awayTeam,kickoff:row.kickoff},match));
+  const identities=(tracked.identities||[]).filter(row=>matchFn(row,match));
   const identity=identities.length===1?identities[0]:null;
   const rows=identity?(tracked.trackedRows||[]).filter(row=>!row.coupon&&idsOf(identity).includes(String(row.fixtureId))&&
-    normalizeTeamIdentity(row.homeTeam)===normalizeTeamIdentity(identity.home)&&
-    normalizeTeamIdentity(row.awayTeam)===normalizeTeamIdentity(identity.away)):[];
+    sameTeam(row.homeTeam,identity.home)&&sameTeam(row.awayTeam,identity.away)):[];
   const recipients=new Map();
   for(const row of [...direct,...rows])recipients.set(String(row.userId),String(row.fixtureId));
   return recipients;
