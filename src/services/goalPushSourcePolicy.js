@@ -22,7 +22,8 @@ function sportmonksGoalMatches(fixtures) {
     leagueId:row.leagueId, kickoff:row.kickoff,
     homeTeam:row.homeTeam, awayTeam:row.awayTeam,
     homeScore:Number(row.homeScore), awayScore:Number(row.awayScore),
-    statusShort:row.statusShort||'LIVE', isLive:true
+    statusShort:row.statusShort||'LIVE', isLive:true,
+    minute:row.minute,liveStats:row.stats||null
   }));
 }
 
