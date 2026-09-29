@@ -95,6 +95,12 @@ router.get('/', async (req,res)=>{
   }
   for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
 
+  // Keep legacy provider rows as fallback candidates. Five Dollar rows below
+  // outrank them for non-SportMonks competitions, but preserving these rows keeps
+  // coverage when Five Dollar is unavailable.
+  for(const m of (bsdDay?.ok?bsdDay.matches:[])) put(m,'bsd');
+  for(const m of (bsdLive?.ok?bsdLive.matches:[])) put(m,'bsd');
+
   // Outside the six subscribed leagues Five Dollar is the canonical fixture backbone.
   // Its fixture ID, league ID and native team IDs travel together into analysis.
   for(const m of (fiveDollarDay?.ok?fiveDollarDay.matches:[])){
@@ -122,7 +128,7 @@ router.get('/', async (req,res)=>{
   const providerIdentity=require('../services/providerIdentityCache');
   const identityWrites=await Promise.allSettled(matches.map(match=>providerIdentity.remember(match)));
   for(const write of identityWrites)if(write.status==='rejected')console.warn('[provider-identity/fixtures]',write.reason?.message);
-  if(!matches.length&&!legacy?.ok&&!fiveDollarDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
+  if(!matches.length&&!legacy?.ok&&!fiveDollarDay?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
   res.json({date,matches,coveragePolicy:'sportmonks-six-else-fivedollar-native-with-sportsdb-fallback'});
 });
 module.exports=router;
