@@ -25,7 +25,7 @@ async function teamAdvancedForm(fixtures, teamId, limit=8, kickoff=null) {
     .sort((a,b)=>(Date.parse(b.fixture?.date)||0)-(Date.parse(a.fixture?.date)||0))
     .slice(0,limit);
   const rows=await Promise.all(finished.map(async f=>{
-    const s=await cachedEventStats(f.fixture.id); if(!s) return null;
+    const s=f._fiveDollar ? {corners:f.corners||null} : await cachedEventStats(f.fixture.id); if(!s) return null;
     const isHome=String(f.teams?.home?.id)===String(teamId);
     const pick=(obj,own)=>{ if(!obj)return null; const v=isHome?obj[own?'home':'away']:obj[own?'away':'home']; return normalizeProviderMetric(v); };
     return {xgFor:pick(s.xg,true),xgAgainst:pick(s.xg,false),cornersFor:pick(s.corners,true),cornersAgainst:pick(s.corners,false),shotsFor:pick(s.totalShots,true),sotFor:pick(s.shotsOnTarget,true)};
