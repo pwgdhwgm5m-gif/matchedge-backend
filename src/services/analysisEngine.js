@@ -79,7 +79,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const isMappedLeague = Boolean(effectiveTsdbLeagueId && sportsDb.isWhitelistedLeague(effectiveTsdbLeagueId));
   const useOwnSource = isSuperLig || isMappedLeague;
   const isInternationalCompetition = /nations league|world cup|euro|international/i.test(String(leagueName || ''));
-  const fiveDollarContext = useFiveDollarPrimary ? await fiveDollarFootball.resolveFixture(homeTeamName,awayTeamName,kickoff).catch(()=>null) : null;
+  const fiveDollarNativeFixtureId=providerIds.fiveDollar||providerIds.fivedollar||providerIds['5dollarfootball']||null;
+  const fiveDollarContext = useFiveDollarPrimary
+    ? (fiveDollarNativeFixtureId
+        ? await fiveDollarFootball.getFixtureContext(fiveDollarNativeFixtureId).catch(()=>null)
+        : await fiveDollarFootball.resolveFixture(homeTeamName,awayTeamName,kickoff).catch(()=>null))
+    : null;
 
   // Resolve provider-native SportMonks teams before selecting historical form.
   // BSD/SportsDB are per-team fallbacks, never a source of SportMonks IDs.
@@ -844,9 +849,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // The bookmaker lookup is day-cached and fails open when unavailable.
   const bsdAnchorOdds = bsdConsensus?.fresh && bsdConsensus?.h2h?.home && bsdConsensus?.h2h?.draw && bsdConsensus?.h2h?.away
     ? bsdConsensus.h2h : null;
-  const fiveDollarOdds = (homeTeamName && awayTeamName)
-    ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff)
-    : null;
+  const fiveDollarOdds = fiveDollarContext?.fixtureId
+    ? await fiveDollarFootball.getFixtureOdds(fiveDollarContext.fixtureId,{homeName:homeTeamName,awayName:awayTeamName,leagueId:fiveDollarContext.leagueId,homeTeamId:fiveDollarContext.homeTeamId,awayTeamId:fiveDollarContext.awayTeamId})
+    : (homeTeamName && awayTeamName ? await fiveDollarFootball.getMatchOdds(homeTeamName, awayTeamName, kickoff) : null);
   if (!marketOddsBoard && fiveDollarOdds?.marketBoard) marketOddsBoard = fiveDollarOdds.marketBoard;
 
   // Football-Data remains the final additive odds fallback.
