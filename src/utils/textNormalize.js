@@ -24,9 +24,20 @@ function normalizeTeamName(str) {
 }
 
 /** Iki takim adinin normalize edilince ayni olup olmadigini kontrol eder */
-function teamNamesMatch(nameA, nameB) {
-  if (!nameA || !nameB) return false;
-  return normalizeTeamName(nameA) === normalizeTeamName(nameB);
+function teamCoreName(str) {
+  return normalizeTeamName(str)
+    .replace(/[^a-z0-9]+/g, '')
+    .replace(/(?:fc|sc|cf)$/g, '');
 }
 
-module.exports = { normalizeTeamName, teamNamesMatch };
+function teamNamesMatch(nameA, nameB) {
+  if (!nameA || !nameB) return false;
+  const a = normalizeTeamName(nameA);
+  const b = normalizeTeamName(nameB);
+  if (a === b) return true;
+  const coreA = teamCoreName(nameA);
+  const coreB = teamCoreName(nameB);
+  return coreA.length >= 5 && coreA === coreB;
+}
+
+module.exports = { normalizeTeamName, teamCoreName, teamNamesMatch };
