@@ -29,8 +29,8 @@ function oddsSportKeyForCompetition(canonicalCompetitionKey){
 }
 
 const PROVIDER_CHAIN = Object.freeze({
-  subscribed: Object.freeze(['sportmonks','bsd','thesportsdb']),
-  other: Object.freeze(['bsd','thesportsdb'])
+  subscribed: Object.freeze(['sportmonks','fiveDollarFootball','thesportsdb']),
+  other: Object.freeze(['fiveDollarFootball','thesportsdb'])
 });
 function providerChain(ctx={}){
   return resolve(ctx) ? [...PROVIDER_CHAIN.subscribed] : [...PROVIDER_CHAIN.other];
@@ -71,8 +71,8 @@ function policy(ctx={}){
     rule:'SportMonks remains first for subscribed league data. For fields SportMonks does not supply, use BSD before legacy fallbacks. BSD consensus is the preferred broad market anchor; The Odds API remains the executable bookmaker-price source for Value/EV because free BSD consensus is not a bettable bookmaker quote. Deduplicate correlated evidence before blending.'
   } : {
     tier:'non-sportmonks', sportmonks:false, sportmonksLeagueId:null,
-    primary:'bsd', secondary:'thesportsdb', marketAnchorPrimary:'bsd-consensus', oddsPrimary:'the-odds-api', oddsSecondary:'bsd-consensus', supplemental:['bsd','thesportsdb','football-data'],
-    rule:'Outside the six subscribed leagues do not query SportMonks. Use BSD first, then TheSportsDB/Football-Data fallbacks. The Odds API remains primary for verified bookmaker prices until BSD price coverage is validated.'
+    primary:'fiveDollarFootball', secondary:'thesportsdb', marketAnchorPrimary:'5dollarfootball-bet365', oddsPrimary:'5dollarfootball-bet365', oddsSecondary:'thesportsdb', supplemental:['thesportsdb','football-data'],
+    rule:'Outside the six subscribed leagues Five Dollar Football owns fixture identity, native league/team IDs, team history and Bet365 odds. SportsDB is fallback only when Five Dollar data is unavailable.'
   };
 }
 module.exports={SPORTMONKS_PRIMARY,PROVIDER_CHAIN,providerChain,ODDS_KEYS_BY_COMPETITION,oddsSportKeyForCompetition,resolve,isBsdCoreLeague,policy};
