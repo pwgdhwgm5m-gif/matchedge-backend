@@ -77,8 +77,14 @@ async function getFullOdds(fixtureId){
  try{
   const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixtureId}/odds`,{headers:headers(),params:{bookmakers:'bet365'},timeout:7000});
   const books=r.data?.data?.bookmakers||[];const book=books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0];
-  const data=book?.odds||null;memory.set(key,{data,expires:Date.now()+DAY_TTL_MS});return data;
+  const data=book?.odds||null;memory.set(key,{data,expires:Date.now()+ODDS_TTL_MS});return data;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return null}
+}
+async function getFixtureOdds(fixtureId,{homeName='',awayName='',leagueId='',homeTeamId='',awayTeamId=''}={}){
+ if(!fixtureId||!available())return null;
+ const full=await getFullOdds(fixtureId);if(!full)return null;
+ const markets=normalizeMarkets(full),now=Date.now();
+ return {fixtureId:String(fixtureId),providerIdentity:{competitionId:String(leagueId||''),fixtureId:String(fixtureId),homeTeamId:String(homeTeamId||''),awayTeamId:String(awayTeamId||'')},homeTeam:homeName,awayTeam:awayName,matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,cornerLine:full?.corner_line||full?.cornerLine||null,marketBoard:{bookmakers:[{bookmaker:'bet365',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh:true,updatedAt:new Date(now).toISOString()}],bookmakerCount:1},source:'5dollarfootball-bet365',fetchedAt:now};
 }
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
@@ -96,4 +102,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  return normalized;
 }
 function quotaState(){return {...rateState,blockedUntil:blockedUntil||null,blocked:Date.now()<blockedUntil,inflight:inflight.size,cacheEntries:memory.size}}
-module.exports={enabled,available,quotaState,getFixturesByDate,resolveFixture,getTeamFixtures,getStandings,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
+module.exports={enabled,available,quotaState,getFixturesByDate,resolveFixture,getTeamFixtures,getStandings,getMatchOdds,getFixtureOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
