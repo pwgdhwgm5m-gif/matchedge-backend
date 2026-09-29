@@ -9,6 +9,7 @@ const ProviderIdentity = require('../models/ProviderIdentity');
 const sportsDb = require('./sportsDbService');
 const bsd = require('./bsdService');
 const sportmonks = require('./sportmonksService');
+const fiveDollar = require('./fiveDollarFootballService');
 const cache = require('../utils/cache');
 const {createHash}=require('crypto');
 const {attachAliases,goalMatchKey,nextGoalScore}=require('./goalNotificationIdentity');
@@ -20,6 +21,9 @@ const lastScores = new Map();
 // overlapping provider snapshots, or a temporary score rollback.
 const sentGoalKeys = new Map();
 const sentSmartKeys = new Map();
+const goalSignalHistory = new Map();
+const GOAL_SIGNAL_HISTORY_MS = 12 * 60 * 1000;
+const GOAL_SIGNAL_RESET_MS = 15 * 60 * 1000;
 const SENT_GOAL_TTL_MS = 6 * 60 * 60 * 1000;
 let running = false;
 let lastTrackedLiveAt = 0;
@@ -124,8 +128,84 @@ function sameTrackedMatch(row, match){
 function usersForTrackedMatch(tracked, match, fixtureId, couponsOnly=false){
   const users=new Set((couponsOnly?tracked.coupons:tracked.all).get(String(fixtureId))||[]);
   if(couponsOnly){for(const row of tracked.matches)if(sameTrackedMatch(row,match))users.add(row.userId)}
-  else for(const row of tracked.matches)if(sameTrackedMatch(row,match))users.add(row.userId);
+  else for(const row of tracked.trackedRows||[])if(sameTrackedMatch(row,match))users.add(row.userId);
   return users;
+}
+
+
+function liveMinute(f){
+  const candidates=[f?.minute,f?.time?.minute,f?.timer?.minute,f?.status?.minute,f?.elapsed];
+  for(const v of candidates){const n=Number(v);if(Number.isFinite(n)&&n>=0&&n<=130)return Math.round(n)}
+  return null;
+}
+function liveTeamNames(f){
+  return {homeTeam:f?.teams?.home?.name||f?.home_team?.name||f?.homeTeam||'',awayTeam:f?.teams?.away?.name||f?.away_team?.name||f?.awayTeam||''};
+}
+function liveScore(f){
+  const s=f?.scores||f?.score||{};
+  const cur=s.current||s.live||s.fulltime||s.full_time||s;
+  const n=v=>{const x=Number(v);return Number.isFinite(x)?x:null};
+  return {home:n(cur?.home??f?.goals?.home??f?.home_score),away:n(cur?.away??f?.goals?.away??f?.away_score)};
+}
+function statSide(stats,key,side){const n=Number(stats?.[key]?.[side]);return Number.isFinite(n)?n:0}
+function signalFixtureKey(f){
+  const t=liveTeamNames(f),kick=Number(f?.kickoff_ts)||Math.floor(Date.parse(f?.kickoff_utc||f?.start_time||'')/1000);
+  return [normalizeTeam(t.homeTeam),normalizeTeam(t.awayTeam),Number.isFinite(kick)?Math.round(kick/900):''].join(':');
+}
+function pushSignalSample(f,now=Date.now()){
+  const key=signalFixtureKey(f),stats=f.normalizedStats||fiveDollar.normalizeStats(f.statistics);
+  const score=liveScore(f),minute=liveMinute(f);
+  if(!key||!stats||minute==null)return null;
+  const sample={at:now,minute,score,home:{da:statSide(stats,'dangerousAttacks','home'),sot:statSide(stats,'shotsOnTarget','home'),soff:statSide(stats,'shotsOffTarget','home'),att:statSide(stats,'attacks','home'),poss:statSide(stats,'possession','home')},away:{da:statSide(stats,'dangerousAttacks','away'),sot:statSide(stats,'shotsOnTarget','away'),soff:statSide(stats,'shotsOffTarget','away'),att:statSide(stats,'attacks','away'),poss:statSide(stats,'possession','away')}};
+  const rows=(goalSignalHistory.get(key)||[]).filter(x=>now-x.at<=GOAL_SIGNAL_HISTORY_MS);
+  rows.push(sample);goalSignalHistory.set(key,rows);return {key,rows,sample};
+}
+function delta(a,b,k){return Math.max(0,Number(b?.[k]||0)-Number(a?.[k]||0))}
+function strongGoalSignal(side,opp,old,cur,minutes){
+  const da=delta(old[side],cur[side],'da'),sot=delta(old[side],cur[side],'sot'),shots=sot+delta(old[side],cur[side],'soff'),att=delta(old[side],cur[side],'att');
+  const oppDa=delta(old[opp],cur[opp],'da'),oppSot=delta(old[opp],cur[opp],'sot');
+  const poss=Number(cur[side].poss||0),scale=Math.max(.65,Math.min(2.2,5/Math.max(1,minutes)));
+  // Recent-window consensus. SOT and dangerous-attack acceleration dominate;
+  // shots/attacks/possession only support the signal and cannot trigger it alone.
+  let score=0;
+  score+=Math.min(38,sot*19*scale);
+  score+=Math.min(30,da*3.0*scale);
+  score+=Math.min(12,Math.max(0,shots-sot)*4*scale);
+  score+=Math.min(8,att*.7*scale);
+  if(poss>=58)score+=5;if(poss>=65)score+=3;
+  if(da>=Math.max(4,oppDa*1.7))score+=6;
+  if(sot>=2&&sot>oppSot)score+=8;
+  const consensus=sot>=2&&da>=4&&shots>=3;
+  return {score:Math.round(Math.min(100,score)),qualified:consensus&&score>=82,metrics:{da,sot,shots,att,poss}};
+}
+async function checkStrongGoalSignals(tracked){
+  if(!fiveDollar.available())return;
+  const intel=await fiveDollar.getLiveIntelligence();
+  if(!intel?.available)return;
+  const now=Date.now();
+  for(const f of intel.fixtures||[]){
+    const teams=liveTeamNames(f),minute=liveMinute(f);
+    if(!teams.homeTeam||!teams.awayTeam||minute==null||minute<10||minute>88)continue;
+    const match={homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,kickoff:Number(f.kickoff_ts)?new Date(Number(f.kickoff_ts)*1000).toISOString():(f.kickoff_utc||f.start_time)};
+    const users=usersForTrackedMatch(tracked,match,String(f.id),false);
+    if(!users.size)continue;
+    const hist=pushSignalSample(f,now);if(!hist||hist.rows.length<2)continue;
+    const old=[...hist.rows].reverse().find(x=>hist.sample.at-x.at>=4*60*1000)||hist.rows[0];
+    const mins=Math.max(1,(hist.sample.at-old.at)/60000);
+    if(mins<3.5)continue;
+    const currentScore=hist.sample.score,oldScore=old.score;
+    const goalChanged=currentScore.home!=null&&oldScore.home!=null&&(currentScore.home!==oldScore.home||currentScore.away!==oldScore.away);
+    if(goalChanged)continue; // a goal ends the pressure phase; build a fresh window.
+    for(const [side,opp,team] of [['home','away',teams.homeTeam],['away','home',teams.awayTeam]]){
+      const sig=strongGoalSignal(side,opp,old,hist.sample,mins);if(!sig.qualified)continue;
+      const phase=Math.floor(now/GOAL_SIGNAL_RESET_MS);
+      const eventId='strong-goal-signal:'+hist.key+':'+side+':'+phase;
+      if(!await claimPushEvent(eventId,'strong-goal-signal'))continue;
+      await sendToUsers([...users],{type:'strong-goal-signal',eventId,fixtureId:String(f.id),title:'⚡ STRONG GOAL SIGNAL',body:team+' · '+minute+"'",homeTeam:teams.homeTeam,awayTeam:teams.awayTeam,signalTeam:team,minute,signalScore:sig.score,url:'/canli-simulator.html?fixtureId='+encodeURIComponent(String(f.id))});
+      console.log('[push/strong-goal-signal]',JSON.stringify({fixtureId:String(f.id),team,minute,score:sig.score,metrics:sig.metrics,users:users.size}));
+    }
+  }
+  for(const [k,rows] of goalSignalHistory)if(!rows.length||now-rows[rows.length-1].at>GOAL_SIGNAL_HISTORY_MS)goalSignalHistory.delete(k);
 }
 
 
@@ -137,6 +217,7 @@ async function checkGoals() {
     webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:support@socceredgepro.com', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     const tracked = await withProviderAliases(await trackedUsersByFixture());
     if (!tracked.all.size) return;
+    await checkStrongGoalSignals(tracked);
     // Refresh more often around a tracked kickoff and while a tracked match
     // is live. The shared BSD request budget still limits all requests.
     const now=Date.now();
