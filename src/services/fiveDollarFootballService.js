@@ -2,8 +2,11 @@ const axios=require('axios');
 const config=require('../config/config');
 const {teamNamesMatch}=require('../utils/textNormalize');
 
-const memory=new Map(),DAY_TTL_MS=10*60*1000,MISS_TTL_MS=30*60*1000,RATE_BACKOFF_MS=60*60*1000,AUTH_BACKOFF_MS=15*60*1000;
-let blockedUntil=0;
+const memory=new Map(),inflight=new Map(),DAY_TTL_MS=10*60*1000,IDENTITY_TTL_MS=24*60*60*1000,HISTORY_TTL_MS=6*60*60*1000,STANDINGS_TTL_MS=6*60*60*1000,ODDS_TTL_MS=10*60*1000,MISS_TTL_MS=30*60*1000,RATE_BACKOFF_MS=60*60*1000,AUTH_BACKOFF_MS=15*60*1000;
+let blockedUntil=0,rateState={limit:null,remaining:null,reset:null};
+function coalesce(key,fn){if(inflight.has(key))return inflight.get(key);const p=Promise.resolve().then(fn).finally(()=>inflight.delete(key));inflight.set(key,p);return p}
+function updateRate(h={}){rateState={limit:Number(h['x-ratelimit-limit'])||null,remaining:Number(h['x-ratelimit-remaining']),reset:h['x-ratelimit-reset']||null};if(Number.isFinite(rateState.remaining)&&rateState.remaining<=2)blockedUntil=Math.max(blockedUntil,Date.now()+60000)}
+function cacheRow(key,data,ttl){memory.set(key,{data,expires:Date.now()+ttl});return data}
 const num=v=>{const n=Number(v);return n>1?n:null};
 function enabled(){return Boolean(config.fiveDollarFootball?.key)}
 function available(){return enabled()&&Date.now()>=blockedUntil}
@@ -33,10 +36,10 @@ function normalizeFixture(f,homeName,awayName,fetchedAt){
  return {fixtureId:String(f.id),providerIdentity:{competitionId:String(f.league?.id||f.competition?.id||''),fixtureId:String(f.id),homeTeamId:String(f.teams?.home?.id||''),awayTeamId:String(f.teams?.away?.id||'')},matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,marketBoard:{bookmakers:[{bookmaker:'market',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh,updatedAt:fetchedAt?new Date(fetchedAt).toISOString():null}],bookmakerCount:1},source:'5dollarfootball-market',fetchedAt};
 }
 async function getDay(start){
- const key=`five-dollar-day-v3:${start}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached;if(!available())return null;
- try{let data=[],page=1,lastHeaders={};while(page<=8){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50,page},timeout:7000});lastHeaders=r.headers||{};const rows=Array.isArray(r.data?.data)?r.data.data:[];data.push(...rows);const more=r.data?.pagination?.has_more===true||r.data?.meta?.current_page<r.data?.meta?.last_page;if(!more||!rows.length)break;const rem=Number(lastHeaders['x-ratelimit-remaining']);if(Number.isFinite(rem)&&rem<=2)break;page++}
+ const key=`five-dollar-day-v3:${start}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached;if(!available())return cached||null;
+ return coalesce(key,async()=>{try{let data=[],page=1,lastHeaders={};while(page<=8){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50,page},timeout:7000});lastHeaders=r.headers||{};updateRate(lastHeaders);const rows=Array.isArray(r.data?.data)?r.data.data:[];data.push(...rows);const more=r.data?.pagination?.has_more===true||r.data?.meta?.current_page<r.data?.meta?.last_page;if(!more||!rows.length)break;const rem=Number(lastHeaders['x-ratelimit-remaining']);if(Number.isFinite(rem)&&rem<=2)break;page++}
  const now=Date.now(),row={data,expires:now+DAY_TTL_MS,fetchedAt:now,rate:{limit:lastHeaders['x-ratelimit-limit']||null,remaining:lastHeaders['x-ratelimit-remaining']||null,reset:lastHeaders['x-ratelimit-reset']||null}};memory.set(key,row);return row;
- }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar]',e.response?.status===429?'rate limit backoff':e.response?.status===401||e.response?.status===403?'auth/plan unavailable':'request failed');return null}
+ }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar]',e.response?.status===429?'rate limit backoff':e.response?.status===401||e.response?.status===403?'auth/plan unavailable':'request failed');return cached||null}})
 }
 
 function kickoffMs(f){return Number(f?.kickoff_ts)*1000||Date.parse(f?.kickoff_utc||f?.start_time||'')}
@@ -62,12 +65,12 @@ async function resolveFixture(homeName,awayName,kickoff){
 async function getTeamFixtures(teamId,{leagueId=null,limit=15}={}){
  if(!available()||!teamId)return {ok:false,error:'missing_team_id',data:{response:[]}};const key=`five-dollar-team-v1:${teamId}:${leagueId||'all'}:${limit}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
  try{let rows=[],page=1;while(page<=4&&rows.length<Math.max(limit,15)){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/teams/${teamId}/fixtures`,{headers:headers(),params:{status:'finished',per_page:50,page},timeout:7000});const batch=Array.isArray(r.data?.data)?r.data.data:[];rows.push(...batch);if(r.data?.pagination?.has_more!==true||!batch.length)break;page++}
-  if(leagueId)rows=rows.filter(x=>String(x?.league?.id||'')===String(leagueId));rows=rows.slice(0,limit);const out={ok:rows.length>0,source:'5dollarfootball-team-history',teamId:String(teamId),data:{response:rows.map(toAnalysisFixture)},raw:rows};memory.set(key,{data:out,expires:Date.now()+DAY_TTL_MS});return out;
+  if(leagueId)rows=rows.filter(x=>String(x?.league?.id||'')===String(leagueId));rows=rows.slice(0,limit);const out={ok:rows.length>0,source:'5dollarfootball-team-history',teamId:String(teamId),data:{response:rows.map(toAnalysisFixture)},raw:rows};memory.set(key,{data:out,expires:Date.now()+HISTORY_TTL_MS});return out;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,error:`five_dollar_team_${e.response?.status||'failed'}`,data:{response:[]}}}
 }
 async function getStandings(leagueId){
  if(!available()||!leagueId)return {ok:false,available:false,table:[]};const key=`five-dollar-standings-v1:${leagueId}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
- try{const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/standings`,{headers:headers(),params:{league:leagueId,type:'total'},timeout:7000});const rows=Array.isArray(r.data?.data?.table)?r.data.data.table:[];const out={ok:true,available:rows.length>0,source:'5dollarfootball',table:rows.map(x=>({teamId:String(x?.team?.id||''),teamName:x?.team?.name||'',rank:Number(x.position),points:Number.isFinite(Number(x.points))?Number(x.points):null,played:Number.isFinite(Number(x.played))?Number(x.played):null,description:null}))};memory.set(key,{data:out,expires:Date.now()+DAY_TTL_MS});return out;}catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,available:false,error:`five_dollar_standings_${e.response?.status||'failed'}`,table:[]}}
+ try{const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/standings`,{headers:headers(),params:{league:leagueId,type:'total'},timeout:7000});const rows=Array.isArray(r.data?.data?.table)?r.data.data.table:[];const out={ok:true,available:rows.length>0,source:'5dollarfootball',table:rows.map(x=>({teamId:String(x?.team?.id||''),teamName:x?.team?.name||'',rank:Number(x.position),points:Number.isFinite(Number(x.points))?Number(x.points):null,played:Number.isFinite(Number(x.played))?Number(x.played):null,description:null}))};memory.set(key,{data:out,expires:Date.now()+STANDINGS_TTL_MS});return out;}catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,available:false,error:`five_dollar_standings_${e.response?.status||'failed'}`,table:[]}}
 }
 async function getFullOdds(fixtureId){
  const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
@@ -92,4 +95,5 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getFixturesByDate,resolveFixture,getTeamFixtures,getStandings,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
+function quotaState(){return {...rateState,blockedUntil:blockedUntil||null,blocked:Date.now()<blockedUntil,inflight:inflight.size,cacheEntries:memory.size}}
+module.exports={enabled,available,quotaState,getFixturesByDate,resolveFixture,getTeamFixtures,getStandings,getMatchOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
