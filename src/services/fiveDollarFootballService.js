@@ -123,6 +123,24 @@ async function getScoreboardDay(date){
  return {available:true,matches:(day.data||[]).map(normalizeScoreFixture).filter(x=>x.homeTeam&&x.awayTeam),fetchedAt:day.fetchedAt};
 }
 
+
+const STANDINGS_TTL_MS=6*60*60*1000;
+function normalizeStandingsRow(r){
+ const gf=Number(r?.goals_for??r?.goals?.for??r?.all?.goals?.for),ga=Number(r?.goals_against??r?.goals?.against??r?.all?.goals?.against);
+ return {teamId:r?.team?.id??r?.team_id??null,teamName:r?.team?.name??r?.team_name??'',rank:Number(r?.position??r?.rank)||null,played:Number(r?.played??r?.all?.played)||0,win:Number(r?.win??r?.wins??r?.all?.win)||0,draw:Number(r?.draw??r?.draws??r?.all?.draw)||0,lose:Number(r?.lose??r?.losses??r?.all?.lose)||0,goalsFor:Number.isFinite(gf)?gf:null,goalsAgainst:Number.isFinite(ga)?ga:null,goalDifference:Number(r?.goal_difference??r?.goals_diff??r?.goalsDiff) || (Number.isFinite(gf)&&Number.isFinite(ga)?gf-ga:null),points:Number(r?.points)||0,description:r?.description??null};
+}
+async function getStandings(leagueId,season){
+ if(!leagueId)return {ok:true,available:false,table:[],source:'5dollarfootball'};
+ const key=`five-dollar-standings-v1:${leagueId}:${season||'current'}`,cached=memory.get(key);
+ if(cached?.expires>Date.now())return cached.data;
+ const params={league:leagueId,type:'total'};if(season)params.season=season;
+ const r=await request('/standings',params,9000);
+ if(!r)return {ok:false,available:false,table:[],source:'5dollarfootball'};
+ const root=r.data?.data||{},table=(Array.isArray(root.table)?root.table:[]).map(normalizeStandingsRow).filter(x=>x.teamName);
+ const data={ok:true,available:table.length>0,table,source:'5dollarfootball',providerSource:root.source||null,season:root.season||season||null,leagueId:String(leagueId),fetchedAt:Date.now()};
+ memory.set(key,{data,expires:Date.now()+STANDINGS_TTL_MS});return data;
+}
+
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
  const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
@@ -138,4 +156,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
+module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeFixture,marketStages};
