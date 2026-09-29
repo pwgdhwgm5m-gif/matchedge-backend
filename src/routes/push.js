@@ -1,10 +1,25 @@
 const express = require('express');
 const router = express.Router();
 const PushSubscription = require('../models/PushSubscription');
+const User = require('../models/User');
 const { requireAuth } = require('../middleware/authMiddleware');
 
 router.get('/public-key', (req, res) => res.json({ publicKey: process.env.VAPID_PUBLIC_KEY || '' }));
 router.use(requireAuth);
+
+router.get('/strong-signal', async (req, res) => {
+  const user = await User.findById(req.user.userId).select('strongGoalNotifications').lean();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ enabled: user.strongGoalNotifications !== false });
+});
+
+router.put('/strong-signal', async (req, res) => {
+  if (typeof req.body?.enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be a boolean' });
+  const user = await User.findByIdAndUpdate(req.user.userId,
+    { $set: { strongGoalNotifications: req.body.enabled } }, { new: true }).select('strongGoalNotifications').lean();
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ enabled: user.strongGoalNotifications });
+});
 
 router.post('/subscribe', async (req, res) => {
   const s = req.body && req.body.subscription;
