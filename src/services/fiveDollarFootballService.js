@@ -62,6 +62,10 @@ async function resolveFixture(homeName,awayName,kickoff){
  const f=candidates.find(x=>!Number.isFinite(kickoffMs(x))||Math.abs(kickoffMs(x)-target)<=4*3600000);if(!f)return null;
  return {raw:f,fixtureId:String(f.id),leagueId:String(f?.league?.id||''),homeTeamId:String(f?.teams?.home?.id||''),awayTeamId:String(f?.teams?.away?.id||''),homeTeam:f?.teams?.home?.name||homeName,awayTeam:f?.teams?.away?.name||awayName,kickoff:f?.kickoff_utc||f?.start_time||kickoff};
 }
+async function getFixtureContext(fixtureId){
+ if(!fixtureId||!available())return null;const key=`five-dollar-fixture-v1:${fixtureId}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
+ return coalesce(key,async()=>{try{const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixtureId}`,{headers:headers(),timeout:7000});updateRate(r.headers||{});const f=r.data?.data||null;if(!f)return null;const out={raw:f,fixtureId:String(f.id),leagueId:String(f?.league?.id||''),homeTeamId:String(f?.teams?.home?.id||''),awayTeamId:String(f?.teams?.away?.id||''),homeTeam:f?.teams?.home?.name||'',awayTeam:f?.teams?.away?.name||'',kickoff:f?.kickoff_utc||f?.start_time||null};return cacheRow(key,out,IDENTITY_TTL_MS)}catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return null}})
+}
 async function getTeamFixtures(teamId,{leagueId=null,limit=15}={}){
  if(!available()||!teamId)return {ok:false,error:'missing_team_id',data:{response:[]}};const key=`five-dollar-team-v1:${teamId}:${leagueId||'all'}:${limit}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
  try{let rows=[],page=1;while(page<=4&&rows.length<Math.max(limit,15)){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/teams/${teamId}/fixtures`,{headers:headers(),params:{status:'finished',per_page:50,page},timeout:7000});const batch=Array.isArray(r.data?.data)?r.data.data:[];rows.push(...batch);if(r.data?.pagination?.has_more!==true||!batch.length)break;page++}
@@ -102,4 +106,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  return normalized;
 }
 function quotaState(){return {...rateState,blockedUntil:blockedUntil||null,blocked:Date.now()<blockedUntil,inflight:inflight.size,cacheEntries:memory.size}}
-module.exports={enabled,available,quotaState,getFixturesByDate,resolveFixture,getTeamFixtures,getStandings,getMatchOdds,getFixtureOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
+module.exports={enabled,available,quotaState,getFixturesByDate,resolveFixture,getFixtureContext,getTeamFixtures,getStandings,getMatchOdds,getFixtureOdds,getFullOdds,priceFreshness,normalizeMarkets,normalizeFixture,toAnalysisFixture};
