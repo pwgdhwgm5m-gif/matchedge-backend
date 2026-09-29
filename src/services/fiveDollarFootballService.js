@@ -200,6 +200,40 @@ async function getStandings(leagueId,season){
  memory.set(key,{data,expires:Date.now()+STANDINGS_TTL_MS});return data;
 }
 
+
+const CORNER_HISTORY_TTL_MS=6*60*60*1000;
+async function getCornerHistoryForMatch({leagueName,homeName,awayName,kickoff}={}){
+ const identity=await resolveLeagueIdentity(leagueName,homeName,awayName,kickoff);
+ if(!identity?.leagueId)return {available:false,source:'5dollarfootball-corners'};
+ const key=`five-dollar-corner-history-v1:${identity.leagueId}`,cached=memory.get(key);
+ let rows=cached?.expires>Date.now()?cached.data:null;
+ if(!rows){
+   const end=Math.floor(Date.now()/1000),start=end-180*86400;
+   const params={status:'finished',order:'desc',page:1,per_page:100,start_time:start,end_time:end,include:'stats'};
+   const r=await request(`/leagues/${identity.leagueId}/fixtures`,params,12000);
+   rows=Array.isArray(r?.data?.data)?r.data.data:[];
+   memory.set(key,{data:rows,expires:Date.now()+CORNER_HISTORY_TTL_MS});
+ }
+ const aggregate=(teamName,teamId)=>{
+   const samples=[];
+   for(const x of rows){
+     const h=x?.teams?.home,a=x?.teams?.away;
+     const home=teamId?String(h?.id||'')===String(teamId):teamNamesMatch(h?.name,teamName);
+     const away=teamId?String(a?.id||'')===String(teamId):teamNamesMatch(a?.name,teamName);
+     if(!home&&!away)continue;
+     const st=normalizeStats(x?.statistics||x?.stats||x),hc=Number(st?.corners?.home),ac=Number(st?.corners?.away);
+     if(!Number.isFinite(hc)||!Number.isFinite(ac))continue;
+     samples.push({for:home?hc:ac,against:home?ac:hc});
+     if(samples.length>=12)break;
+   }
+   if(samples.length<3)return null;
+   const avg=k=>samples.reduce((s,x)=>s+x[k],0)/samples.length;
+   return {cornerSample:samples.length,avgCornersFor:+avg('for').toFixed(2),avgCornersAgainst:+avg('against').toFixed(2)};
+ };
+ const home=aggregate(homeName,identity.homeTeamId),away=aggregate(awayName,identity.awayTeamId);
+ return {available:Boolean(home&&away),home,away,leagueId:String(identity.leagueId),source:'5dollarfootball-corners',fetchedAt:Date.now()};
+}
+
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
  const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
@@ -215,4 +249,4 @@ async function getMatchOdds(homeName,awayName,kickoff){
  }
  return normalized;
 }
-module.exports={enabled,available,getMatchOdds,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeCornerMarket,normalizeFixture,marketStages};
+module.exports={enabled,available,getMatchOdds,getCornerHistoryForMatch,getFullOdds,getLiveIntelligence,getHistoricalLeagueFixtures,getStandings,getStandingsForMatch,resolveLeagueIdentity,getScoreboardDay,normalizeScoreFixture,normalizeStats,normalizeEvents,priceFreshness,normalizeMarkets,normalizeCornerMarket,normalizeFixture,marketStages};

@@ -642,6 +642,12 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   }
   if (marketProbabilities.scoring) marketProbabilities.scoring={home:shrinkPercent(marketProbabilities.scoring.home),away:shrinkPercent(marketProbabilities.scoring.away)};
   const cornerProjection = accuracy.cornerProjection(homeAdvanced, awayAdvanced);
+  const fiveDollarCornerHistory = !useSportmonksPrimary ? await fiveDollarFootball.getCornerHistoryForMatch({
+    leagueName:registeredCompetition?.displayName||leagueName||league,
+    homeName:homeTeamName,awayName:awayTeamName,kickoff
+  }).catch(()=>({available:false})) : null;
+  const fiveDollarCornerProjection = fiveDollarCornerHistory?.available
+    ? accuracy.cornerProjection(fiveDollarCornerHistory.home,fiveDollarCornerHistory.away) : null;
   const smHome = sportmonksHistorical?.home;
   const smAway = sportmonksHistorical?.away;
   const ha = smHome?.averages || {}, aa = smAway?.averages || {};
@@ -676,11 +682,15 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   };
   const smWeight=smCornerReady?Math.min(smSample,8):0;
   const tsdbWeight=tsdbCornerReady?Math.min(Number(cornerProjection.sample||0),8):0;
-  const pooledHome=weighted(smExpectedHome,smWeight,cornerProjection?.homeExpected,tsdbWeight);
-  const pooledAway=weighted(smExpectedAway,smWeight,cornerProjection?.awayExpected,tsdbWeight);
-  const effectiveCornerSample=Math.max(smWeight,tsdbWeight);
+  const fiveWeight=fiveDollarCornerProjection?.sample||0;
+  const fallbackHome=fiveDollarCornerProjection?.homeExpected??cornerProjection?.homeExpected;
+  const fallbackAway=fiveDollarCornerProjection?.awayExpected??cornerProjection?.awayExpected;
+  const fallbackWeight=fiveWeight||tsdbWeight;
+  const pooledHome=weighted(smExpectedHome,smWeight,fallbackHome,fallbackWeight);
+  const pooledAway=weighted(smExpectedAway,smWeight,fallbackAway,fallbackWeight);
+  const effectiveCornerSample=Math.max(smWeight,fallbackWeight);
   const pooledReady=Number.isFinite(pooledHome)&&Number.isFinite(pooledAway)&&effectiveCornerSample>=3;
-  const poolSources=[smCornerReady?'sportmonks':null,tsdbCornerReady?'sportsdb':null].filter(Boolean);
+  const poolSources=[smCornerReady?'sportmonks':null,fiveDollarCornerProjection?'5dollarfootball':null,!fiveDollarCornerProjection&&tsdbCornerReady?'sportsdb':null].filter(Boolean);
 
   let cornerMetrics = pooledReady
     ? Object.assign(poisson.estimateCornerMetricsFromExpected(pooledHome, pooledAway), {
