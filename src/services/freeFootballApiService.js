@@ -1,5 +1,7 @@
 const config = require('../config/config');
 const { fetchT } = require('../utils/fetchWithTimeout');
+const cache = require('../utils/cache');
+const providerQuota = require('./providerQuotaService');
 
 /**
  * "Free API Live Football Data" (RapidAPI) - gunun maclarini date bazli
@@ -10,9 +12,12 @@ const { fetchT } = require('../utils/fetchWithTimeout');
  * @param {string} dateStr - 'YYYY-MM-DD' formatinda tarih
  */
 async function getMatchesByDate(dateStr) {
+  const key=`free-football:matches:${dateStr}`; const hit=cache.get(key); if(hit!==undefined)return {...hit,cached:true};
+  if(!providerQuota.canCall('freeFootball'))return {ok:false,error:'quota_guard_free_football'};
+  providerQuota.record('freeFootball');
   const compactDate = dateStr.replace(/-/g, ''); // '2026-09-15' -> '20260915'
 
-  return fetchT(
+  const result=await fetchT(
     {
       method: 'GET',
       url: `${config.freeFootballApi.baseUrl}/football-get-matches-by-date`,
@@ -25,6 +30,8 @@ async function getMatchesByDate(dateStr) {
     8000,
     'FreeFootballAPI Matches'
   );
+  if(!result.ok){if(String(result.error||'').includes('429'))providerQuota.rateLimited('freeFootball',60000);return result;}
+  cache.set(key,result,10*60); return result;
 }
 
 /**
