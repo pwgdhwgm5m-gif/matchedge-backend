@@ -1,4 +1,7 @@
 const axios = require('axios');
+const cache = require('../utils/cache');
+const providerQuota = require('./providerQuotaService');
+const inFlight = new Map();
 
 const BASE_URL = 'https://api.sportmonks.com/v3/football';
 
@@ -8,20 +11,31 @@ function token() {
 
 async function request(path, params = {}, timeoutMs = 12000) {
   if (!token()) return { ok: false, error: 'SPORTMONKS_API_TOKEN missing', data: null };
-  try {
-    const response = await axios.get(`${BASE_URL}${path}`, {
-      params: { ...params, api_token: token() },
-      timeout: timeoutMs,
-    });
-    return { ok: true, data: response.data };
-  } catch (err) {
-    return {
-      ok: false,
-      error: err.response?.data?.message || err.message,
-      status: err.response?.status || null,
-      data: null,
-    };
-  }
+  const cleanParams={...params}; delete cleanParams.api_token;
+  const key='sportmonks-http:'+path+':'+JSON.stringify(Object.keys(cleanParams).sort().reduce((o,k)=>(o[k]=cleanParams[k],o),{}));
+  const cached=cache.get(key);
+  if(cached!==undefined)return {...cached,cached:true};
+  if(inFlight.has(key))return inFlight.get(key);
+  const task=(async()=>{
+    if(!providerQuota.canCall('sportmonks'))return {ok:false,error:'quota_guard_sportmonks',data:null};
+    providerQuota.record('sportmonks');
+    try {
+      const response = await axios.get(`${BASE_URL}${path}`, {
+        params: { ...cleanParams, api_token: token() },
+        timeout: timeoutMs,
+      });
+      const out={ ok: true, data: response.data };
+      const live=/livescores|inplay/i.test(path);
+      cache.set(key,out,live?15:300);
+      return out;
+    } catch (err) {
+      const status=err.response?.status||null;
+      if(status===429)providerQuota.rateLimited('sportmonks',Math.max(60000,Number(err.response?.headers?.['retry-after']||60)*1000));
+      return {ok:false,error:err.response?.data?.message||err.message,status,data:null};
+    }
+  })();
+  inFlight.set(key,task);
+  try{return await task;}finally{if(inFlight.get(key)===task)inFlight.delete(key);}
 }
 
 function scoreValue(scores, participant) {
