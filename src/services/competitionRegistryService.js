@@ -473,7 +473,20 @@ function resolveCompetition({
   }
 
   const name = leagueName || league || displayName;
-  const hit = BY_ALIAS.get(normalizeCompetitionName(name));
+  const normalizedName = normalizeCompetitionName(name);
+
+  // UEFA providers frequently label the same competition by stage/round
+  // (e.g. League Stage, Qualifying, Knockout Play-offs). Those labels are
+  // still the parent UEFA competition and must never become unmapped.
+  const uefaStageCompetition =
+    normalizedName.includes('championsleague') ? BY_KEY.get('uefa-champions-league') :
+    normalizedName.includes('europaleague') ? BY_KEY.get('uefa-europa-league') :
+    normalizedName.includes('conferenceleague') ? BY_KEY.get('uefa-conference-league') :
+    normalizedName.includes('nationsleague') ? BY_KEY.get('uefa-nations-league') :
+    null;
+  if (uefaStageCompetition) return uefaStageCompetition;
+
+  const hit = BY_ALIAS.get(normalizedName);
   if (!hit || hit === AMBIGUOUS_ALIAS) return null;
   const suppliedCountry = normalizeCountry(leagueCountry || competitionCountry || country);
   const mappedCountry = normalizeCountry(hit.country);
