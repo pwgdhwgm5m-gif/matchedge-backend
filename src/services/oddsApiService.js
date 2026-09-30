@@ -3,13 +3,17 @@ const { fetchT } = require('../utils/fetchWithTimeout');
 const cache = require('../utils/cache');
 const { teamNamesMatch, normalizeTeamName } = require('../utils/textNormalize');
 const competitionRegistry = require('./competitionRegistryService');
+const providerQuota = require('./providerQuotaService');
 
 let oddsCircuitOpenUntil=0;
 function oddsEnabled(){return Boolean(config.oddsApi.key)&&Date.now()>=oddsCircuitOpenUntil}
 function markOddsFailure(result){const status=result?.status||result?.error?.status||result?.error?.response?.status;const err=String(result?.error||'');if(status===401||status===403||status===429||/http_(401|403|429)/.test(err)){oddsCircuitOpenUntil=Date.now()+(status===429||/429/.test(err)?6*60*60*1000:24*60*60*1000);console.warn('[odds-api] circuit breaker aktif; gereksiz istekler gecici olarak durduruldu.')}}
 /** Belirli bir lig icin coklu bookmaker oranlari */
 async function getOddsForLeague(sportKey = 'soccer_epl') {
+  const cacheKey=`odds-api:league:${sportKey}`; const cached=cache.get(cacheKey); if(cached!==undefined)return {...cached,cached:true};
   if(!oddsEnabled()) return {ok:false,error:'odds_api_disabled_or_circuit_open'};
+  if(!providerQuota.canCall('oddsApi'))return {ok:false,error:'quota_guard_odds_api'};
+  providerQuota.record('oddsApi');
   const result=await fetchT(
     {
       method: 'GET',
@@ -24,8 +28,8 @@ async function getOddsForLeague(sportKey = 'soccer_epl') {
     6000,
     'The Odds API'
   );
-  if(!result.ok) markOddsFailure(result);
-  return result;
+  if(!result.ok){markOddsFailure(result);if(String(result.error||'').includes('429'))providerQuota.rateLimited('oddsApi',6*60*60*1000);return result;}
+  cache.set(cacheKey,result,10*60); return result;
 }
 
 /**
@@ -36,7 +40,10 @@ async function getOddsForLeague(sportKey = 'soccer_epl') {
  * gercek (kotali) oran istegiyle tariyoruz.
  */
 async function getEventsForLeague(sportKey) {
+  const cacheKey=`odds-api:events:${sportKey}`; const cached=cache.get(cacheKey); if(cached!==undefined)return {...cached,cached:true};
   if (!oddsEnabled()) return { ok: false, error: 'odds_api_disabled_or_circuit_open' };
+  if(!providerQuota.canCall('oddsApi'))return {ok:false,error:'quota_guard_odds_api'};
+  providerQuota.record('oddsApi');
   const result=await fetchT(
     {
       method: 'GET',
@@ -46,8 +53,8 @@ async function getEventsForLeague(sportKey) {
     5000,
     `The Odds API Events (${sportKey})`
   );
-  if(!result.ok) markOddsFailure(result);
-  return result;
+  if(!result.ok){markOddsFailure(result);if(String(result.error||'').includes('429'))providerQuota.rateLimited('oddsApi',6*60*60*1000);return result;}
+  cache.set(cacheKey,result,10*60); return result;
 }
 
 async function getEventExtendedOdds(sportKey,eventId){
