@@ -40,6 +40,7 @@ const { normalizeTeamName } = require('../utils/textNormalize');
 const cache = require('../utils/cache');
 const fixtureIdentity = require('./fixtureIdentityService');
 const { BsdRequestBudget } = require('./bsdRequestBudget');
+const providerQuota = require('./providerQuotaService');
 
 const BASE_URL = 'https://sports.bzzoiro.com/api/v2';
 const API_KEY = process.env.BSD_API_KEY || '';
@@ -50,7 +51,9 @@ const inFlight = new Map();
 
 async function fetchBsd(path, timeoutMs) {
   if (!API_KEY) return { ok: false, error: 'no_api_key' };
+  if (!providerQuota.canCall('bsd')) return {ok:false,error:'quota_guard_bsd'};
   if (!requestBudget.reserve()) return {ok:false,error:'bsd_request_budget'};
+  providerQuota.record('bsd');
 
   const ms = timeoutMs || 8000;
   const controller = new AbortController();
@@ -61,6 +64,10 @@ async function fetchBsd(path, timeoutMs) {
       headers: { 'Authorization': 'Token ' + API_KEY },
     });
     requestBudget.observe(res);
+    if(res.status===429){
+      const retrySeconds=Number(res.headers?.get('retry-after'));
+      providerQuota.rateLimited('bsd',Math.max(60000,(Number.isFinite(retrySeconds)?retrySeconds:60)*1000));
+    }
     if (!res.ok) {
       return { ok: false, error: 'http_' + res.status };
     }
