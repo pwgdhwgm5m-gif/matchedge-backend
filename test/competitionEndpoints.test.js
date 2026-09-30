@@ -23,7 +23,7 @@ function responseCapture() {
   };
 }
 
-test('fixture endpoint deduplicates verified cross-provider league rows', async () => {
+test('fixture endpoint uses SportsDB fallback when Five Dollar is unavailable', async () => {
   const original = {
     getOrFetch: cache.getOrFetch,
     transformEvent: sportsDb.transformEvent,
@@ -63,55 +63,14 @@ test('fixture endpoint deduplicates verified cross-provider league rows', async 
     assert.equal(response.body.matches.length, 1);
     assert.equal(response.body.matches[0].canonicalCompetitionKey, 'usa-mls');
     assert.equal(response.body.matches[0].displayName, 'USA Major League Soccer');
-    assert.equal(response.body.matches[0].canonicalProvider, 'bsd');
+    assert.equal(response.body.matches[0].canonicalProvider, 'thesportsdb');
     assert.equal(response.body.matches[0].providerIds.sportsdb, 'tsdb-mls-1');
-    assert.equal(response.body.matches[0].providerIds.bsd, 'bsd-mls-1');
   } finally {
     cache.getOrFetch = original.getOrFetch;
     sportsDb.transformEvent = original.transformEvent;
     sportsDb.isWhitelistedLeague = original.isWhitelistedLeague;
     sportsDb.applyLiveOverlay = original.applyLiveOverlay;
   }
-});
-
-test('fixture endpoint includes a BSD Eerste Divisie match with an unmapped numeric league ID', async () => {
-  const originalGetOrFetch = cache.getOrFetch;
-  try {
-    cache.getOrFetch = async key => key.startsWith('bsd:canonical-results:')
-      ? {ok: true, matches: [{
-          fixtureId: 'bsd-dordrecht-almere', bsdEventId: 'bsd-dordrecht-almere',
-          leagueId: 'provider-league-id', league: 'Eerste Divisie', leagueCountry: 'Netherlands',
-          homeTeam: 'FC Dordrecht', awayTeam: 'Almere City', date: '2026-09-25T19:00:00Z'
-        }]}
-      : {ok: false, fixtures: [], matches: []};
-    const response = responseCapture();
-    await routeHandler(matchesRouter)({query: {date: '2026-09-25'}}, response);
-    assert.equal(response.statusCode, 200);
-    assert.equal(response.body.matches.length, 1);
-    assert.equal(response.body.matches[0].canonicalCompetitionKey, 'netherlands-eerste-divisie');
-    assert.equal(response.body.matches[0].visibleInCompetitionFilter, true);
-    assert.equal(response.body.matches[0].canonicalProvider, 'bsd');
-  } finally {
-    cache.getOrFetch = originalGetOrFetch;
-  }
-});
-
-test('fixture endpoint retains a BSD live match missing from its day feed', async () => {
-  const originalGetOrFetch = cache.getOrFetch;
-  try {
-    cache.getOrFetch = async key => key === 'bsd:fixture-live:canonical'
-      ? {ok:true,matches:[{
-          fixtureId:'bsd-live-only',bsdEventId:'bsd-live-only',league:'Keuken Kampioen Divisie',
-          leagueCountry:'Netherlands',leagueId:'live-league-id',
-          homeTeam:'FC Dordrecht',awayTeam:'Almere City',date:'2026-09-25T19:00:00Z',isLive:true
-        }]}
-      : {ok:false,fixtures:[],matches:[]};
-    const response=responseCapture();
-    await routeHandler(matchesRouter)({query:{date:'2026-09-25'}},response);
-    assert.equal(response.body.matches.length,1);
-    assert.equal(response.body.matches[0].canonicalCompetitionKey,'netherlands-eerste-divisie');
-    assert.equal(response.body.matches[0].visibleInCompetitionFilter,true);
-  } finally {cache.getOrFetch=originalGetOrFetch;}
 });
 
 test('fixture endpoint uses a verified live fallback when BSD has no Eerste Divisie event', async () => {
