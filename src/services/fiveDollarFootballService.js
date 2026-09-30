@@ -84,8 +84,14 @@ async function getFullOdds(fixtureId){
   const data=book?.odds||null;memory.set(key,{data,expires:Date.now()+ODDS_TTL_MS});return data;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return cached?.data||null}})
 }
-async function getFixtureOdds(fixtureId,{homeName='',awayName='',leagueId='',homeTeamId='',awayTeamId=''}={}){
+async function getFixtureOdds(fixtureId,{homeName='',awayName='',leagueId='',homeTeamId='',awayTeamId='',kickoff=null}={}){
  if(!fixtureId||!available())return null;
+ // Prefer the shared day cache. This keeps bookmaker traffic independent from
+ // standings/history traffic and prevents N match cards from creating N odds calls.
+ if(homeName&&awayName&&kickoff){
+   const cached=await getMatchOdds(homeName,awayName,kickoff);
+   if(cached?.matchOdds||cached?.totals25||cached?.btts)return cached;
+ }
  const full=await getFullOdds(fixtureId);if(!full)return null;
  const markets=normalizeMarkets(full),now=Date.now();
  return {fixtureId:String(fixtureId),providerIdentity:{competitionId:String(leagueId||''),fixtureId:String(fixtureId),homeTeamId:String(homeTeamId||''),awayTeamId:String(awayTeamId||'')},homeTeam:homeName,awayTeam:awayName,matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,cornerLine:full?.corner_line||full?.cornerLine||null,marketBoard:{bookmakers:[{bookmaker:'bet365',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh:true,updatedAt:new Date(now).toISOString()}],bookmakerCount:1},source:'5dollarfootball-bet365',fetchedAt:now};
@@ -99,7 +105,11 @@ async function getMatchOdds(homeName,awayName,kickoff){
  // The list include is intentionally compact. The documented single-fixture
  // odds endpoint is the authoritative payload for BTTS and goal_line_fixed.
  let normalized=normalizeFixture(f,homeName,awayName,day.fetchedAt);
- if(!normalized?.totals25||!normalized?.btts){
+ // Quota isolation: the day fixture feed already includes bookmaker odds and is
+ // shared by every analysis on that date. Never spend one single-fixture odds
+ // request merely because an optional BTTS/totals market is absent. Only enrich
+ // when the cached day payload contains no usable bookmaker market at all.
+ if(!normalized?.matchOdds && !normalized?.totals25 && !normalized?.btts){
    const full=await getFullOdds(f.id);
    if(full)normalized=normalizeFixture({...f,odds:full},homeName,awayName,Date.now());
  }
