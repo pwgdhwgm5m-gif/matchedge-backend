@@ -4,6 +4,8 @@
  */
 
 const cheerio = require('cheerio');
+const cache = require('../utils/cache');
+const providerQuota = require('./providerQuotaService');
 
 // Turkce buyuk/kucuk harf donusumu JS'in varsayilan toLowerCase()'i ile
 // hatali calisiyor (ozellikle "I" ve "İ" harfleri). Karsilastirma icin
@@ -34,6 +36,8 @@ async function fetchT(url, options, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(function () { controller.abort(); }, ms);
   try {
+    if(!providerQuota.canCall('tff')) throw new Error('quota_guard_tff');
+    providerQuota.record('tff');
     const res = await fetch(url, Object.assign({}, opts, { signal: controller.signal }));
     return res;
   } finally {
@@ -202,13 +206,13 @@ function parseFixtures(html) {
 }
 
 async function getStandings() {
-  const html = await fetchTffHtml();
-  return parseStandings(html);
+  const key='tff:superlig:html'; const hit=cache.get(key); if(hit!==undefined)return parseStandings(hit);
+  const html=await fetchTffHtml(); cache.set(key,html,30*60); return parseStandings(html);
 }
 
 async function getFixtures() {
-  const html = await fetchTffHtml();
-  return parseFixtures(html);
+  const key='tff:superlig:html'; const hit=cache.get(key); if(hit!==undefined)return parseFixtures(hit);
+  const html=await fetchTffHtml(); cache.set(key,html,30*60); return parseFixtures(html);
 }
 
 async function getTeamForm(teamIdentifier, lastN) {
