@@ -1,5 +1,7 @@
 const config = require('../config/config');
 const { normalizeTeamName } = require('../utils/textNormalize');
+const cache = require('../utils/cache');
+const providerQuota = require('./providerQuotaService');
 
 const CLUB_WORDS = new Set(['fc', 'cf', 'afc', 'sc', 'ac', 'calcio', 'club', 'de', 'football']);
 
@@ -25,6 +27,10 @@ function scoreNumber(value) {
 
 async function getMatchesByDate(date) {
   if (!config.footballDataOrg.token) return { ok: false, disabled: true, matches: [] };
+  const key=`football-data-org:matches:${date}`;
+  const hit=cache.get(key); if(hit!==undefined)return {...hit,cached:true};
+  if(!providerQuota.canCall('footballDataOrg'))return {ok:false,error:'quota_guard_football_data',matches:[]};
+  providerQuota.record('footballDataOrg');
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
@@ -34,9 +40,9 @@ async function getMatchesByDate(date) {
       headers: { 'X-Auth-Token': config.footballDataOrg.token },
       signal: controller.signal,
     });
-    if (!response.ok) return { ok: false, error: `http_${response.status}`, matches: [] };
+    if (!response.ok) { if(response.status===429)providerQuota.rateLimited('footballDataOrg',60000); return { ok: false, error: `http_${response.status}`, matches: [] }; }
     const data = await response.json();
-    return { ok: true, matches: Array.isArray(data.matches) ? data.matches : [] };
+    const out={ ok: true, matches: Array.isArray(data.matches) ? data.matches : [] }; cache.set(key,out,15*60); return out;
   } catch (error) {
     return { ok: false, error: error.message, matches: [] };
   } finally {
