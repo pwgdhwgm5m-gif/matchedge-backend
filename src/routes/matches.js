@@ -34,18 +34,15 @@ function fixtureOddsWithoutBlocking(date) {
 /** GET /api/matches?date=YYYY-MM-DD
  * Only the selected first divisions and UEFA competitions appear in Fixtures.
  * Provider ownership remains SportMonks for the six subscribed leagues and
- * BSD with verified fallbacks for the other selected competitions.
+ * Five Dollar with SportsDB fallback for the other selected competitions.
  */
 router.get('/', async (req,res)=>{
   const date=req.query.date||new Date().toISOString().split('T')[0];
-  const [legacy,live,oddsEvents,turkeySm,smDay,bsdDay,bsdLive,fiveDollarDay]=await Promise.all([
+  const [legacy,live,turkeySm,smDay,fiveDollarDay]=await Promise.all([
     cache.getOrFetch(`fixtures:${date}`,config.cache.ttlStatic,()=>sportsDb.getMatchesByDate(date)),
     cache.getOrFetch('live:v2:all',config.cache.ttlLive,()=>sportsDb.getLiveScores()),
-    fixtureOddsWithoutBlocking(date),
     cache.getOrFetch(`sportmonks:tr:600:${date}`,config.cache.ttlLive,()=>sportmonks.getLeagueFixturesByDate(date,600)),
     Promise.race([cache.getOrFetch(`sportmonks:date:${date}`,config.cache.ttlLive,()=>sportmonks.getFixturesByDate(date)),new Promise(r=>setTimeout(()=>r({ok:false,error:'sportmonks_date_timeout'}),5000))]),
-    cache.getOrFetch(`bsd:canonical-results:${date}`,300,()=>bsdService.getResultMatchesForDate(date)),
-    cache.getOrFetch('bsd:fixture-live:canonical',20,()=>bsdService.getLiveResultMatches()),
     cache.getOrFetch(`five-dollar:fixtures:v1:${date}`,config.cache.ttlLive,()=>fiveDollarFootball.getFixturesByDate(date))
   ]);
   const candidates=[];
@@ -93,14 +90,6 @@ router.get('/', async (req,res)=>{
     if(!m?.isLive||!Number.isFinite(kickoff.getTime())||kickoff.toISOString().slice(0,10)!==date)continue;
     if(sportsDb.isWhitelistedLeague(m.leagueId) && sportsDb.isLeagueIdentityConsistent(m.leagueId,m.league))put(m,'sportsdb');
   }
-  for(const m of (oddsEvents?.ok?oddsEvents.matches:[]))put(m,'oddsApi');
-
-  // Keep legacy provider rows as fallback candidates. Five Dollar rows below
-  // outrank them for non-SportMonks competitions, but preserving these rows keeps
-  // coverage when Five Dollar is unavailable.
-  for(const m of (bsdDay?.ok?bsdDay.matches:[])) put(m,'bsd');
-  for(const m of (bsdLive?.ok?bsdLive.matches:[])) put(m,'bsd');
-
   // Outside the six subscribed leagues Five Dollar is the canonical fixture backbone.
   // Its fixture ID, league ID and native team IDs travel together into analysis.
   for(const m of (fiveDollarDay?.ok?fiveDollarDay.matches:[])){
@@ -128,7 +117,7 @@ router.get('/', async (req,res)=>{
   const providerIdentity=require('../services/providerIdentityCache');
   const identityWrites=await Promise.allSettled(matches.map(match=>providerIdentity.remember(match)));
   for(const write of identityWrites)if(write.status==='rejected')console.warn('[provider-identity/fixtures]',write.reason?.message);
-  if(!matches.length&&!legacy?.ok&&!fiveDollarDay?.ok&&!bsdDay?.ok&&!smDay?.ok&&!oddsEvents?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
+  if(!matches.length&&!legacy?.ok&&!fiveDollarDay?.ok&&!smDay?.ok)return res.status(502).json({error:'Fikstur verisi alinamadi'});
   res.json({date,matches,coveragePolicy:'sportmonks-six-else-fivedollar-native-with-sportsdb-fallback'});
 });
 module.exports=router;
