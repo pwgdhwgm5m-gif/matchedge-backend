@@ -262,8 +262,13 @@ router.get('/:fixtureId', async (req, res) => {
     const verified=known ? null : requestedProvider ? await verifiedFixtureProvider({fixtureId,homeTeamName,awayTeamName,
       leagueName,kickoff,provider:requestedProvider}).catch(()=>null) : null;
     const providerIds={...(known?.providerIds||{})};
+    // Carry canonical Five Dollar identity from fixture cards directly into analysis.
+    // These IDs stay inside the Five Dollar namespace and are never sent to another provider.
+    if(req.query.fiveDollarFixtureId)providerIds.fiveDollar=String(req.query.fiveDollarFixtureId);
+    const directFiveDollarTeams={home:req.query.fiveDollarHomeTeamId?String(req.query.fiveDollarHomeTeamId):null,away:req.query.fiveDollarAwayTeamId?String(req.query.fiveDollarAwayTeamId):null};
     if(verified)providerIds[verified.provider]=verified.id;
-    const providerTeamIds=known?.providerTeamIds||{};
+    const providerTeamIds={...(known?.providerTeamIds||{})};
+    if(directFiveDollarTeams.home||directFiveDollarTeams.away)providerTeamIds.fiveDollar={...(providerTeamIds.fiveDollar||{}),...Object.fromEntries(Object.entries(directFiveDollarTeams).filter(([,v])=>v))};
     const analysisWorkKey='analysis-work:v3-standings:'+[
       fixtureId||'', homeTeamName||'', awayTeamName||'', leagueName||'', String(kickoff||'').slice(0,16)
     ].join(':');
