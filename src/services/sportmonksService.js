@@ -448,4 +448,37 @@ function toResultMatches(fixtures) {
   }));
 }
 
-module.exports = { toResultMatches, getLeagueFixturesByDate, getFixturesByDate, getFixtureForMatch, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
+
+async function getSeasonStandings(seasonId) {
+  if (!seasonId) return { ok:false, available:false, source:'sportmonks', table:[], error:'season_id_missing' };
+  const result = await request('/standings/seasons/' + encodeURIComponent(seasonId), {
+    include: 'participant',
+  });
+  if (!result.ok) return { ok:false, available:false, source:'sportmonks', table:[], error:result.error, status:result.status || null };
+  const raw = Array.isArray(result.data?.data) ? result.data.data : [];
+  const rows = raw.flatMap(group => Array.isArray(group?.details) ? group.details : [group]);
+  const table = rows.map(row => {
+    const participant = row.participant || row.team || {};
+    const details = Array.isArray(row.details) ? row.details : [];
+    const detailValue = names => {
+      const wanted=names.map(x=>String(x).toLowerCase());
+      const d=details.find(x=>wanted.includes(String(x.type?.developer_name||x.type?.name||x.type||'').toLowerCase()));
+      return d?.value ?? d?.data?.value ?? null;
+    };
+    const played = row.played ?? row.games_played ?? detailValue(['overall matches played','matches played','played']);
+    const points = row.points ?? detailValue(['overall points','points']);
+    const goalDiff = row.goal_difference ?? row.goal_diff ?? detailValue(['goal difference','overall goal difference']);
+    return {
+      teamId: String(row.participant_id ?? participant.id ?? ''),
+      teamName: participant.name || row.participant_name || row.team_name || '',
+      rank: Number(row.position ?? row.rank ?? 0) || null,
+      played: Number.isFinite(Number(played)) ? Number(played) : null,
+      goalDiff: Number.isFinite(Number(goalDiff)) ? Number(goalDiff) : null,
+      points: Number.isFinite(Number(points)) ? Number(points) : null,
+      description: null,
+    };
+  }).filter(x=>x.teamId || x.teamName).sort((a,b)=>(a.rank||999)-(b.rank||999));
+  return { ok:true, available:table.length>0, source:'sportmonks', seasonId:String(seasonId), table };
+}
+
+module.exports = { getSeasonStandings, toResultMatches, getLeagueFixturesByDate, getFixturesByDate, getFixtureForMatch, enrichMatches, getLeagueFixturesBetween, getLeagueTeamsFromRecentFixtures, request, getInplay, getLivescores, getFixtureIntelligence, getTeamFixtureHistory, aggregateTeamHistory, transformFixture, findMatch, getVerifiedLiveData };
