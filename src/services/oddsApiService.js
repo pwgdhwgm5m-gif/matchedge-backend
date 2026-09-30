@@ -61,10 +61,12 @@ async function getEventExtendedOdds(sportKey,eventId){
  if(!oddsEnabled()||!sportKey||!eventId)return {ok:false,error:'extended_odds_unavailable'};
  const cacheKey=`extendedOdds:${sportKey}:${eventId}`;
  const hit=cache.get(cacheKey);if(hit)return {ok:true,data:hit,cached:true};
+ if(!providerQuota.canCall('oddsApi'))return {ok:false,error:'quota_guard_odds_api'};
+ providerQuota.record('oddsApi');
  const result=await fetchT({method:'GET',url:`${config.oddsApi.baseUrl}/sports/${sportKey}/events/${eventId}/odds`,params:{
   apiKey:config.oddsApi.key,regions:'eu',markets:'btts,team_totals,alternate_team_totals,h2h_3_way_h1,totals_h1,team_totals_h1',oddsFormat:'decimal'
  }},6000,'The Odds API Extended');
- if(!result.ok){markOddsFailure(result);return result;}
+ if(!result.ok){markOddsFailure(result);if(String(result.error||'').includes('429'))providerQuota.rateLimited('oddsApi',6*60*60*1000);return result;}
  cache.set(cacheKey,result.data,5*60);
  return result;
 }
