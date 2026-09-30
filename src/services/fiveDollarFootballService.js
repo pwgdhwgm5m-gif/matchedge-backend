@@ -68,21 +68,21 @@ async function getFixtureContext(fixtureId){
 }
 async function getTeamFixtures(teamId,{leagueId=null,limit=15}={}){
  if(!available()||!teamId)return {ok:false,error:'missing_team_id',data:{response:[]}};const key=`five-dollar-team-v1:${teamId}:${leagueId||'all'}:${limit}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
- try{let rows=[],page=1;while(page<=4&&rows.length<Math.max(limit,15)){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/teams/${teamId}/fixtures`,{headers:headers(),params:{status:'finished',per_page:50,page},timeout:7000});const batch=Array.isArray(r.data?.data)?r.data.data:[];rows.push(...batch);if(r.data?.pagination?.has_more!==true||!batch.length)break;page++}
+ return coalesce(key,async()=>{try{let rows=[],page=1;while(page<=4&&rows.length<Math.max(limit,15)){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/teams/${teamId}/fixtures`,{headers:headers(),params:{status:'finished',per_page:50,page},timeout:7000});updateRate(r.headers||{});const batch=Array.isArray(r.data?.data)?r.data.data:[];rows.push(...batch);if(r.data?.pagination?.has_more!==true||!batch.length)break;page++}
   if(leagueId)rows=rows.filter(x=>String(x?.league?.id||'')===String(leagueId));rows=rows.slice(0,limit);const out={ok:rows.length>0,source:'5dollarfootball-team-history',teamId:String(teamId),data:{response:rows.map(toAnalysisFixture)},raw:rows};memory.set(key,{data:out,expires:Date.now()+HISTORY_TTL_MS});return out;
- }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,error:`five_dollar_team_${e.response?.status||'failed'}`,data:{response:[]}}}
+ }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return hit?.data||{ok:false,error:`five_dollar_team_${e.response?.status||'failed'}`,data:{response:[]}}}})
 }
 async function getStandings(leagueId){
  if(!available()||!leagueId)return {ok:false,available:false,table:[]};const key=`five-dollar-standings-v1:${leagueId}`,hit=memory.get(key);if(hit?.expires>Date.now())return hit.data;
- try{const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/standings`,{headers:headers(),params:{league:leagueId,type:'total'},timeout:7000});const rows=Array.isArray(r.data?.data?.table)?r.data.data.table:[];const out={ok:true,available:rows.length>0,source:'5dollarfootball',table:rows.map(x=>({teamId:String(x?.team?.id||''),teamName:x?.team?.name||'',rank:Number(x.position),points:Number.isFinite(Number(x.points))?Number(x.points):null,played:Number.isFinite(Number(x.played))?Number(x.played):null,description:null}))};memory.set(key,{data:out,expires:Date.now()+STANDINGS_TTL_MS});return out;}catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return {ok:false,available:false,error:`five_dollar_standings_${e.response?.status||'failed'}`,table:[]}}
+ return coalesce(key,async()=>{try{const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/standings`,{headers:headers(),params:{league:leagueId,type:'total'},timeout:7000});updateRate(r.headers||{});const rows=Array.isArray(r.data?.data?.table)?r.data.data.table:[];const out={ok:true,available:rows.length>0,source:'5dollarfootball',table:rows.map(x=>({teamId:String(x?.team?.id||''),teamName:x?.team?.name||'',rank:Number(x.position),points:Number.isFinite(Number(x.points))?Number(x.points):null,played:Number.isFinite(Number(x.played))?Number(x.played):null,description:null}))};memory.set(key,{data:out,expires:Date.now()+STANDINGS_TTL_MS});return out;}catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);return hit?.data||{ok:false,available:false,error:`five_dollar_standings_${e.response?.status||'failed'}`,table:[]}}})
 }
 async function getFullOdds(fixtureId){
  const key=`five-dollar-full-odds-v1:${fixtureId}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached.data;if(!available())return null;
- try{
+ return coalesce(key,async()=>{try{
   const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures/${fixtureId}/odds`,{headers:headers(),params:{bookmakers:'bet365'},timeout:7000});
-  const books=r.data?.data?.bookmakers||[];const book=books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0];
+  updateRate(r.headers||{});const books=r.data?.data?.bookmakers||[];const book=books.find(x=>String(x.slug||'').toLowerCase()==='bet365')||books[0];
   const data=book?.odds||null;memory.set(key,{data,expires:Date.now()+ODDS_TTL_MS});return data;
- }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return null}
+ }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return cached?.data||null}})
 }
 async function getFixtureOdds(fixtureId,{homeName='',awayName='',leagueId='',homeTeamId='',awayTeamId=''}={}){
  if(!fixtureId||!available())return null;
