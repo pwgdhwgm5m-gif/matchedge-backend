@@ -396,6 +396,9 @@ const UEFA_NATIONAL_TEAM_NAMES = new Set([
 
 function isUefaNationsLeagueTeamPair(match) {
   if (!match || match.canonicalCompetitionKey !== 'uefa-nations-league') return true;
+  // A bare canonical key is used by registry-level callers/tests. The team
+  // identity guard only applies when an actual fixture object is supplied.
+  if (!match.homeTeam || !match.awayTeam) return true;
   const normalizeNationalTeam = value => normalizeCompetitionName(value)
     .replace(/^republicof/, '')
     .replace(/^turkiye$/, 'turkey');
