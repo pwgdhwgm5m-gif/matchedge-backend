@@ -4,7 +4,10 @@ const nowDay=()=>new Date().toISOString().slice(0,10);
 const limits={
   sportmonks:{daily:Number(process.env.SPORTMONKS_DAILY_BUDGET||0),reserve:.10},
   bsd:{daily:Number(process.env.BSD_DAILY_BUDGET||0),reserve:.10},
-  thesportsdb:{daily:Number(process.env.SPORTSDB_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.SPORTSDB_PER_MINUTE_BUDGET||90)}
+  thesportsdb:{daily:Number(process.env.SPORTSDB_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.SPORTSDB_PER_MINUTE_BUDGET||90)},
+  footballDataOrg:{daily:Number(process.env.FOOTBALL_DATA_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.FOOTBALL_DATA_PER_MINUTE_BUDGET||8)},
+  freeFootball:{daily:Number(process.env.FREE_FOOTBALL_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.FREE_FOOTBALL_PER_MINUTE_BUDGET||20)},
+  oddsApi:{daily:Number(process.env.ODDS_API_DAILY_BUDGET||0),reserve:.20,perMinute:Number(process.env.ODDS_API_PER_MINUTE_BUDGET||10)}
 };
 function state(provider){
   const cfg=limits[provider]||{}; const day=nowDay(); let s=buckets.get(provider);
