@@ -1,5 +1,6 @@
 const config = require('../config/config');
 const { fetchT } = require('../utils/fetchWithTimeout');
+const providerQuota = require('./providerQuotaService');
 
 /**
  * Birden fazla API-Football kaynagi (RapidAPI ve/veya dogrudan
@@ -33,6 +34,8 @@ async function requestWithKeyFallback(path, buildParams, timeoutMs, label) {
       params: buildParams(),
     };
     const sourceLabel = sources.length > 1 ? `${label} (kaynak ${i + 1}/${sources.length}: ${src.type})` : label;
+    if(!providerQuota.canCall('apiFootball')) return {ok:false,source:sourceLabel,error:'quota_guard_api_football'};
+    providerQuota.record('apiFootball');
     const result = await fetchT(options, timeoutMs, sourceLabel);
 
     if (result.ok) {
