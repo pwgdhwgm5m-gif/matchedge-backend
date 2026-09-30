@@ -161,7 +161,10 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   // Canonical standings policy matches the rest of analysis:
   // six SportMonks leagues keep their existing primary path for now; every
   // other mapped competition (including UEFA) must try BSD before SportsDB.
-  const standingsFetcher = useFiveDollarPrimary && fiveDollarContext?.leagueId
+  const standingsFetcher = useSportmonksPrimary && smContext?.fixture?.seasonId
+    ? () => sportmonks.getSeasonStandings(smContext.fixture.seasonId)
+        .then(r=>r?.available?r:bsdThenSportsdbStandings())
+    : useFiveDollarPrimary && fiveDollarContext?.leagueId
     ? () => fiveDollarFootball.getStandings(fiveDollarContext.leagueId).then(r=>r?.available?r:sportsdbStandingsFallback())
     : isSuperLig
     ? () => tffScraper.getStandings().then(table => ({
@@ -180,7 +183,7 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
   const standingsCompetitionKey=registeredCompetition?.canonicalCompetitionKey||canonicalCompetitionForIds?.canonicalCompetitionKey||'unmapped';
   const standingsCacheKey = isSuperLig
     ? 'standings:v4:turkey-super-lig:tff'
-    : `standings:v4:${standingsCompetitionKey}:bsd-${bsdLeagueId||'none'}:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
+    : `standings:v5:${standingsCompetitionKey}:sportmonks-season-${smContext?.fixture?.seasonId||'none'}:bsd-${bsdLeagueId||'none'}:sportsdb-${effectiveTsdbLeagueId||'none'}:${currentSeason}`;
 
   const [h2hResult, oddsResult, injuriesResult, homeFixturesResult, awayFixturesResult, standingsResult] =
     await Promise.allSettled([
@@ -1144,6 +1147,9 @@ async function computeFullAnalysis({ fixtureId, home, away, homeTeamName, awayTe
       table: standingsTable,
       homeTeamId: homeTeamIdForStats,
       awayTeamId: awayTeamIdForStats,
+      homeTeamName,
+      awayTeamName,
+      source: standingsResult.status === 'fulfilled' ? (standingsResult.value?.source || null) : null,
     },
     h2h: useDerivedH2H
       ? { ok: true, derived: true, data: { response: derivedH2HFixtures } }
