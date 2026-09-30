@@ -385,34 +385,11 @@ const FIXTURE_UEFA_KEYS = new Set([
 // identity error become a visible UEFA fixture. For Nations League rows we
 // require both teams to be recognizable UEFA member national teams; this is
 // deliberately scoped to this competition so club fixtures are unaffected.
-const UEFA_NATIONAL_TEAM_NAMES = new Set([
-  'albania','andorra','armenia','austria','azerbaijan','belarus','belgium','bosniaandherzegovina',
-  'bulgaria','croatia','cyprus','czechia','denmark','england','estonia','faroeislands','finland',
-  'france','georgia','germany','gibraltar','greece','hungary','iceland','ireland','israel','italy',
-  'kazakhstan','kosovo','latvia','liechtenstein','lithuania','luxembourg','malta','moldova','montenegro',
-  'netherlands','northmacedonia','northernireland','norway','poland','portugal','romania','russia',
-  'sanmarino','scotland','serbia','slovakia','slovenia','spain','sweden','switzerland','turkey','ukraine','wales'
-]);
-
-function isUefaNationsLeagueTeamPair(match) {
-  if (!match || match.canonicalCompetitionKey !== 'uefa-nations-league') return true;
-  // A bare canonical key is used by registry-level callers/tests. The team
-  // identity guard only applies when an actual fixture object is supplied.
-  if (!match.homeTeam || !match.awayTeam) return true;
-  const normalizeNationalTeam = value => normalizeCompetitionName(value)
-    .replace(/^republicof/, '')
-    .replace(/^turkiye$/, 'turkey');
-  const home = normalizeNationalTeam(match.homeTeam);
-  const away = normalizeNationalTeam(match.awayTeam);
-  return UEFA_NATIONAL_TEAM_NAMES.has(home) && UEFA_NATIONAL_TEAM_NAMES.has(away);
-}
-
 function isFixtureCompetitionAllowed(value) {
   const competition=typeof value==='string' ? BY_KEY.get(value) :
     BY_KEY.get(value?.canonicalCompetitionKey);
-  if (!competition?.visibleInCompetitionFilter ||
-      !(competition.type==='league'||FIXTURE_UEFA_KEYS.has(competition.canonicalCompetitionKey))) return false;
-  return isUefaNationsLeagueTeamPair(typeof value==='string' ? {canonicalCompetitionKey:value} : value);
+  return Boolean(competition?.visibleInCompetitionFilter &&
+    (competition.type==='league'||FIXTURE_UEFA_KEYS.has(competition.canonicalCompetitionKey)));
 }
 const BY_ALIAS = new Map();
 const BY_PROVIDER_ID = new Map();
