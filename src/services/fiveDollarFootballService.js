@@ -97,23 +97,27 @@ async function getFullOdds(fixtureId){
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar/odds]',e.response?.status||'request failed');return cached?.data||null}})
 }
 async function getFixtureOdds(fixtureId,{homeName='',awayName='',leagueId='',homeTeamId='',awayTeamId='',kickoff=null}={}){
- if(!fixtureId||!available())return null;
- // Prefer the shared day cache. This keeps bookmaker traffic independent from
- // standings/history traffic and prevents N match cards from creating N odds calls.
+ if(!fixtureId)return null;
+ // Cache reads must never be blocked by the provider quota guard. A cached
+ // bookmaker quote is already paid for and is safe to reuse; only a cache miss
+ // may require a fresh provider call.
  if(homeName&&awayName&&kickoff){
    const cached=await getMatchOdds(homeName,awayName,kickoff);
    if(cached?.matchOdds||cached?.totals25||cached?.btts)return cached;
  }
+ if(!available())return null;
  const full=await getFullOdds(fixtureId);if(!full)return null;
  const markets=normalizeMarkets(full),now=Date.now();
  return {fixtureId:String(fixtureId),providerIdentity:{competitionId:String(leagueId||''),fixtureId:String(fixtureId),homeTeamId:String(homeTeamId||''),awayTeamId:String(awayTeamId||'')},homeTeam:homeName,awayTeam:awayName,matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,cornerLine:full?.corner_line||full?.cornerLine||null,marketBoard:{bookmakers:[{bookmaker:'bet365',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh:true,updatedAt:new Date(now).toISOString()}],bookmakerCount:1},source:'5dollarfootball-bet365',fetchedAt:now};
 }
 async function getMatchOdds(homeName,awayName,kickoff){
- if(!available()||!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
+ if(!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
  const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
  const day=await getDay(start);if(!day)return null;const target=d.getTime();
  const f=day.data.find(x=>{if(!teamNamesMatch(x.teams?.home?.name,homeName)||!teamNamesMatch(x.teams?.away?.name,awayName))return false;const k=Number(x.kickoff_ts)*1000||Date.parse(x.kickoff_utc||x.start_time||'');return !Number.isFinite(k)||Math.abs(k-target)<=4*60*60*1000});
  if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}
+ // If the shared day cache exists, never spend another BSD request merely to
+ // read its bookmaker prices. Only the enrichment below can require a call.
  // The list include is intentionally compact. The documented single-fixture
  // odds endpoint is the authoritative payload for BTTS and goal_line_fixed.
  let normalized=normalizeFixture(f,homeName,awayName,day.fetchedAt);
