@@ -43,6 +43,7 @@ const userSchema = new mongoose.Schema({
   },
   lastLoginAt: { type: Date, default: null },
   lastActiveAt: { type: Date, default: null },
+  strongGoalNotifications: { type: Boolean, default: false },
   loginCount: { type: Number, default: 0, min: 0 },
   verificationTokenHash: { type: String, default: null },
   verificationExpires: { type: Date, default: null },
