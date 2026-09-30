@@ -7,7 +7,9 @@ const limits={
   thesportsdb:{daily:Number(process.env.SPORTSDB_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.SPORTSDB_PER_MINUTE_BUDGET||90)},
   footballDataOrg:{daily:Number(process.env.FOOTBALL_DATA_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.FOOTBALL_DATA_PER_MINUTE_BUDGET||8)},
   freeFootball:{daily:Number(process.env.FREE_FOOTBALL_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.FREE_FOOTBALL_PER_MINUTE_BUDGET||20)},
-  oddsApi:{daily:Number(process.env.ODDS_API_DAILY_BUDGET||0),reserve:.20,perMinute:Number(process.env.ODDS_API_PER_MINUTE_BUDGET||10)}
+  oddsApi:{daily:Number(process.env.ODDS_API_DAILY_BUDGET||0),reserve:.20,perMinute:Number(process.env.ODDS_API_PER_MINUTE_BUDGET||10)},
+  apiFootball:{daily:Number(process.env.API_FOOTBALL_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.API_FOOTBALL_PER_MINUTE_BUDGET||8)},
+  tff:{daily:Number(process.env.TFF_DAILY_BUDGET||0),reserve:.15,perMinute:Number(process.env.TFF_PER_MINUTE_BUDGET||10)}
 };
 function state(provider){
   const cfg=limits[provider]||{}; const day=nowDay(); let s=buckets.get(provider);
