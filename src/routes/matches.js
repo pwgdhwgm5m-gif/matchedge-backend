@@ -93,7 +93,10 @@ router.get('/', async (req,res)=>{
   // Outside the six subscribed leagues Five Dollar is the canonical fixture backbone.
   // Its fixture ID, league ID and native team IDs travel together into analysis.
   for(const m of (fiveDollarDay?.ok?fiveDollarDay.matches:[])){
-    if(sourcePolicy.resolve({leagueName:m.leagueName||m.league}))continue;
+    // Only the six SportMonks-owned domestic leagues are excluded here.
+    // UEFA competitions are intentionally Five Dollar/BSD-first and must not
+    // be dropped merely because sourcePolicy can resolve their canonical name.
+    if(sourcePolicy.resolve({leagueName:m.leagueName||m.league})?.sportmonks === true)continue;
     put(m,'5dollarfootball');
   }
 
