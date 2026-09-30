@@ -1,6 +1,7 @@
 const axios=require('axios');
 const config=require('../config/config');
 const {teamNamesMatch}=require('../utils/textNormalize');
+const providerQuota=require('./providerQuotaService');
 
 const memory=new Map(),inflight=new Map(),DAY_TTL_MS=10*60*1000,IDENTITY_TTL_MS=24*60*60*1000,HISTORY_TTL_MS=6*60*60*1000,STANDINGS_TTL_MS=6*60*60*1000,ODDS_TTL_MS=10*60*1000,MISS_TTL_MS=30*60*1000,RATE_BACKOFF_MS=60*60*1000,AUTH_BACKOFF_MS=15*60*1000;
 let blockedUntil=0,rateState={limit:null,remaining:null,reset:null};
@@ -9,9 +10,9 @@ function updateRate(h={}){rateState={limit:Number(h['x-ratelimit-limit'])||null,
 function cacheRow(key,data,ttl){memory.set(key,{data,expires:Date.now()+ttl});return data}
 const num=v=>{const n=Number(v);return n>1?n:null};
 function enabled(){return Boolean(config.fiveDollarFootball?.key)}
-function available(){return enabled()&&Date.now()>=blockedUntil}
+function available(){return enabled()&&Date.now()>=blockedUntil&&providerQuota.canCall('bsd')}
 function headers(){return {Authorization:`Bearer ${config.fiveDollarFootball.key}`}}
-function backoff(status,retryAfter){if(status===429)blockedUntil=Math.max(blockedUntil,Date.now()+Math.max(60000,Number(retryAfter||0)*1000||RATE_BACKOFF_MS));else if(status===401||status===403)blockedUntil=Math.max(blockedUntil,Date.now()+AUTH_BACKOFF_MS)}
+function backoff(status,retryAfter){if(status===429){const ms=Math.max(60000,Number(retryAfter||0)*1000||RATE_BACKOFF_MS);blockedUntil=Math.max(blockedUntil,Date.now()+ms);providerQuota.rateLimited('bsd',ms);}else if(status===401||status===403)blockedUntil=Math.max(blockedUntil,Date.now()+AUTH_BACKOFF_MS)}
 function priceFreshness(value){const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;if(!raw)return {fresh:false,updatedAt:null};const ms=typeof raw==='number'?(raw>1e12?raw:raw*1000):Date.parse(raw);if(!Number.isFinite(ms))return {fresh:false,updatedAt:null};return {fresh:Date.now()-ms<=15*60*1000,updatedAt:new Date(ms).toISOString()}}
 function stage(v){return v&&(v.inplay||v.closing||v.opening||v)}
 function pair(v,a=['over','over_odds','over25','over_2.5'],b=['under','under_odds','under25','under_2.5']){const p=stage(v)||{};const pick=keys=>keys.map(k=>num(p[k])).find(Boolean)||null;const x=pick(a),y=pick(b);return x&&y?{a:x,b:y}:null}
@@ -37,7 +38,7 @@ function normalizeFixture(f,homeName,awayName,fetchedAt){
 }
 async function getDay(start){
  const key=`five-dollar-day-v3:${start}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached;if(!available())return cached||null;
- return coalesce(key,async()=>{try{let data=[],page=1,lastHeaders={};while(page<=8){const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50,page},timeout:7000});lastHeaders=r.headers||{};updateRate(lastHeaders);const rows=Array.isArray(r.data?.data)?r.data.data:[];data.push(...rows);const more=r.data?.pagination?.has_more===true||r.data?.meta?.current_page<r.data?.meta?.last_page;if(!more||!rows.length)break;const rem=Number(lastHeaders['x-ratelimit-remaining']);if(Number.isFinite(rem)&&rem<=2)break;page++}
+ return coalesce(key,async()=>{try{let data=[],page=1,lastHeaders={};while(page<=8){if(!providerQuota.canCall('bsd'))break;providerQuota.record('bsd');const r=await axios.get(`${config.fiveDollarFootball.baseUrl}/fixtures`,{headers:headers(),params:{start_time:start,end_time:start+86400,include:'odds',per_page:50,page},timeout:7000});lastHeaders=r.headers||{};updateRate(lastHeaders);const rows=Array.isArray(r.data?.data)?r.data.data:[];data.push(...rows);const more=r.data?.pagination?.has_more===true||r.data?.meta?.current_page<r.data?.meta?.last_page;if(!more||!rows.length)break;const rem=Number(lastHeaders['x-ratelimit-remaining']);if(Number.isFinite(rem)&&rem<=2)break;page++}
  const now=Date.now(),row={data,expires:now+DAY_TTL_MS,fetchedAt:now,rate:{limit:lastHeaders['x-ratelimit-limit']||null,remaining:lastHeaders['x-ratelimit-remaining']||null,reset:lastHeaders['x-ratelimit-reset']||null}};memory.set(key,row);return row;
  }catch(e){backoff(e.response?.status,e.response?.headers?.['retry-after']);console.warn('[5dollar]',e.response?.status===429?'rate limit backoff':e.response?.status===401||e.response?.status===403?'auth/plan unavailable':'request failed');return cached||null}})
 }
