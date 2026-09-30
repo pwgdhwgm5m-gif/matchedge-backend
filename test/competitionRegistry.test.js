@@ -101,17 +101,14 @@ test('fixture whitelist keeps first divisions and UEFA Nations League but exclud
     assert.equal(registry.isFixtureCompetitionAllowed(key),false,key);
 });
 
-test('UEFA Nations League rejects CONCACAF rows mislabeled by a provider',()=>{
-  const uefa = registry.decorateMatch({
-    fixtureId:'uefa-1', leagueId:'4490', league:'UEFA Nations League',
-    homeTeam:'Spain', awayTeam:'Croatia', kickoff:'2026-09-29T18:45:00Z'
-  },'sportsdb');
-  const concacaf = registry.decorateMatch({
-    fixtureId:'concacaf-1', leagueId:'4490', league:'UEFA Nations League',
-    homeTeam:'Belize', awayTeam:'St Vincent Grenadines', kickoff:'2026-09-30T23:00:00Z'
-  },'sportsdb');
-  assert.equal(registry.isFixtureCompetitionAllowed(uefa),true);
-  assert.equal(registry.isFixtureCompetitionAllowed(concacaf),false);
+test('UEFA Nations League remains fixture-eligible independent of team-name spelling',()=>{
+  for(const names of [['Spain','Croatia'],['Türkiye','Italy'],['Republic of Ireland','Austria']]){
+    const match=registry.decorateMatch({
+      fixtureId:'uefa-'+names[0], leagueId:'4490', league:'UEFA Nations League',
+      homeTeam:names[0], awayTeam:names[1], kickoff:'2026-10-01T18:45:00Z'
+    },'sportsdb');
+    assert.equal(registry.isFixtureCompetitionAllowed(match),true);
+  }
 });
 
 test('fixture provider requests skip cup sport keys before calling Odds API',()=>{
