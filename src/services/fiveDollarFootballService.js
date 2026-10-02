@@ -28,7 +28,19 @@ function backoff(status,retryAfter){if(status===429){const ms=Math.max(60000,Num
 function priceFreshness(value){const raw=value?.updated_at||value?.updatedAt||value?.timestamp||value?.last_update||null;if(!raw)return {fresh:false,updatedAt:null};const ms=typeof raw==='number'?(raw>1e12?raw:raw*1000):Date.parse(raw);if(!Number.isFinite(ms))return {fresh:false,updatedAt:null};return {fresh:Date.now()-ms<=15*60*1000,updatedAt:new Date(ms).toISOString()}}
 function stage(v){return v&&(v.inplay||v.closing||v.opening||v)}
 function pair(v,a=['over','over_odds','over25','over_2.5'],b=['under','under_odds','under25','under_2.5']){const p=stage(v)||{};const pick=keys=>keys.map(k=>num(p[k])).find(Boolean)||null;const x=pick(a),y=pick(b);return x&&y?{a:x,b:y}:null}
-function oddsRoot(f){const o=f?.odds||{};if(Array.isArray(o.bookmakers)){const book=o.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||o.bookmakers[0];return book?.odds||book?.markets||{}}if(Array.isArray(f?.bookmakers)){const book=f.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||f.bookmakers[0];return book?.odds||book?.markets||{}}return o}
+function oddsBook(f){
+ const o=f?.odds||{};
+ if(Array.isArray(o.bookmakers)){
+   const book=o.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||o.bookmakers[0];
+   return {name:book?.name||book?.title||book?.slug||'Bet365',root:book?.odds||book?.markets||{}};
+ }
+ if(Array.isArray(f?.bookmakers)){
+   const book=f.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||f.bookmakers[0];
+   return {name:book?.name||book?.title||book?.slug||'Bet365',root:book?.odds||book?.markets||{}};
+ }
+ return {name:'Bet365',root:o};
+}
+function oddsRoot(f){return oddsBook(f).root}
 function normalizeMarkets(root){
  const one=stage(root?.['1x2']||root?.match_result||root?.moneyline)||{};
  const h=num(one.home),d=num(one.draw),a=num(one.away);
@@ -45,8 +57,9 @@ function normalizeMarkets(root){
 }
 function normalizeFixture(f,homeName,awayName,fetchedAt){
  if(!f||!teamNamesMatch(f.teams?.home?.name,homeName)||!teamNamesMatch(f.teams?.away?.name,awayName))return null;
- const markets=normalizeMarkets(oddsRoot(f)),fresh=Date.now()-Number(fetchedAt||0)<=DAY_TTL_MS*1.5;
- return {fixtureId:String(f.id),providerIdentity:{competitionId:String(f.league?.id||f.competition?.id||''),fixtureId:String(f.id),homeTeamId:String(f.teams?.home?.id||''),awayTeamId:String(f.teams?.away?.id||'')},matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,marketBoard:{bookmakers:[{bookmaker:'market',h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh,updatedAt:fetchedAt?new Date(fetchedAt).toISOString():null}],bookmakerCount:1},source:'5dollarfootball-market',fetchedAt};
+ const book=oddsBook(f),markets=normalizeMarkets(book.root),fresh=Date.now()-Number(fetchedAt||0)<=DAY_TTL_MS*1.5;
+ const bookmaker=String(book.name||'Bet365').toLowerCase().includes('bet365')?'Bet365':String(book.name||'Bet365');
+ return {fixtureId:String(f.id),providerIdentity:{competitionId:String(f.league?.id||f.competition?.id||''),fixtureId:String(f.id),homeTeamId:String(f.teams?.home?.id||''),awayTeamId:String(f.teams?.away?.id||'')},matchOdds:markets.h2h,totals25:markets.totals,btts:markets.btts,marketBoard:{bookmakers:[{bookmaker, name:bookmaker, h2h:markets.h2h,totals:markets.totals,btts:markets.btts,fresh,updatedAt:fetchedAt?new Date(fetchedAt).toISOString():null}],bookmakerCount:1},source:'5dollarfootball-bet365',fetchedAt};
 }
 async function getDay(start){
  const key=`five-dollar-day-v3:${start}`,cached=memory.get(key);if(cached?.expires>Date.now())return cached;if(!available())return cached||null;
