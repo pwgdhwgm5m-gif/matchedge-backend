@@ -95,7 +95,13 @@ async function fetchBsdCached(path, ttlSeconds, timeoutMs) {
     // through another endpoint or after the UTC quota reset.
     const snapshot=path==='/events/live/' ? {...result,fetchedAt:Date.now()} : result;
     if(result.error!=='bsd_request_budget')
-      cache.set(key,snapshot,result.ok ? Math.max(30,ttlSeconds) : Math.min(60,ttlSeconds));
+      // Live-score freshness is latency-sensitive. Keep the shared live
+      // snapshot only as long as the caller requested (5s for goal pushes).
+      // All callers still share this one cache key + in-flight promise, while
+      // BsdRequestBudget/providerQuota remain the hard API protection.
+      cache.set(key,snapshot,result.ok
+        ? (path==='/events/live/' ? Math.max(1,ttlSeconds) : Math.max(30,ttlSeconds))
+        : Math.min(60,ttlSeconds));
     return snapshot;
   })();
   inFlight.set(key,pending);
