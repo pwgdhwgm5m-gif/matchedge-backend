@@ -385,11 +385,35 @@ const FIXTURE_UEFA_KEYS = new Set([
 // identity error become a visible UEFA fixture. For Nations League rows we
 // require both teams to be recognizable UEFA member national teams; this is
 // deliberately scoped to this competition so club fixtures are unaffected.
+const UEFA_NATIONAL_TEAMS = new Set([
+  'albania','andorra','armenia','austria','azerbaijan','belarus','belgium','bosniaandherzegovina',
+  'bulgaria','croatia','cyprus','czechia','czechrepublic','denmark','england','estonia','faroeislands',
+  'finland','france','georgia','germany','gibraltar','greece','hungary','iceland','israel','italy',
+  'kazakhstan','kosovo','latvia','liechtenstein','lithuania','luxembourg','malta','moldova',
+  'montenegro','netherlands','northmacedonia','northernireland','norway','poland','portugal',
+  'republicofireland','ireland','romania','sanmarino','scotland','serbia','slovakia','slovenia',
+  'spain','sweden','switzerland','turkey','turkiye','ukraine','wales',
+  // Localized names used by the Turkish UI/provider normalization.
+  'arnavutluk','ermenistan','avusturya','azerbaycan','belarus','belcika','bosnahersek','bulgaristan',
+  'hirvatistan','kibris','cekya','danimarka','ingiltere','estonya','faroeadalari','finlandiya','fransa',
+  'gurcistan','almanya','yunanistan','macaristan','izlanda','israil','italya','kazakistan','letonya',
+  'litvanya','karadag','hollanda','kuzeymakedonya','kuzeyirlanda','norvec','polonya','portekiz',
+  'irlanda','romanya','iskocya','sirbistan','slovakya','slovenya','ispanya','isvec','isvicre','turkiye',
+  'ukrayna','galler'
+]);
+function isUefaNationalTeam(name){ return UEFA_NATIONAL_TEAMS.has(normalizeCompetitionName(name)); }
+
 function isFixtureCompetitionAllowed(value) {
   const competition=typeof value==='string' ? BY_KEY.get(value) :
     BY_KEY.get(value?.canonicalCompetitionKey);
-  return Boolean(competition?.visibleInCompetitionFilter &&
-    (competition.type==='league'||FIXTURE_UEFA_KEYS.has(competition.canonicalCompetitionKey)));
+  if(!competition?.visibleInCompetitionFilter) return false;
+  if(competition.canonicalCompetitionKey==='uefa-nations-league' && value && typeof value==='object'){
+    // Provider IDs/names can occasionally mislabel CONCACAF Nations League
+    // rows as UEFA. Require both participants to be UEFA national teams.
+    if(!isUefaNationalTeam(value.homeTeam||value.homeTeamName) ||
+       !isUefaNationalTeam(value.awayTeam||value.awayTeamName)) return false;
+  }
+  return Boolean(competition.type==='league'||FIXTURE_UEFA_KEYS.has(competition.canonicalCompetitionKey));
 }
 const BY_ALIAS = new Map();
 const BY_PROVIDER_ID = new Map();
