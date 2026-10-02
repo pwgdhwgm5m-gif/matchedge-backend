@@ -30,15 +30,21 @@ function stage(v){return v&&(v.inplay||v.closing||v.opening||v)}
 function pair(v,a=['over','over_odds','over25','over_2.5'],b=['under','under_odds','under25','under_2.5']){const p=stage(v)||{};const pick=keys=>keys.map(k=>num(p[k])).find(Boolean)||null;const x=pick(a),y=pick(b);return x&&y?{a:x,b:y}:null}
 function oddsBook(f){
  const o=f?.odds||{};
- if(Array.isArray(o.bookmakers)){
-   const book=o.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||o.bookmakers[0];
-   return {name:book?.name||book?.title||book?.slug||'Bet365',root:book?.odds||book?.markets||{}};
+ // Five Dollar has returned bookmaker data in several equivalent shapes
+ // across competition feeds. Normalize all of them before market parsing.
+ const books = Array.isArray(o.bookmakers) ? o.bookmakers
+   : Array.isArray(f?.bookmakers) ? f.bookmakers
+   : Array.isArray(o.books) ? o.books
+   : [];
+ if(books.length){
+   const book=books.find(x=>/bet365/i.test(String(x.slug||x.name||x.title||x.key||'')))||books[0];
+   const root=book?.odds||book?.markets||book?.data||book||{};
+   return {name:book?.name||book?.title||book?.slug||book?.key||'Bet365',root};
  }
- if(Array.isArray(f?.bookmakers)){
-   const book=f.bookmakers.find(x=>/bet365/i.test(String(x.slug||x.name||'')))||f.bookmakers[0];
-   return {name:book?.name||book?.title||book?.slug||'Bet365',root:book?.odds||book?.markets||{}};
- }
- return {name:'Bet365',root:o};
+ // Some /fixtures?include=odds responses expose the selected bookmaker
+ // directly under odds without a bookmakers array.
+ const direct=o?.bet365||o?.Bet365||o?.data||o;
+ return {name:'Bet365',root:direct||{}};
 }
 function oddsRoot(f){return oddsBook(f).root}
 function normalizeMarkets(root){
@@ -125,10 +131,10 @@ async function getFixtureOdds(fixtureId,{homeName='',awayName='',leagueId='',hom
 }
 async function getMatchOdds(homeName,awayName,kickoff){
  if(!homeName||!awayName||!kickoff)return null;const d=new Date(kickoff);if(Number.isNaN(d.getTime()))return null;
- const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000),missKey=`five-dollar-miss-v3:${start}:${String(homeName).toLowerCase()}:${String(awayName).toLowerCase()}`,miss=memory.get(missKey);if(miss?.expires>Date.now())return null;
+ const start=Math.floor(Date.UTC(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate())/1000);
  const day=await getDay(start);if(!day)return null;const target=d.getTime();
  const f=day.data.find(x=>{if(!teamNamesMatch(x.teams?.home?.name,homeName)||!teamNamesMatch(x.teams?.away?.name,awayName))return false;const k=Number(x.kickoff_ts)*1000||Date.parse(x.kickoff_utc||x.start_time||'');return !Number.isFinite(k)||Math.abs(k-target)<=4*60*60*1000});
- if(!f){memory.set(missKey,{miss:true,expires:Date.now()+MISS_TTL_MS});return null}
+ if(!f)return null
  // If the shared day cache exists, never spend another BSD request merely to
  // read its bookmaker prices. Only the enrichment below can require a call.
  // The list include is intentionally compact. The documented single-fixture
