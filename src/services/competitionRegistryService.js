@@ -659,7 +659,14 @@ function dedupeCompetitionFixtures(rows, options = {}) {
       if(!Number.isFinite(existingKickoff)) return false;
       const diff=Math.abs(existingKickoff-kickoff);
       if(diff<=toleranceMs) return true;
-      return diff<=sameDayToleranceMs &&
+      // Wider same-day collapse is safe only when one provider already has a
+      // final result. Two scheduled rows 40 minutes apart can be real rematches
+      // and must remain distinct.
+      const finalish = row => {
+        const s=String(row?.statusShort||row?.status||'').toUpperCase();
+        return row?.isFinished===true || ['FT','AET','PEN','FINISHED','MATCH FINISHED','BITTI','BİTTİ'].includes(s);
+      };
+      return (finalish(existing)||finalish(match)) && diff<=sameDayToleranceMs &&
         new Date(existingKickoff).toISOString().slice(0,10)===new Date(kickoff).toISOString().slice(0,10);
     });
 
