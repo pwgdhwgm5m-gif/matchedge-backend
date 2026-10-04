@@ -624,6 +624,11 @@ function mergeDuplicate(preferred, secondary) {
 
 function dedupeCompetitionFixtures(rows, options = {}) {
   const toleranceMs = options.toleranceMs || 15 * 60 * 1000;
+  // Some providers publish the same fixture with a wrong/stale kickoff
+  // (observed VVV-Venlo v Roda JC). Same teams + same competition on the
+  // same UTC day are one canonical fixture; this must not create a second
+  // "upcoming" card after the match has already finished.
+  const sameDayToleranceMs = options.sameDayToleranceMs || 12 * 60 * 60 * 1000;
   const kept = [];
 
   for (const raw of Array.isArray(rows) ? rows : []) {
@@ -651,7 +656,11 @@ function dedupeCompetitionFixtures(rows, options = {}) {
       if (existingCompetition !== competitionKey) return false;
       const existingKickoffValue = existing?.kickoff || existing?.date;
       const existingKickoff = existingKickoffValue ? new Date(existingKickoffValue).getTime() : NaN;
-      return Number.isFinite(existingKickoff) && Math.abs(existingKickoff - kickoff) <= toleranceMs;
+      if(!Number.isFinite(existingKickoff)) return false;
+      const diff=Math.abs(existingKickoff-kickoff);
+      if(diff<=toleranceMs) return true;
+      return diff<=sameDayToleranceMs &&
+        new Date(existingKickoff).toISOString().slice(0,10)===new Date(kickoff).toISOString().slice(0,10);
     });
 
     if (duplicateIndex < 0) {
@@ -660,10 +669,16 @@ function dedupeCompetitionFixtures(rows, options = {}) {
     }
 
     const previous = kept[duplicateIndex];
-    const preferNew = sourceRank(match, options.preferBsd === true) > sourceRank(previous, options.preferBsd === true);
-    kept[duplicateIndex] = preferNew
-      ? mergeDuplicate(match, previous)
-      : mergeDuplicate(previous, match);
+    const finished = row => {
+      const s=String(row?.statusShort||row?.status||'').toUpperCase();
+      return row?.isFinished===true || ['FT','AET','PEN','FINISHED','MATCH FINISHED','BITTI','BİTTİ'].includes(s);
+    };
+    // A completed observation is stronger than a stale provider's upcoming
+    // copy. Preserve its score/status while still merging provider-native IDs.
+    const preferNew = finished(match)!==finished(previous)
+      ? finished(match)
+      : sourceRank(match, options.preferBsd === true) > sourceRank(previous, options.preferBsd === true);
+    kept[duplicateIndex] = preferNew ? mergeDuplicate(match, previous) : mergeDuplicate(previous, match);
   }
 
   return kept;
